@@ -1,0 +1,306 @@
+<div class="app-shell" [class.sidebar-collapsed]="sidebarCollapsed()">
+  <aside class="sidebar" [class.mobile-open]="mobileMenuOpen()">
+    <div class="sidebar-header">
+      <a class="brand" routerLink="/dashboard">
+        <span class="brand-mark">AM</span>
+        <span class="brand-copy">
+          <span class="brand-name">Audiomax CRM</span>
+        </span>
+      </a>
+      <button class="sidebar-toggle" (click)="toggleSidebar()" type="button"
+        [attr.aria-expanded]="!sidebarCollapsed()"
+        aria-label="Espandi o comprimi menu laterale">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          @if (sidebarCollapsed()) {
+            <path d="M3 12h18M3 6h18M3 18h18"/>
+          } @else {
+            <path d="m15 18-6-6 6-6"/>
+          }
+        </svg>
+      </button>
+    </div>
+
+    <nav class="nav-section" aria-label="Navigazione principale">
+
+      <!-- Dashboard -->
+      <a class="nav-item nav-home"
+        routerLink="/dashboard"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: true }">
+        <span class="nav-icon-wrap">
+          <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="14" y="3" width="7" height="7" rx="1.5"/>
+            <rect x="3" y="14" width="7" height="7" rx="1.5"/>
+            <rect x="14" y="14" width="7" height="7" rx="1.5"/>
+          </svg>
+        </span>
+        <span class="nav-text">Dashboard</span>
+      </a>
+
+      <!-- Grouped navigation -->
+      @for (group of navGroups; track group.label) {
+        <div class="nav-group">
+          <span class="nav-group-label">
+            <span class="nav-group-icon">
+              @switch (group.label) {
+                @case ('Vendite') {
+                  <svg class="nav-svg nav-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19h16"/>
+                    <path d="M7 15V9"/>
+                    <path d="M12 15V5"/>
+                    <path d="M17 15v-3"/>
+                  </svg>
+                }
+                @case ('Operativo') {
+                  <svg class="nav-svg nav-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9h.1a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6z"/>
+                  </svg>
+                }
+                @case ('Gestione') {
+                  <svg class="nav-svg nav-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9"/>
+                    <path d="M9 3v6h6"/>
+                    <path d="M9 3l6 6"/>
+                  </svg>
+                }
+                @default {
+                  <svg class="nav-svg nav-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="4" width="16" height="16" rx="3"/>
+                    <path d="M9 12h6"/>
+                    <path d="M12 9v6"/>
+                  </svg>
+                }
+              }
+            </span>
+            <span>{{ group.label }}</span>
+          </span>
+          @for (section of group.sections; track section.id) {
+            <a class="nav-item"
+              [routerLink]="['/', section.route]"
+              routerLinkActive="active"
+              [attr.aria-label]="section.label">
+              <span class="nav-icon-wrap">
+                @switch (section.id) {
+                  @case ('clienti') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/>
+                      <circle cx="9.5" cy="7" r="3.5"/>
+                      <path d="M20 8v6"/>
+                      <path d="M23 11h-6"/>
+                    </svg>
+                  }
+                  @case ('preventivi') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                      <path d="M14 3v6h6"/>
+                      <path d="M8 13h8"/>
+                      <path d="M8 17h5"/>
+                    </svg>
+                  }
+                  @case ('cassa') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="5" width="18" height="14" rx="2"/>
+                      <path d="M3 10h18"/>
+                      <path d="M7 15h2"/>
+                    </svg>
+                  }
+                  @case ('agenda') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="4" width="18" height="18" rx="2"/>
+                      <path d="M8 2v4"/>
+                      <path d="M16 2v4"/>
+                      <path d="M3 10h18"/>
+                    </svg>
+                  }
+                  @case ('servizi') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M4 7h16"/>
+                      <path d="M6 12h12"/>
+                      <path d="M8 17h8"/>
+                    </svg>
+                  }
+                  @case ('tecnico') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.9L4 17.5V20h2.5l5.3-5.3a4 4 0 0 0 5.9-5.4l-2.3 2.3-3-3z"/>
+                    </svg>
+                  }
+                  @case ('magazzino') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 7.5 12 3l9 4.5-9 4.5L3 7.5z"/>
+                      <path d="M3 12l9 4.5 9-4.5"/>
+                      <path d="M3 16.5 12 21l9-4.5"/>
+                    </svg>
+                  }
+                  @case ('spese') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M12 1v22"/>
+                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                  }
+                  @case ('orari') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="9"/>
+                      <path d="M12 7v5l3 3"/>
+                    </svg>
+                  }
+                  @case ('dipendenti') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                      <circle cx="9.5" cy="7" r="3.5"/>
+                      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                      <path d="M16 3.13a3.5 3.5 0 0 1 0 6.74"/>
+                    </svg>
+                  }
+                  @case ('ecommerce') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="9" cy="20" r="1"/>
+                      <circle cx="18" cy="20" r="1"/>
+                      <path d="M3 4h2l2.4 10.2a1 1 0 0 0 1 .8h9.7a1 1 0 0 0 1-.8L21 7H7"/>
+                    </svg>
+                  }
+                  @case ('impostazioni') {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9h.1a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6z"/>
+                    </svg>
+                  }
+                  @default {
+                    <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="8"/>
+                    </svg>
+                  }
+                }
+              </span>
+              <span class="nav-text">{{ section.label }}</span>
+            </a>
+          }
+        </div>
+      }
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-status" [class.connected]="connectionState() === 'connected'">
+        <span class="status-dot"></span>
+        <span class="status-label">{{ connectionLabel() }}</span>
+      </div>
+      <button class="theme-btn sidebar-theme-btn" (click)="toggleTheme()" type="button" [attr.aria-label]="currentTheme() === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'">
+        @if (currentTheme() === 'dark') {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+        } @else {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        }
+      </button>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <button class="mobile-menu-btn" (click)="toggleSidebar()" type="button" aria-label="Apri menu">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M3 12h18M3 6h18M3 18h18"/>
+        </svg>
+      </button>
+
+      <div class="topbar-left">
+        <div class="topbar-title-row">
+          <span class="topbar-title">Audiomax CRM</span>
+        </div>
+        <span class="topbar-date">{{ todayLabel }}</span>
+      </div>
+
+      <button class="topbar-search-btn" type="button" (click)="openGlobalSearch()" aria-label="Apri ricerca globale">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="8"/>
+          <path d="m21 21-4.35-4.35"/>
+        </svg>
+        <span class="topbar-search-label">Cerca</span>
+        <span class="topbar-search-kbd">⌘K</span>
+      </button>
+
+      <button class="theme-btn mobile-theme-btn" (click)="toggleTheme()" type="button" [attr.aria-label]="currentTheme() === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'">
+        @if (currentTheme() === 'dark') {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+        } @else {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        }
+      </button>
+
+      <div class="topbar-metrics">
+        @for (metric of topMetrics(); track metric.label) {
+          <div class="topbar-metric">
+            <span class="metric-value">{{ metric.value }}</span>
+            <span class="metric-label">{{ metric.label }}</span>
+          </div>
+        }
+      </div>
+    </header>
+
+    <main class="workspace-body">
+      <router-outlet></router-outlet>
+    </main>
+  </div>
+</div>
+
+@if (mobileMenuOpen()) {
+  <div class="mobile-overlay" (click)="closeMobileMenu()" aria-hidden="true"></div>
+}
+
+@if (globalSearchOpen()) {
+  <div class="global-search-overlay" (click)="closeGlobalSearch()">
+    <div class="global-search-modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true" aria-label="Ricerca globale">
+      <div class="global-search-head">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="8"/>
+          <path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input
+          id="global-search-input"
+          class="global-search-input"
+          type="search"
+          placeholder="Cerca cliente, preventivo, appuntamento, ticket…"
+          [value]="globalSearchQuery()"
+          (input)="updateGlobalSearchQuery($event)"
+        >
+        <button class="global-search-close" type="button" (click)="closeGlobalSearch()" aria-label="Chiudi ricerca">
+          Esc
+        </button>
+      </div>
+
+      <div class="global-search-results">
+        @if (globalSearchResults().length) {
+          @for (result of globalSearchResults(); track result.id + result.category; let index = $index) {
+            <a
+              class="global-search-item"
+              [class.active]="index === globalSearchSelectedIndex()"
+              [routerLink]="result.route"
+              (click)="closeGlobalSearch()"
+            >
+              <div class="global-search-item-head">
+                <span class="global-search-category">{{ result.category }}</span>
+                <span class="global-search-status">{{ result.status }}</span>
+              </div>
+              <strong class="global-search-title">{{ result.title }}</strong>
+              <p class="global-search-detail">{{ result.detail }}</p>
+            </a>
+          }
+        } @else {
+          <div class="global-search-empty">
+            Nessun risultato
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+}

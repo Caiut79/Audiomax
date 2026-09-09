@@ -1,0 +1,437 @@
+<section class="dashboard dashboard-simple">
+  <div class="dash-hero dash-hero-compact">
+    <div class="dash-hero-main">
+      <div class="dash-hero-title">
+        <h1>Panoramica operativa della giornata</h1>
+      </div>
+    </div>
+    <div class="dash-hero-side">
+      <div class="dash-hero-actions">
+        <span class="dash-conn-pill" [class.connected]="connectionLabel() === 'Supabase connesso'">
+          <span class="dash-conn-dot"></span>
+          {{ connectionLabel() }}
+        </span>
+        <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Pianifica appuntamento</button>
+        <a class="btn-ghost" routerLink="/clienti">Apri contatti</a>
+      </div>
+      <div class="dash-hero-stats">
+        <div class="dash-hero-stat">
+          <span>Operazioni oggi</span>
+          <strong>{{ todayAppointments().length }}</strong>
+        </div>
+        <div class="dash-hero-stat">
+          <span>Contatti attivi</span>
+          <strong>{{ data.activeClients() }}</strong>
+        </div>
+        <div class="dash-hero-stat">
+          <span>Trattative aperte</span>
+          <strong>{{ data.openQuotes() }}</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="search-bar">
+    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="11" cy="11" r="8"/>
+      <path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input
+      class="search-input"
+      type="search"
+      placeholder="Cerca cliente, preventivo, appuntamento, ticket…"
+      [value]="searchTerm()"
+      (input)="updateSearchTerm($event)"
+    >
+  </div>
+
+  @if (searchTerm().trim()) {
+    <div class="search-results-panel">
+      @if (searchResults().length) {
+        <div class="search-results-grid">
+          @for (result of searchResults(); track result.id + result.category) {
+            <a class="search-result" [routerLink]="result.route">
+              <span class="result-category">{{ result.category }}</span>
+              <strong>{{ result.title }}</strong>
+              <p>{{ result.detail }}</p>
+              <span class="badge badge-info">{{ result.status }}</span>
+            </a>
+          }
+        </div>
+      } @else {
+        <p class="empty-state">Nessun risultato per "{{ searchTerm() }}"</p>
+      }
+    </div>
+  }
+
+  <div class="kpi-row kpi-row-compact">
+    @for (metric of overviewMetrics(); track metric.label) {
+      <a class="kpi-card" [class.kpi-blue]="metric.tone === 'kpi-blue'" [class.kpi-green]="metric.tone === 'kpi-green'" [class.kpi-orange]="metric.tone === 'kpi-orange'" [class.kpi-purple]="metric.tone === 'kpi-purple'" [routerLink]="metric.route">
+        <span class="kpi-icon">{{ metric.icon }}</span>
+        <div class="kpi-body">
+          <span class="kpi-value">{{ metric.value }}</span>
+          <span class="kpi-label">{{ metric.label }}</span>
+          <span class="kpi-detail">{{ metric.detail }}</span>
+        </div>
+      </a>
+    }
+  </div>
+
+  <div class="dash-primary-grid dash-primary-grid-calendar">
+    <section class="calendar-section" aria-label="Calendario operativo">
+      <div class="section-head-inline">
+        <div>
+          <h2 class="section-title">Calendario operativo</h2>
+          <div class="calendar-head-meta">
+            <span class="calendar-meta-pill">Vista {{ calendarViewMode() }}</span>
+            <span class="calendar-meta-pill">Selezione {{ dashboardSelectedDateAppointments().length }} appuntamenti</span>
+          </div>
+        </div>
+        <div class="calendar-head-actions">
+          <div class="btn-group calendar-toolbar-group">
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('giorno')" [class.active]="calendarViewMode() === 'giorno'">Giorno</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('settimana')" [class.active]="calendarViewMode() === 'settimana'">Settimana</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('mese')" [class.active]="calendarViewMode() === 'mese'">Mese</button>
+          </div>
+          <div class="btn-group calendar-toolbar-group">
+            <button class="btn-ghost btn-sm" (click)="prevCalendarPeriod()">‹</button>
+            <button class="btn-ghost btn-sm" (click)="todayCalendarPeriod()">Oggi</button>
+            <button class="btn-ghost btn-sm" (click)="nextCalendarPeriod()">›</button>
+          </div>
+          <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Nuovo</button>
+          <a class="btn-ghost" routerLink="/agenda">Vai alla sezione</a>
+        </div>
+      </div>
+
+      <div class="calendar-layout">
+        <div class="month-calendar">
+          <div class="month-calendar-head">
+            <div class="month-calendar-title">
+              <strong>{{ calendarDisplayTitle() }}</strong>
+              <span>{{ data.plannedAppointments() }} appuntamenti programmati in totale</span>
+            </div>
+            <div class="month-calendar-summary">
+              <span class="month-calendar-badge">Oggi {{ todayAppointments().length }}</span>
+              <span class="month-calendar-badge month-calendar-badge-soft">Urgenti {{ urgentQuotes().length }}</span>
+            </div>
+          </div>
+
+          @if (calendarViewMode() !== 'giorno') {
+            <div class="month-weekdays">
+              @for (label of calendarWeekdays; track label) {
+                <span>{{ label }}</span>
+              }
+            </div>
+          }
+
+          <div class="month-grid" [class.view-giorno]="calendarViewMode() === 'giorno'" [class.view-settimana]="calendarViewMode() === 'settimana'">
+            @for (day of appointmentCalendarCells(); track day.isoDate) {
+              <button
+                type="button"
+                class="month-day"
+                [class.is-today]="day.isToday"
+                [class.is-selected]="day.isoDate === dashboardSelectedDate()"
+                [class.is-outside]="!day.inCurrentMonth"
+                [class.is-sunday]="day.isSunday"
+                [class.is-holiday]="!!day.holidayLabel"
+                (click)="handleDashboardCalendarDateClick(day.isoDate, day.items.length)"
+              >
+                <span class="month-day-head">
+                  <span class="day-head-left">
+                    @if (calendarViewMode() === 'giorno') {
+                      <span class="day-weekday">{{ day.weekdayLabel }}</span>
+                    }
+                    <strong>{{ day.dayNumber }}</strong>
+                  </span>
+                  <span>{{ day.items.length }}</span>
+                </span>
+                @if (day.holidayLabel) {
+                  <span class="month-holiday-label">{{ day.holidayLabel }}</span>
+                }
+                @if (day.items.length) {
+                  <span class="month-day-events">
+                    @for (appointment of day.items.slice(0, 2); track appointment.id) {
+                      <span
+                        class="month-event-pill"
+                        [class.type-negozio]="appointmentTypeClass(appointment.appointmentType) === 'negozio'"
+                        [class.type-uscita]="appointmentTypeClass(appointment.appointmentType) === 'uscita'"
+                        [class.type-installazione]="appointmentTypeClass(appointment.appointmentType) === 'installazione'"
+                        [class.type-assistenza]="appointmentTypeClass(appointment.appointmentType) === 'assistenza'"
+                        [class.type-sopralluogo]="appointmentTypeClass(appointment.appointmentType) === 'sopralluogo'"
+                      >
+                        <strong>{{ appointment.scheduledAt.slice(11, 16) }}</strong>
+                        <span>{{ appointment.appointmentType }}</span>
+                      </span>
+                    }
+                    @if (day.items.length > 2) {
+                      <span class="month-more">+{{ day.items.length - 2 }} altri</span>
+                    }
+                  </span>
+                }
+              </button>
+            }
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="dash-side-column" aria-label="Azioni rapide e priorita">
+      <section class="dash-panel" aria-label="Alert operativi">
+        <div class="dash-panel-head">
+          <div>
+            <span class="dash-focus-kicker">Alert</span>
+            <h2 class="section-title">Priorità operative</h2>
+          </div>
+          <span class="badge badge-neutral dash-panel-count">{{ dashboardAlerts().length }}</span>
+        </div>
+        @if (dashboardAlerts().length) {
+          <div class="dashboard-alerts">
+            @for (alert of dashboardAlerts(); track alert.id) {
+              <a class="dashboard-alert" [class.alert-warning]="alert.tone === 'warning'" [class.alert-danger]="alert.tone === 'danger'" [class.alert-info]="alert.tone === 'info'" [routerLink]="alert.route">
+                <span class="dashboard-alert-kicker">{{ alert.kicker }}</span>
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.detail }}</p>
+                <span class="dashboard-alert-link">{{ alert.cta }}</span>
+              </a>
+            }
+          </div>
+        } @else {
+          <div class="dash-focus-empty">Nessun alert operativo aperto.</div>
+        }
+      </section>
+
+      <section class="actions-section dash-panel" aria-label="Azioni rapide">
+        <div class="dash-panel-head">
+          <div>
+            <span class="dash-focus-kicker">Azioni rapide</span>
+            <h2 class="section-title">Azioni rapide</h2>
+          </div>
+          <span class="badge badge-neutral dash-panel-count">{{ quickActions.length }}</span>
+        </div>
+        <div class="actions-grid">
+          @for (action of quickActions; track action.label) {
+            <a class="action-btn" [class.action-btn-primary]="action === quickActions[0]" [routerLink]="action.route">
+              <span class="action-icon">{{ action.icon }}</span>
+              <strong class="action-label">{{ action.label }}</strong>
+              <small class="action-caption">{{ action.caption }}</small>
+            </a>
+          }
+        </div>
+      </section>
+
+      <section class="dash-panel" aria-label="Preventivi urgenti">
+        <div class="dash-panel-head">
+          <div>
+            <span class="dash-focus-kicker">Commerciale</span>
+            <h2 class="section-title">Preventivi da seguire</h2>
+          </div>
+          <div class="dash-panel-tail">
+            <span class="badge badge-neutral dash-panel-count">{{ urgentQuotes().length }}</span>
+            <a class="live-link" routerLink="/preventivi">Apri</a>
+          </div>
+        </div>
+        <div class="dash-focus-list">
+          @for (quote of urgentQuotes(); track quote.id) {
+            <div class="dash-focus-item">
+              <strong>{{ quote.customerName }} · {{ quote.projectType }}</strong>
+              <span>{{ quoteDueStatus(quote.daysToDue) }} · € {{ quote.value.toLocaleString('it-IT') }}</span>
+            </div>
+          } @empty {
+            <div class="dash-focus-empty">Nessun preventivo urgente da seguire.</div>
+          }
+        </div>
+      </section>
+
+      <section class="dash-panel" aria-label="Clienti prioritari">
+        <div class="dash-panel-head">
+          <div>
+            <span class="dash-focus-kicker">Clienti</span>
+            <h2 class="section-title">Lead da richiamare</h2>
+          </div>
+          <div class="dash-panel-tail">
+            <span class="badge badge-neutral dash-panel-count">{{ followUpClients().length }}</span>
+            <a class="live-link" routerLink="/clienti">Apri</a>
+          </div>
+        </div>
+        <div class="dash-focus-list">
+          @for (client of followUpClients(); track client.id) {
+            <div class="dash-focus-item">
+              <strong>{{ client.name }}</strong>
+              <span>{{ client.city }} · {{ client.status }}</span>
+            </div>
+          } @empty {
+            <div class="dash-focus-empty">Nessun cliente prioritario al momento.</div>
+          }
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  @if (dashboardAppointmentModalOpen()) {
+    <div class="ui-modal-overlay" (click)="closeDashboardAppointmentModal()">
+      <div class="ui-modal dashboard-appointment-modal dashboard-split-modal" (click)="$event.stopPropagation()">
+        <div class="ui-modal-head dashboard-modal-head">
+          <div>
+            <span class="detail-subtitle">Gestione Agenda</span>
+            <h2 class="op-card-title">{{ dashboardSelectedDateLabel() }}</h2>
+            <p class="dashboard-modal-copy">Visualizza gli appuntamenti della giornata o creane uno nuovo rapidamente.</p>
+          </div>
+          <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Chiudi</button>
+        </div>
+        <div class="ui-modal-body dashboard-appointment-body">
+          <div class="dashboard-modal-split">
+            <!-- SEZIONE SINISTRA: Visualizzazione Appuntamenti -->
+            <aside class="dashboard-split-side" aria-label="Appuntamenti del giorno">
+              <div class="split-side-head">
+                <span class="detail-subtitle">In programma</span>
+                <strong>Appuntamenti del giorno</strong>
+                <span class="badge badge-info">{{ dashboardSelectedDateAppointments().length }}</span>
+              </div>
+              <div class="split-side-list">
+                @for (appointment of dashboardSelectedDateAppointments(); track appointment.id) {
+                  <div class="split-item">
+                    <div class="split-item-time">
+                      <strong>{{ appointment.scheduledAt.slice(11, 16) }}</strong>
+                      <span class="badge badge-purple">{{ appointment.appointmentType }}</span>
+                    </div>
+                    <div class="split-item-details">
+                      <strong>{{ appointment.title }}</strong>
+                      <span>{{ appointment.customerName }}</span>
+                      <span>Operatore: {{ appointment.technician }}</span>
+                    </div>
+                  </div>
+                } @empty {
+                  <div class="split-empty">
+                    Nessun appuntamento presente. La giornata è libera.
+                  </div>
+                }
+              </div>
+            </aside>
+
+            <!-- SEZIONE DESTRA: Nuovo Appuntamento -->
+            <form class="dashboard-form-main split-form-main" [formGroup]="dashboardAppointmentForm" (ngSubmit)="saveDashboardAppointment()">
+              <div class="split-side-head">
+                <span class="detail-subtitle">Nuovo inserimento</span>
+                <strong>Crea un nuovo appuntamento</strong>
+              </div>
+
+              <div class="dashboard-form-panel">
+                <div class="dashboard-panel-head">
+                  <span class="detail-subtitle">Tipo appuntamento</span>
+                  <strong>Scegli il flusso</strong>
+                </div>
+                <div class="dashboard-type-grid">
+                  @for (type of dashboardAppointmentTypes; track type.value) {
+                    <button
+                      type="button"
+                      class="dashboard-type-card"
+                      [class.is-active]="isDashboardAppointmentTypeActive(type.value)"
+                      (click)="setDashboardAppointmentType(type.value)"
+                    >
+                      <strong>{{ type.label }}</strong>
+                      <span>{{ type.detail }}</span>
+                    </button>
+                  }
+                </div>
+              </div>
+
+              <div class="dashboard-form-panel">
+                <div class="dashboard-panel-head">
+                  <span class="detail-subtitle">Cliente</span>
+                  <strong>Anagrafica o inserimento rapido</strong>
+                </div>
+                <div class="dashboard-appointment-grid">
+                  <label class="dashboard-field wide">
+                    <span>Cliente registrato</span>
+                    <select (change)="selectDashboardClient($event)">
+                      <option value="">Seleziona dall'anagrafica</option>
+                      @for (client of dashboardQuickClients(); track client.id) {
+                        <option [value]="client.id">{{ client.name }} · {{ client.city }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="dashboard-field">
+                    <span>Cliente o referente</span>
+                    <input type="text" formControlName="customerName" placeholder="Cliente o referente">
+                  </label>
+                  <label class="dashboard-field wide">
+                    <span>Oggetto appuntamento</span>
+                    <input type="text" formControlName="title" placeholder="Es. installazione living, demo showroom">
+                  </label>
+                </div>
+              </div>
+
+              <div class="dashboard-form-panel">
+                <div class="dashboard-panel-head">
+                  <span class="detail-subtitle">Pianificazione</span>
+                  <strong>Ora, durata e operatore</strong>
+                </div>
+                <div class="dashboard-time-slots">
+                  @for (slot of dashboardQuickSlots; track slot.value) {
+                    <button
+                      type="button"
+                      class="dashboard-slot"
+                      [class.is-active]="isDashboardTimeSlotActive(slot.value)"
+                      (click)="applyDashboardTimeSlot(slot.value)"
+                    >
+                      {{ slot.label }}
+                    </button>
+                  }
+                </div>
+                <div class="dashboard-appointment-grid">
+                  <label class="dashboard-field">
+                    <span>Data e ora</span>
+                    <input type="datetime-local" formControlName="scheduledAt">
+                  </label>
+                  <label class="dashboard-field">
+                    <span>Durata</span>
+                    <select formControlName="durationMinutes">
+                      <option [value]="30">30 min</option>
+                      <option [value]="60">1 ora</option>
+                      <option [value]="90">1,5 ore</option>
+                      <option [value]="120">2 ore</option>
+                      <option [value]="180">3 ore</option>
+                      <option [value]="240">4 ore</option>
+                    </select>
+                  </label>
+                  <label class="dashboard-field">
+                    <span>Luogo</span>
+                    <select formControlName="locationType">
+                      <option value="showroom">Showroom</option>
+                      <option value="domicilio">Domicilio</option>
+                      <option value="officina">Officina</option>
+                    </select>
+                  </label>
+                  <label class="dashboard-field">
+                    <span>Operatore</span>
+                    <select formControlName="technician">
+                      @for (operator of dashboardOperators(); track operator) {
+                        <option [value]="operator">{{ operator }}</option>
+                      }
+                    </select>
+                  </label>
+                  @if (dashboardAppointmentForm.controls.appointmentType.value === 'installazione') {
+                    <label class="dashboard-field wide">
+                      <span>Preventivo associato</span>
+                      <select formControlName="linkedQuoteId" (change)="selectDashboardQuote($event)">
+                        <option value="">Seleziona preventivo ordine</option>
+                        @for (quote of dashboardQuickQuotes(); track quote.id) {
+                          <option [value]="quote.id">{{ quote.customerName }} · {{ quote.projectType }} · € {{ quote.value.toLocaleString('it-IT') }}</option>
+                        }
+                      </select>
+                    </label>
+                  }
+                </div>
+              </div>
+              <div class="form-actions split-actions">
+                <button type="submit" class="btn-primary">Salva appuntamento</button>
+                <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Annulla</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+</section>

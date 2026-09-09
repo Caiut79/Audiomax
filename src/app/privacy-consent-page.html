@@ -1,0 +1,116 @@
+<section class="privacy-page">
+  @if (client(); as currentClient) {
+    <div class="privacy-card">
+      <div class="privacy-head">
+        <div>
+          <span class="privacy-kicker">Stato del consenso</span>
+          <h1>{{ currentClient.name }}</h1>
+          <p>
+            Conferma o rifiuta i consensi opzionali. L’informativa risulta già registrata
+            nel gestionale con versione {{ currentClient.privacyProfile.noticeVersion }}.
+          </p>
+        </div>
+        <div class="privacy-head-side">
+          <span class="privacy-status-pill">{{ currentClient.privacyProfile.remoteConsentStatus }}</span>
+          <a routerLink="/clienti" class="privacy-link">Torna al gestionale</a>
+        </div>
+      </div>
+
+      <div class="privacy-status-grid">
+        @for (card of statusCards(); track card.label) {
+          <div class="privacy-status-card">
+            <span>{{ card.label }}</span>
+            <strong>{{ card.value }}</strong>
+            <small>{{ card.detail }}</small>
+          </div>
+        }
+      </div>
+
+      <div class="privacy-grid">
+        <div class="privacy-panel">
+          <h2>Scelte del cliente</h2>
+          <div class="privacy-panel-intro">
+            <strong>Tutti i sistemi sono operativi</strong>
+            <span>Conferma solo i canali che vuoi realmente attivare.</span>
+          </div>
+          <label class="privacy-choice">
+            <input
+              type="checkbox"
+              [checked]="emailMarketing()"
+              (change)="setEmailMarketing($any($event.target).checked)"
+            >
+            <span>
+              <strong>Email marketing</strong>
+              <small>Offerte, novità e campagne commerciali via email</small>
+            </span>
+          </label>
+
+          <label class="privacy-choice">
+            <input
+              type="checkbox"
+              [checked]="whatsappMarketing()"
+              (change)="setWhatsappMarketing($any($event.target).checked)"
+            >
+            <span>
+              <strong>WhatsApp marketing</strong>
+              <small>Messaggi promozionali e comunicazioni commerciali via WhatsApp</small>
+            </span>
+          </label>
+
+          <label class="privacy-choice">
+            <input
+              type="checkbox"
+              [checked]="fidelityProfiling()"
+              (change)="setFidelityProfiling($any($event.target).checked)"
+            >
+            <span>
+              <strong>Fidelity e profilazione</strong>
+              <small>Proposte personalizzate, punti e storico preferenze</small>
+            </span>
+          </label>
+
+          <div class="privacy-actions">
+            <button type="button" class="btn-primary" (click)="confirmConsents()">Conferma scelte</button>
+            <button type="button" class="btn-ghost" (click)="rejectConsents()">Rifiuta consensi opzionali</button>
+          </div>
+        </div>
+
+        <div class="privacy-panel">
+          <h2>Riepilogo</h2>
+          <div class="privacy-summary">
+            <div><span>Base giuridica</span><strong>{{ currentClient.privacyProfile.lawfulBasis }}</strong></div>
+            <div><span>Informativa</span><strong>@if (currentClient.privacyProfile.noticeAcknowledged) { Registrata } @else { Da registrare }</strong></div>
+            <div><span>Stato remoto</span><strong>{{ currentClient.privacyProfile.remoteConsentStatus }}</strong></div>
+            <div><span>Contatto preferito</span><strong>{{ currentClient.preferredContact }}</strong></div>
+          </div>
+
+          <div class="privacy-note">
+            <span>Conservazione</span>
+            <p>{{ currentClient.privacyProfile.dataRetentionNote }}</p>
+          </div>
+
+          @if (archivePreview().length) {
+            <div class="privacy-archive">
+              <span class="privacy-archive-title">Archivio recente</span>
+              @for (entry of archivePreview(); track entry.id) {
+                <div class="privacy-archive-row">
+                  <div>
+                    <strong>{{ entry.title }}</strong>
+                    <small>{{ entry.type }} · {{ entry.channel }}</small>
+                  </div>
+                  <span class="privacy-archive-badge">{{ entry.status }}</span>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  } @else {
+    <div class="privacy-card empty">
+      <h1>Link non valido</h1>
+      <p>Il cliente associato a questo consenso non è disponibile nel gestionale.</p>
+      <a routerLink="/clienti" class="privacy-link">Apri clienti</a>
+    </div>
+  }
+</section>
