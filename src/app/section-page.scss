@@ -6,11 +6,8 @@
   // POS mode: zero gap, POS fills all space
   &.pos-mode {
     gap: 0.85rem;
-
-    // Hide the inner POS shell header — topbar already shows all needed info
-    .pos-shell-head {
-      display: none;
-    }
+    // Layout: riga 1 = pos-topbar (auto), riga 2 = pos-shell (1fr)
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   &.agenda-mode {
@@ -110,6 +107,32 @@
   align-items: center;
   gap: 1rem;
   flex-shrink: 0;
+}
+
+.pos-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.pos-topbar-actions .btn-primary,
+.pos-topbar-actions .btn-ghost {
+  padding: 0.58rem 1rem;
+  font-size: 0.82rem;
+  border-radius: 0.85rem;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.pos-topbar-actions .btn-primary {
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.pos-topbar-actions .btn-ghost {
+  box-shadow:
+    0 6px 16px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 .pos-topbar-kpis {
@@ -4851,25 +4874,32 @@
 }
 
 .pos-shell {
-  display: grid;
-  gap: 1.35rem;
-  padding: 1.65rem;
-  border-radius: 1.8rem;
-  background:
-    radial-gradient(circle at top right, transparent, transparent 24%),
-    radial-gradient(circle at top left, transparent, transparent 28%),
-    linear-gradient(180deg, transparent, transparent 28%),
-    transparent;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: 0 32px 92px rgba(15, 23, 42, 0.11);
-  backdrop-filter: blur(18px);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  border-radius: 1.5rem;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+
+  // Ora pos-shell è dentro .section-page.pos-mode grid-rows=auto 1fr
+  // (prima riga = topbar, seconda riga = pos-shell 1fr).
+  // height 100% e min-height 0 permettono il nested flex scroll interno.
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .pos-shell-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1.1rem;
+  gap: 1.2rem;
   align-items: start;
+  flex-shrink: 0;
+  padding: 0.1rem 0.35rem 0.15rem;
 }
 
 .pos-shell-copy {
@@ -4919,7 +4949,41 @@
 
 .pos-head-metrics {
   display: grid;
+  grid-template-rows: auto auto;
+  gap: 0.5rem;
+  justify-items: end;
+  align-content: start;
+}
+
+.pos-shell-actions {
+  display: inline-flex;
+  align-items: center;
   gap: 0.6rem;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.pos-shell-actions .btn-primary,
+.pos-shell-actions .btn-ghost {
+  padding: 0.65rem 1.1rem;
+  font-size: 0.85rem;
+  border-radius: 0.9rem;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.pos-shell-actions .btn-ghost {
+  box-shadow:
+    0 6px 16px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.pos-head-metrics-bottom {
+  display: grid;
+  gap: 0.5rem;
   justify-items: end;
 }
 
@@ -4936,172 +5000,246 @@
 }
 
 .pos-workbench {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(23rem, 27rem) minmax(0, 1.75fr) minmax(22rem, 26rem);
-  gap: 1.2rem;
-  align-items: start;
+  grid-template-columns: minmax(22rem, 25rem) minmax(0, 1.85fr) minmax(22rem, 24rem);
+  gap: 0;
+
+  // ═══ Blocco VISIVO FUSO · unico bordo e unica ombra ESTERNA ═══
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.35rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfbfd 100%);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow:
+    0 24px 56px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
+// ─── Colonne: nessun bordo esterno, nessuna ombra, separatori interni ───
 .pos-sidebar,
 .pos-main,
 .pos-receipt {
   align-content: start;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
-  padding-top: 1.5rem;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background:
-    linear-gradient(180deg, transparent, transparent),
-    transparent;
-  box-shadow: 0 20px 42px rgba(15, 23, 42, 0.08);
-  transition:
-    box-shadow 0.25s ease,
-    transform 0.22s ease,
-    border-color 0.22s ease;
-
-  // Bordo colorato in alto per ogni sezione
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 5px;
-    background: #94a3b8;
-  }
+  padding: 1.1rem 1.1rem 0.95rem;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  transform: none;
+  transition: background 0.2s ease;
 }
 
-// ═══ Colonna SINISTRA · Cliente (BLU) ═══
+.pos-sidebar,
+.pos-main {
+  // Separatore verticale tra colonne
+  border-right: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+// ─── Accento colorato sulla striscia in TESTATA di ogni colonna ───
+// (non più bordo della card, solo un "riga divisorio" interna colorata per accento visivo)
+.pos-sidebar::after,
+.pos-main::after,
+.pos-receipt::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #cbd5e1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+// ════════════════════════════════════════
+// Colonna SINISTRA · Cliente (ACCENTO BLU)
+// ════════════════════════════════════════
 .pos-panel--customer {
   background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.75), rgba(239, 246, 255, 0.18) 22%),
-    var(--panel-bg);
-  border-color: rgba(37, 99, 235, 0.14);
-  box-shadow:
-    0 22px 46px rgba(37, 99, 235, 0.09),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    linear-gradient(180deg, rgba(239, 246, 255, 0.38) 0%, rgba(255, 255, 255, 0) 35%);
 
-  &::before {
-    background: #1d4ed8;
-  }
+  &::after { background: #2563eb; }
 
-  &:hover {
-    transform: translateY(-2px);
-    border-color: rgba(37, 99, 235, 0.28);
-    box-shadow:
-      0 28px 56px rgba(37, 99, 235, 0.13),
-      inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  }
-
-  .pos-panel-top strong {
-    color: #1e3a8a;
-  }
-
-  .detail-subtitle {
-    color: #1d4ed8;
-  }
-
-  .pos-block {
-    border-bottom-color: rgba(37, 99, 235, 0.12);
-  }
+  .pos-panel-top strong { color: #1e3a8a; }
+  .detail-subtitle { color: #1d4ed8; }
+  .pos-block { border-bottom-color: rgba(37, 99, 235, 0.12); }
 }
 
-// ═══ Colonna CENTRO · Servizi e articoli (SLATE) ═══
+// ════════════════════════════════════════
+// Colonna CENTRO · Servizi (ACCENTO GRIGIO)
+// ════════════════════════════════════════
 .pos-panel--sales {
   background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.65), rgba(248, 250, 252, 0.16) 20%),
-    var(--panel-bg);
-  border-color: rgba(71, 85, 105, 0.14);
-  box-shadow:
-    0 24px 50px rgba(15, 23, 42, 0.10),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    linear-gradient(180deg, rgba(248, 250, 252, 0.55) 0%, rgba(255, 255, 255, 0) 32%);
 
-  &::before {
-    background: #475569;
-  }
+  &::after { background: #475569; }
 
-  &:hover {
-    transform: translateY(-2px);
-    border-color: rgba(71, 85, 105, 0.26);
-    box-shadow:
-      0 30px 60px rgba(15, 23, 42, 0.13),
-      inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  }
+  .pos-panel-top strong { color: #0f172a; }
+  .detail-subtitle { color: #475569; }
+  .pos-block { border-bottom-color: rgba(71, 85, 105, 0.1); }
+}
 
-  .pos-panel-top strong {
-    color: #0f172a;
-  }
+// ════════════════════════════════════════
+// Colonna DESTRA · Pagamento (DEFAULT: ROSSO / PAGATO: VERDE)
+// ════════════════════════════════════════
+.pos-panel--payment {
+  // STATO DEFAULT (rosso): pagamento da completare o vuoto
+  background:
+    linear-gradient(180deg, rgba(254, 242, 242, 0.48) 0%, rgba(255, 255, 255, 0) 38%);
 
-  .detail-subtitle {
-    color: #475569;
-  }
+  &::after { background: #dc2626; }
 
-  .pos-block {
-    border-bottom-color: rgba(71, 85, 105, 0.1);
+  .pos-panel-top strong { color: #7f1d1d; }
+  .detail-subtitle { color: #b91c1c; }
+  .pos-block { border-bottom-color: rgba(220, 38, 38, 0.12); }
+
+  // STATO PAGATO (verde): importo ricevuto >= dovuto, scontrino valido
+  &.is-paid {
+    background:
+      linear-gradient(180deg, rgba(236, 253, 245, 0.58) 0%, rgba(255, 255, 255, 0) 40%);
+    border-left-color: rgba(22, 163, 74, 0.18);
+
+    &::after { background: #16a34a; }
+
+    .pos-panel-top strong { color: #14532d; }
+    .detail-subtitle { color: #15803d; }
+    .pos-block { border-bottom-color: rgba(22, 163, 74, 0.14); }
   }
 }
 
-// ═══ Colonna DESTRA · Pagamento (ROSSO) ═══
-.pos-panel--payment {
-  background:
-    linear-gradient(180deg, rgba(254, 242, 242, 0.72), rgba(254, 242, 242, 0.18) 22%),
-    var(--panel-bg);
-  border-color: rgba(220, 38, 38, 0.16);
-  box-shadow:
-    0 22px 46px rgba(220, 38, 38, 0.09),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+// ───────────── Scroll interno se i contenuti sforano ─────────────
+.pos-sidebar > :last-child,
+.pos-main > :last-child,
+.pos-receipt > :last-child {
+  padding-bottom: 1rem;
+}
 
-  &::before {
-    background: #dc2626;
-  }
-
-  &:hover {
-    transform: translateY(-2px);
-    border-color: rgba(220, 38, 38, 0.3);
-    box-shadow:
-      0 28px 56px rgba(220, 38, 38, 0.13),
-      inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  }
-
-  .pos-panel-top strong {
-    color: #7f1d1d;
-  }
-
-  .detail-subtitle {
-    color: #b91c1c;
-  }
-
-  .pos-block {
-    border-bottom-color: rgba(220, 38, 38, 0.12);
-  }
+.pos-sidebar,
+.pos-main,
+.pos-receipt {
+  // Abilita scroll interno con fallback a colonna flex se i contenuti sono corti
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+}
+.pos-sidebar::-webkit-scrollbar,
+.pos-main::-webkit-scrollbar,
+.pos-receipt::-webkit-scrollbar { width: 8px; }
+.pos-sidebar::-webkit-scrollbar-thumb,
+.pos-main::-webkit-scrollbar-thumb,
+.pos-receipt::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
 }
 
 .pos-panel-top {
   display: grid;
   gap: 0.35rem;
-  padding-bottom: 0.6rem;
-  margin-bottom: 0.25rem;
-  border-bottom: 1px dashed rgba(148, 163, 184, 0.22);
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.2rem;
+  border-bottom: 1px dashed rgba(148, 163, 184, 0.25);
+  flex-shrink: 0;
 }
 
 .pos-panel-top strong {
   color: var(--text-primary);
-  font-size: 1.08rem;
+  font-size: 1.02rem;
   font-weight: 800;
   letter-spacing: -0.01em;
 }
 
 .pos-block {
   display: grid;
-  gap: 0.6rem;
-  padding: 0.85rem 0 1rem;
+  gap: 0.55rem;
+  padding: 0.75rem 0 0.9rem;
   border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
 }
 
 .pos-block:last-child {
   padding-bottom: 0;
   border-bottom: 0;
 }
+
+// ═══ Banners di stato colonna pagamento ═══
+.receipt-valid-banner,
+.receipt-pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.85rem;
+  margin-bottom: 0.6rem;
+  flex-shrink: 0;
+}
+
+.rv-check {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+
+.rv-copy {
+  display: grid;
+  gap: 0.05rem;
+}
+.rv-copy strong {
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+}
+.rv-copy span {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.receipt-valid-banner {
+  background: rgba(22, 163, 74, 0.1);
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  .rv-check {
+    background: rgba(22, 163, 74, 0.18);
+    color: #15803d;
+  }
+  .rv-copy strong { color: #14532d; }
+}
+
+.receipt-pending-banner {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  .rv-check {
+    background: rgba(220, 38, 38, 0.16);
+    color: #b91c1c;
+  }
+  .rv-copy strong { color: #7f1d1d; }
+}
+
+// Variante kicker VERDE (pagamento completato)
+.pos-panel-kicker--green {
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+  border: 1px solid rgba(22, 163, 74, 0.2);
+}
+
+// ─── Nascondi la sezione report extra per stare in single-screen ───
+.pos-bottom-actions,
+.report-grid {
+  display: none;
+}
+
 
 .pos-customer-mode,
 .pos-sales-switch,
@@ -5723,7 +5861,20 @@
 
 .pos-cart-line.receipt-hidden {
   border-style: dashed;
-  opacity: 0.82;
+  opacity: 0.95;
+  // Voce fuori scontrino: evidenziata con un grigietto chiaro
+  // per distinguerla subito dalle righe regolari.
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(148, 163, 184, 0.05) 0 10px,
+      rgba(226, 232, 240, 0.25) 10px 20px
+    ),
+    linear-gradient(180deg, #f4f5f7 0%, #eef1f5 100%);
+  border-color: rgba(148, 163, 184, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 4px 10px rgba(15, 23, 42, 0.04);
 }
 
 .pos-line-tag {
@@ -5734,7 +5885,8 @@
 
 .pos-cart-line.receipt-hidden .pos-line-tag {
   background: transparent;
-  color: var(--warning);
+  color: #64748b;
+  font-weight: 800;
 }
 
 .receipt-toggle {
@@ -5789,14 +5941,25 @@
 
 .pos-receipt-payment {
   display: grid;
-  gap: 0.85rem;
-  padding: 1.1rem 1.15rem;
-  border-radius: 1.1rem;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 1.05rem;
   background: #ffffff;
   border: 1.5px solid rgba(220, 38, 38, 0.22);
   box-shadow:
-    0 10px 26px rgba(220, 38, 38, 0.08),
+    0 10px 22px rgba(220, 38, 38, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  flex-shrink: 0;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+
+  .pos-panel--payment.is-paid & {
+    border-color: rgba(22, 163, 74, 0.24);
+    box-shadow:
+      0 10px 22px rgba(22, 163, 74, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
 }
 
 .pos-receipt-payment-head {
@@ -5806,12 +5969,20 @@
   gap: 0.75rem;
   padding-bottom: 0.3rem;
   border-bottom: 2px dashed rgba(220, 38, 38, 0.18);
+
+  .pos-panel--payment.is-paid & {
+    border-bottom-color: rgba(22, 163, 74, 0.22);
+  }
 }
 
 .pos-receipt-payment-head strong {
   color: #991b1b;
   font-weight: 800;
   text-transform: capitalize;
+
+  .pos-panel--payment.is-paid & {
+    color: #166534;
+  }
 }
 
 .pos-quick-amounts.compact {
@@ -5897,23 +6068,24 @@
 .virtual-receipt {
   position: relative;
   display: grid;
-  gap: 0.85rem;
-  padding: 1.1rem 1.1rem 1.25rem;
+  gap: 0.75rem;
+  padding: 1rem 1rem 1.15rem;
   border-radius: 0.55rem;
   background:
     repeating-linear-gradient(
       180deg,
       #fffdf7 0px,
       #fffdf7 22px,
-      rgba(0, 0, 0, 0.02) 23px,
-      rgba(0, 0, 0, 0.02) 23px
+      rgba(0, 0, 0, 0.018) 23px,
+      rgba(0, 0, 0, 0.018) 23px
     ),
     #fffdf7;
   border: 1px solid #e7e2d0;
   box-shadow:
-    0 14px 30px rgba(120, 53, 15, 0.12),
+    0 14px 28px rgba(120, 53, 15, 0.12),
     0 2px 0 #d6cfb7;
   font-family: 'Courier New', ui-monospace, SFMono-Regular, Menlo, monospace;
+  flex-shrink: 0;
 
   // "Dentellatura" scontrino in alto e in basso
   &::before,
@@ -5929,38 +6101,74 @@
   }
   &::before { top: -6px; background-position: 0 -7px; }
   &::after  { bottom: -6px; background-position: 0 0; }
+
+  // ═══ STATO SCONTRINO VALIDO · tutte le tinte diventano VERDI ═══
+  .pos-panel--payment.is-paid & {
+    background:
+      repeating-linear-gradient(
+        180deg,
+        #f0fdf4 0px,
+        #f0fdf4 22px,
+        rgba(22, 101, 52, 0.04) 23px,
+        rgba(22, 101, 52, 0.04) 23px
+      ),
+      #f0fdf4;
+    border-color: #bbf7d0;
+    box-shadow:
+      0 14px 28px rgba(22, 101, 52, 0.14),
+      0 2px 0 #86efac;
+
+    &::before,
+    &::after {
+      background-image: radial-gradient(circle, transparent 3px, #f0fdf4 3.5px);
+    }
+
+    .virtual-receipt-head { border-bottom-color: #86efac; }
+    .virtual-receipt-head strong { color: #14532d; }
+    .virtual-receipt-head span { color: #15803d; }
+    .virtual-receipt-foot { border-top-color: #86efac; }
+
+    .virtual-receipt-meta,
+    .virtual-receipt-foot div {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(34, 197, 94, 0.32);
+    }
+    .virtual-receipt-meta span,
+    .virtual-receipt-foot span { color: #166534; }
+    .virtual-receipt-foot strong { color: #052e16; }
+  }
 }
 
 .virtual-receipt-head,
 .virtual-receipt-meta,
 .virtual-receipt-foot {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.4rem;
 }
 
 .virtual-receipt-head {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  padding-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
   border-bottom: 1.5px dashed #b8ad8b;
 }
 
 .virtual-receipt-head strong {
   color: #1c1917;
   letter-spacing: 0.06em;
-  font-size: 1.02rem;
+  font-size: 0.98rem;
 }
 
 .virtual-receipt-head span {
   color: #78716c;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   font-weight: 700;
 }
 
 .virtual-receipt-meta {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding: 0.65rem 0.75rem;
+  padding: 0.55rem 0.65rem;
   border-radius: 0.3rem;
   background: rgba(251, 191, 36, 0.08);
   border: 1px dashed #d6b678;
@@ -5968,21 +6176,21 @@
 
 .virtual-receipt-meta span {
   color: #44403c;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
 }
 
 .virtual-receipt-foot {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-  padding-top: 0.8rem;
+  gap: 0.45rem;
+  padding-top: 0.7rem;
   border-top: 1.5px dashed #b8ad8b;
 }
 
 .virtual-receipt-foot div {
   display: grid;
-  gap: 0.15rem;
-  padding: 0.55rem 0.6rem;
+  gap: 0.12rem;
+  padding: 0.5rem 0.55rem;
   border-radius: 0.3rem;
   background: rgba(251, 191, 36, 0.08);
   border: 1px solid #e7d7ae;
@@ -5990,12 +6198,12 @@
 
 .virtual-receipt-foot strong {
   color: #0f172a;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 
 .virtual-receipt-foot span {
   color: #78716c;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -7104,7 +7312,10 @@
     grid-template-columns: 1fr;
   }
 
-  .pos-shell-head,
+  // NOTA: pos-shell-head rimane a 2 colonne (copia sx + pulsanti/kpi dx)
+  // anche su schermi medi, altrimenti "Chiusura giornaliera" e
+  // "Report giornaliero" scomparivano. Solo il workbench va a 1 colonna
+  // a schermi tablet/medi (stessa soglia) e sotto i 768px anche head.
   .pos-workbench {
     grid-template-columns: 1fr;
   }
@@ -7170,6 +7381,28 @@
   .page-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  // Sotto i 768px (mobile) l'header della cassa passa a 1 colonna:
+  // prima titolo + pulsanti Chiusura/Report (in fila) e sotto i KPI.
+  .pos-shell-head {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
+  .pos-head-metrics {
+    justify-items: stretch;
+  }
+  .pos-shell-actions {
+    justify-content: stretch;
+  }
+  .pos-shell-actions > .btn-primary,
+  .pos-shell-actions > .btn-ghost {
+    flex: 1 1 0;
+    text-align: center;
+    justify-content: center;
+  }
+  .pos-head-metrics-bottom {
+    justify-items: stretch;
   }
 
   .module-hero-head {
@@ -7292,14 +7525,22 @@
 }
 
 .pos-payment-warning {
-  padding: 0.55rem 0.75rem;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--warning);
-  font-size: 0.78rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.95rem;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  color: #92400e;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-bottom: 0.6rem;
+}
+
+.pos-payment-warning.is-blocker {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(220, 38, 38, 0.28);
+  color: #991b1b;
+  font-weight: 800;
 }
 
 .pos-payment-summary-grid {

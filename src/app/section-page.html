@@ -44,6 +44,10 @@
       </div>
     </div>
     <div class="pos-topbar-right">
+      <div class="pos-topbar-actions">
+        <button type="button" class="btn-primary btn-lg" (click)="openCashClosureModal()">Chiusura giornaliera</button>
+        <button type="button" class="btn-ghost btn-lg" (click)="openCashReportModal('incassi')">Report giornaliero</button>
+      </div>
       <div class="pos-topbar-kpis">
         <div class="pos-topbar-kpi">
           <span>Righe</span>
@@ -1666,27 +1670,11 @@
     <!-- ═══════════════ CASSA ═══════════════ -->
     @case ('cassa') {
       <div class="pos-shell">
-        <div class="pos-shell-head">
-          <div class="pos-shell-copy">
-            <span class="pos-shell-kicker">Banco operativo</span>
-            <h2 class="op-card-title">Cassa Audiomax</h2>
-            <p class="text-muted">Flusso guidato da sinistra a destra: operatore, cliente, catalogo, carrello e chiusura pagamento.</p>
-          </div>
-          <div class="pos-head-metrics">
-            <div class="pos-status-pill">Sistema online</div>
-            <div class="kpi-mini-row">
-              <div class="kpi-mini"><span>Righe</span><strong>{{ cashItemCount() }}</strong></div>
-              <div class="kpi-mini"><span>Servizi a ore</span><strong>{{ cashServiceHours() }}</strong></div>
-              <div class="kpi-mini"><span>Totale</span><strong>€ {{ cashSubtotal().toLocaleString('it-IT') }}</strong></div>
-            </div>
-          </div>
-        </div>
-
         <div class="pos-workbench">
           <div class="pos-sidebar op-card pos-panel--customer">
             <div class="pos-panel-top">
-              <span class="pos-panel-kicker pos-panel-kicker--blue">👤 Setup rapido</span>
-              <strong>Ingresso cassa · Cliente</strong>
+              <span class="pos-panel-kicker pos-panel-kicker--blue">👤 Ingresso Cliente</span>
+              <strong>Dati cliente e operatore</strong>
             </div>
             <div class="pos-block">
               <span class="detail-subtitle">Cliente</span>
@@ -2044,11 +2032,39 @@
 
           </div>
 
-          <div class="pos-receipt op-card pos-panel--payment">
+          <div
+            class="pos-receipt op-card pos-panel--payment"
+            [class.is-paid]="cashIsPaymentSettled()"
+            [class.is-empty]="!cashHasSessionTotal()"
+          >
             <div class="pos-panel-top">
-              <span class="pos-panel-kicker pos-panel-kicker--red">💸 Chiusura</span>
-              <strong>Documento e pagamento</strong>
+              <span class="pos-panel-kicker" [class.pos-panel-kicker--green]="cashIsPaymentSettled()" [class.pos-panel-kicker--red]="!cashIsPaymentSettled()">
+                @if (cashIsPaymentSettled()) { 💚 Pagamento completato }
+                @else { 💸 Chiusura · Pagamento }
+              </span>
+              <strong>
+                @if (cashIsPaymentSettled()) { Scontrino pronto per l'emissione }
+                @else { Documento e pagamento }
+              </strong>
             </div>
+
+            @if (cashIsPaymentSettled()) {
+              <div class="receipt-valid-banner">
+                <span class="rv-check">✅</span>
+                <div class="rv-copy">
+                  <strong>Scontrino valido</strong>
+                  <span>Importo coperto · Nessun insoluto · Totale € {{ cashEffectiveTotal().toLocaleString('it-IT') }}</span>
+                </div>
+              </div>
+            } @else if (cashHasSessionTotal()) {
+              <div class="receipt-pending-banner">
+                <span class="rv-check">⚠️</span>
+                <div class="rv-copy">
+                  <strong>Pagamento da completare</strong>
+                  <span>Inserisci importo ricevuto pari al dovuto per chiudere in pareggio</span>
+                </div>
+              </div>
+            }
 
             <div class="pos-block">
               <span class="detail-subtitle">Tipo documento</span>
@@ -2120,15 +2136,21 @@
                 </div>
               }
               @if (cashHasOffReceiptItems()) {
-                <div class="pos-payment-warning">
-                  Voci fuori scontrino presenti: pagamento solo contanti.
+                <div class="pos-payment-warning" [class.is-blocker]="cashPaymentMethod() === 'pos' || cashPaymentMethod() === 'bonifico'">
+                  @if (cashPaymentMethod() === 'misto') {
+                    ⚠️ Voci fuori scontrino (€ {{ cashHiddenReceiptTotal().toLocaleString('it-IT') }}): nel pagamento MISTO la quota in CONTANTI deve coprire almeno l'importo fuori scontrino.
+                  } @else if (cashPaymentMethod() === 'pos' || cashPaymentMethod() === 'bonifico') {
+                    🚫 Voci fuori scontrino presenti: con pagamento ELETTRONICO (POS / Bonifico) NON puoi emettere lo scontrino. Usa Contanti o Misto.
+                  } @else {
+                    💡 Voci fuori scontrino (€ {{ cashHiddenReceiptTotal().toLocaleString('it-IT') }}): pagamento consentito in Contanti o Misto (con la parte fuori scontrino obbligatoriamente in contanti).
+                  }
                 </div>
               }
               <div class="pos-method-list compact">
                 <button type="button" [class.active]="cashPaymentMethod() === 'contanti'" (click)="setCashPaymentMethod('contanti')">Contanti</button>
                 <button type="button" [class.active]="cashPaymentMethod() === 'pos'" [disabled]="cashHasOffReceiptItems()" (click)="setCashPaymentMethod('pos')">POS</button>
                 <button type="button" [class.active]="cashPaymentMethod() === 'bonifico'" [disabled]="cashHasOffReceiptItems()" (click)="setCashPaymentMethod('bonifico')">Bonifico</button>
-                <button type="button" [class.active]="cashPaymentMethod() === 'misto'" [disabled]="cashHasOffReceiptItems()" (click)="setCashPaymentMethod('misto')">Misto</button>
+                <button type="button" [class.active]="cashPaymentMethod() === 'misto'" (click)="setCashPaymentMethod('misto')">Misto</button>
               </div>
               <label class="pos-inline-label">
                 <span>Ricevuto €</span>
@@ -2213,65 +2235,6 @@
                 <div><span>Totale</span><strong>€ {{ cashEffectiveTotal().toLocaleString('it-IT') }}</strong></div>
                 <div><span>Resto</span><strong>€ {{ cashChange().toLocaleString('it-IT') }}</strong></div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="pos-bottom-actions">
-          <button type="button" class="btn-primary" (click)="openCashClosureModal()">Chiusura giornaliera</button>
-          <button type="button" class="btn-ghost" (click)="navigateToReports()">Report giornaliero</button>
-        </div>
-
-        <div class="report-grid">
-          <div class="op-card">
-            <h2 class="op-card-title">Ultime vendite</h2>
-            <div class="record-list compact">
-              @for (transaction of latestCashTransactions(); track transaction.id) {
-                <div class="record-row" [class.selected]="selectedCashTransactionId() === transaction.id" (click)="selectCashTransaction(transaction.id)">
-                  <div class="record-info">
-                    <strong>{{ transaction.reference }}</strong>
-                    <span>{{ transaction.customerName }} · {{ transaction.documentType }} · {{ transaction.paymentMethod }}</span>
-                  </div>
-                  <div class="record-actions">
-                    @if (transaction.receiptNumber) { <span class="badge badge-neutral">Sc. {{ transaction.receiptNumber }}</span> }
-                    @if (transaction.invoiceNumber) { <span class="badge badge-info">Ft. {{ transaction.invoiceNumber }}</span> }
-                    <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
-                    <span class="badge" [class.badge-success]="transaction.status === 'pagato'" [class.badge-warning]="transaction.status === 'sospeso'" [class.badge-danger]="transaction.status === 'insoluto'">{{ cashStatusLabel(transaction.status) }}</span>
-                  </div>
-                </div>
-              }
-            </div>
-          </div>
-
-          <div class="op-card">
-            <div class="cash-report-head">
-              <h2 class="op-card-title">Riepilogo giornata</h2>
-              <button type="button" class="btn-ghost btn-sm-fit" (click)="openCashReceiptsModal()">Elenco scontrini</button>
-            </div>
-            <div class="pos-totals">
-              <div><span>Incasso totale</span><strong>€ {{ cashPaidTransactionsTotal().toLocaleString('it-IT') }}</strong></div>
-              <div><span>Operazioni</span><strong>{{ cashTransactionsTotalCount() }}</strong></div>
-              <div><span>Insoluti aperti</span><strong>€ {{ cashUnpaidTransactionsTotal().toLocaleString('it-IT') }}</strong></div>
-              <div><span>Scontrini emessi</span><strong>{{ cashTodayReceiptCount() }}</strong></div>
-              <div><span>Fatture emesse</span><strong>{{ cashTodayInvoiceCount() }}</strong></div>
-              @if (hasCashDailyDiscounts()) {
-                <div><span>Sconti totali</span><strong>€ {{ cashTodayDiscountTotal().toLocaleString('it-IT') }}</strong></div>
-              }
-            </div>
-            <div class="report-methods">
-              <div><span>Contanti</span><strong>€ {{ cashTotalsByMethod().contanti.toLocaleString('it-IT') }}</strong></div>
-              <div><span>POS</span><strong>€ {{ cashTotalsByMethod().pos.toLocaleString('it-IT') }}</strong></div>
-              <div><span>Bonifico</span><strong>€ {{ cashTotalsByMethod().bonifico.toLocaleString('it-IT') }}</strong></div>
-              <div><span>Misto</span><strong>€ {{ cashTotalsByMethod().misto.toLocaleString('it-IT') }}</strong></div>
-            </div>
-          </div>
-
-          <div class="op-card">
-            <h2 class="op-card-title">Per operatore</h2>
-            <div class="report-methods">
-              @for (entry of cashByOperator(); track entry.operator) {
-                <div><span>{{ entry.operator }}</span><strong>€ {{ entry.total.toLocaleString('it-IT') }} ({{ entry.count }} voci)</strong></div>
-              }
             </div>
           </div>
         </div>

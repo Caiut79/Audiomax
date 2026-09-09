@@ -834,6 +834,17 @@ export class SectionPageComponent {
   protected readonly cashHasOffReceiptItems = computed(() =>
     this.cashCart().some((line) => line.excludeFromReceipt),
   );
+
+  // Regola speciale: in pagamento MISTO la quota in CONTANTI deve coprire
+  // OBBLIGATORIAMENTE almeno il totale delle voci fuori scontrino.
+  // Perché le voci fuori scontrino non possono essere pagate elettronicamente
+  // (non c'è tracciabilità sullo scontrino fiscale, quindi devono risultare
+  // come incasso contanti "a mano" extra).
+  protected readonly cashMixedCashCoversOffReceipt = computed(() => {
+    if (!this.cashHasOffReceiptItems()) return true;
+    if (this.cashPaymentMethod() !== 'misto') return true;
+    return Number(this.cashMixedCashAmount().toFixed(2)) >= Number(this.cashHiddenReceiptTotal().toFixed(2));
+  });
   protected readonly cashEffectiveTotal = computed(() => {
     const pendingTx = this.cashPendingTransaction();
     if (pendingTx) {
@@ -893,24 +904,48 @@ export class SectionPageComponent {
         this.cashEffectiveTotal() > 0,
   );
   protected readonly cashCanFinalizePaidSale = computed(() => {
-    if (!this.cashCart().length) {
+    if (!this.cashCart().length && !this.cashIsSettlingPending()) {
       return false;
     }
 
     if (this.cashIsSettlingPending()) {
-      return this.cashMixedIsValid();
+      if (!this.cashMixedIsValid()) return false;
+      if (!this.cashMixedCashCoversOffReceipt()) return false;
+      return true;
     }
 
-    if (this.cashPaymentMethod() === 'contanti') {
-      return this.cashReceivedAmount() >= this.cashEffectiveTotal();
+    if (this.cashEffectiveTotal() <= 0) {
+      return false;
     }
 
+    // ═══════════════ REGOLE FUORI SCONTRINO ═══════════════
+    if (this.cashHasOffReceiptItems()) {
+      // (1) Metodi elettronici PURI (solo POS / solo Bonifico)
+      //     = VIETATO emettere scontrino quando ci sono voci escluse,
+      //     perché le voci fuori scontrino non possono essere
+      //     tracciate come pagamento elettronico.
+      if (this.cashPaymentMethod() === 'pos' || this.cashPaymentMethod() === 'bonifico') {
+        return false;
+      }
+
+      // (2) Pagamento MISTO: la quota CONTANTI deve coprire
+      //     OBBLIGATORIAMENTE il totale delle voci fuori scontrino.
+      if (this.cashPaymentMethod() === 'misto' && !this.cashMixedCashCoversOffReceipt()) {
+        return false;
+      }
+    }
+
+    // (3) REGOLA UNIFICATA ricevuto >= dovuto per tutti i metodi.
     if (this.cashPaymentMethod() === 'misto') {
       return this.cashMixedIsValid();
     }
 
-    return true;
+    return this.cashReceivedAmount() >= this.cashEffectiveTotal();
   });
+
+  // Stato pagamento esposto al template (per colorazione dinamica colonna chiusura)
+  public readonly cashIsPaymentSettled = computed(() => this.cashCanFinalizePaidSale());
+  public readonly cashHasSessionTotal = computed(() => this.cashEffectiveTotal() > 0);
   protected readonly cashCanMarkAsInsoluto = computed(
     () => this.cashCart().length > 0 && !!this.selectedCashClientId() && !this.cashIsSettlingPending(),
   );
@@ -3101,6 +3136,7 @@ export class SectionPageComponent {
   protected readonly cashHiddenReceiptLines = computed(() =>
     this.cashCart().filter((line) => line.excludeFromReceipt),
   );
+  // Importo totale delle righe contrassegnate "fuori scontrino"
   protected readonly cashHiddenReceiptTotal = computed(() =>
     this.cashHiddenReceiptLines().reduce((sum, line) => sum + line.total, 0),
   );
@@ -6179,11 +6215,39 @@ export class SectionPageComponent {
       this.cashMixedCashAmount.set(0);
       this.cashMixedElectronicAmount.set(0);
       this.cashMixedElectronicMethod.set('bancomat');
+    } else {
+      // Quando passi a MISTO: se ci sono voci fuori scontrino
+      // prepopola la quota CONTANTI = importo fuori scontrino
+      // (obbligo di legge) e il resto lo mette in elettronico.
+      if (this.cashHasOffReceiptItems() && this.cashEffectiveTotal() > 0) {
+        const minCash = this.cashHiddenReceiptTotal();
+        const cash = Math.max(minCash, this.cashMixedCashAmount());
+        const electronic = Math.max(Number((this.cashEffectiveTotal() - cash).toFixed(2)), 0);
+        this.cashMixedCashAmount.set(cash);
+        this.cashMixedElectronicAmount.set(electronic);
+        this.cashReceivedAmount.set(cash);
+      } else if (this.cashMixedCashAmount() === 0 && this.cashEffectiveTotal() > 0) {
+        // Valore di default Misto senza fuori scontrino: metà contanti / metà elettronico
+        const half = Number((this.cashEffectiveTotal() / 2).toFixed(2));
+        this.cashMixedCashAmount.set(half);
+        this.cashMixedElectronicAmount.set(Number((this.cashEffectiveTotal() - half).toFixed(2)));
+        this.cashReceivedAmount.set(half);
+      }
     }
   }
 
   protected applyQuickReceivedAmount(amount: number): void {
     this.cashReceivedAmount.set(amount);
+    // Nel pagamento MISTO quando applichiamo un importo rapido ("Esatto",
+    // €50, €100, €200) garantiamo SEMPRE che la quota contanti copra
+    // il totale delle voci fuori scontrino, per rispettare l'obbligo.
+    if (this.cashPaymentMethod() === 'misto' && this.cashEffectiveTotal() > 0) {
+      const minCash = this.cashHasOffReceiptItems() ? this.cashHiddenReceiptTotal() : 0;
+      const desiredCash = Math.max(minCash, Math.min(amount, this.cashEffectiveTotal()));
+      const electronic = Math.max(Number((this.cashEffectiveTotal() - desiredCash).toFixed(2)), 0);
+      this.cashMixedCashAmount.set(desiredCash);
+      this.cashMixedElectronicAmount.set(electronic);
+    }
   }
 
   protected updateCashMixedCashAmount(event: Event): void {
@@ -7818,6 +7882,9 @@ export class SectionPageComponent {
     this.cashClosureModalOpen.set(false);
   }
 
+  // NOTA: il pulsante "Report giornaliero" nel banner in alto non naviga piu' via
+  // (come prima faceva navigateToReports), ma adesso apre il modale report giornaliero
+  // gia' presente nel template. NavigateToReports resta per altri percorsi.
   protected navigateToReports(): void {
     void this.router.navigate(['/report']);
   }
