@@ -22,7 +22,11 @@ export class App {
   private readonly sidebarStorageKey = 'audiomax-sidebar-collapsed';
 
   protected readonly sections = crmSections;
-  protected readonly sidebarCollapsed = signal(false);
+  // Menu laterale: collassato di default (stato retrattile).
+  // Al passaggio del mouse sulla sidebar si espande temporaneamente
+  // se l'utente non l'ha bloccata in modalità espansa con il toggle.
+  protected readonly sidebarCollapsed = signal(true);
+  protected readonly sidebarHover = signal(false);
   protected readonly mobileMenuOpen = signal(false);
 
   protected readonly navGroups = [

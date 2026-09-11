@@ -98,6 +98,10 @@
             <button class="btn-ghost btn-sm" (click)="todayCalendarPeriod()">Oggi</button>
             <button class="btn-ghost btn-sm" (click)="nextCalendarPeriod()">›</button>
           </div>
+          <button type="button" class="btn-primary btn-primary-hr"
+                  (click)="openMiniHrDashboard(dashboardSelectedDate() || todayIso(), 'ferie')">
+            ⚡ Dip
+          </button>
           <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Nuovo</button>
           <a class="btn-ghost" routerLink="/agenda">Vai alla sezione</a>
         </div>
@@ -428,6 +432,152 @@
                 <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Annulla</button>
               </div>
             </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ===================== TOAST LOCALE DASHBOARD ===================== -->
+  @if (toastMessage()) {
+    <div class="ui-toast ui-toast-float"
+         [class.ui-toast-error]="toastTone() === 'error'"
+         [class.ui-toast-success]="toastTone() === 'success'">
+      <span>{{ toastMessage() }}</span>
+    </div>
+  }
+
+  <!-- ===================== MINI-MODALE HR DASHBOARD ⚡ Operazioni Dipendenti ===================== -->
+  @if (miniHrDashOpen()) {
+    <div class="ui-modal-overlay" (click)="miniHrDashOpen.set(false)">
+      <div class="ui-modal mini-hr-modal mini-hr-modal-dash" (click)="$event.stopPropagation()">
+        <div class="ui-modal-head mini-hr-head">
+          <div>
+            <span class="detail-subtitle">Gestione Risorse Umane</span>
+            <h2 class="op-card-title">⚡ Operazioni Dipendenti</h2>
+            <p class="text-muted small" style="margin-top: 0.25rem;">
+              Inserisci rapidamente Straordinari, Ferie, Malattie o Permessi. I dati vengono sincronizzati
+              in planner e nel report paghe PDF.
+            </p>
+          </div>
+          <button type="button" class="btn-ghost" (click)="miniHrDashOpen.set(false)">Chiudi</button>
+        </div>
+
+        <div class="ui-modal-body mini-hr-body">
+          <!-- Selezione AZIONE -->
+          <div class="field-legend">Cosa vuoi inserire?</div>
+          <div class="mini-hr-actions">
+            <button type="button" class="mini-hr-action-btn mini-hr-action-stra"
+                    [class.active]="miniHrDashAction() === 'straordinario'"
+                    (click)="miniHrDashAction.set('straordinario')">
+              <strong>✨ Turno Extra</strong>
+              <span>Straordinario 08:30–17:00</span>
+            </button>
+            <button type="button" class="mini-hr-action-btn mini-hr-action-ferie"
+                    [class.active]="miniHrDashAction() === 'ferie'"
+                    (click)="miniHrDashAction.set('ferie')">
+              <strong>🏖️ Ferie</strong>
+              <span>Giornata di ferie</span>
+            </button>
+            <button type="button" class="mini-hr-action-btn mini-hr-action-malattia"
+                    [class.active]="miniHrDashAction() === 'malattia'"
+                    (click)="miniHrDashAction.set('malattia')">
+              <strong>🤒 Malattia</strong>
+              <span>Assenza per malattia</span>
+            </button>
+            <button type="button" class="mini-hr-action-btn mini-hr-action-permesso"
+                    [class.active]="miniHrDashAction() === 'permesso'"
+                    (click)="miniHrDashAction.set('permesso')">
+              <strong>⏱️ Permesso</strong>
+              <span>Giornata intera o parziale</span>
+            </button>
+          </div>
+
+          <!-- Selezione DATA -->
+          <div class="mini-hr-inline-grid">
+            <label class="custom-field">
+              <span>📅 Data inserimento</span>
+              <input type="date"
+                     [value]="miniHrDashDate()"
+                     (change)="miniHrDashDate.set($any($event.target).value)">
+            </label>
+            <label class="custom-field">
+              <span>📝 Nota (opzionale)</span>
+              <input type="text"
+                     placeholder="es. Permesso visita medica"
+                     [value]="miniHrDashNote()"
+                     (input)="miniHrDashNote.set($any($event.target).value)">
+            </label>
+          </div>
+
+          <!-- Permesso ORARI (solo se action === permesso) -->
+          @if (miniHrDashAction() === 'permesso') {
+            <div class="mini-hr-permit-box">
+              <div class="field-legend" style="margin-bottom: 0.5rem;">
+                ⏱️ Permesso orario (lascia 09:00–13:00 per default, o personalizza)
+              </div>
+              <div class="mini-hr-inline-grid">
+                <label class="custom-field">
+                  <span>Inizio permesso</span>
+                  <select [value]="miniHrDashPermitStart()"
+                          (change)="miniHrDashPermitStart.set($any($event.target).value)">
+                    @for (slot of planner30MinSlots; track slot) {
+                      <option [value]="slot">{{ slot }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="custom-field">
+                  <span>Fine permesso</span>
+                  <select [value]="miniHrDashPermitEnd()"
+                          (change)="miniHrDashPermitEnd.set($any($event.target).value)">
+                    @for (slot of planner30MinSlots; track slot) {
+                      <option [value]="slot">{{ slot }}</option>
+                    }
+                  </select>
+                </label>
+              </div>
+              <div class="permit-hours-summary" style="margin-top: 0.7rem;">
+                @let minuti = miniHrDashPermitMinutesCalc();
+                @if (minuti > 0 && minuti < 480) {
+                  <span class="chip chip-info chip-big">
+                    ⏱️ Permesso orario:
+                    <strong>{{ (minuti / 60) % 1 === 0 ? (minuti / 60) : ((minuti / 60).toFixed(1).replace('.', ',')) }}</strong>h
+                  </span>
+                } @else {
+                  <span class="chip chip-neutral chip-big">📋 Permesso giornata intera</span>
+                }
+              </div>
+            </div>
+          }
+
+          <!-- Selezione DIPENDENTI -->
+          <div class="field-legend" style="margin-top: 0.2rem;">
+            Seleziona dipendenti (clicca per attivare/disattivare · multi-seleziona)
+            <span class="badge badge-blue" style="margin-left: 0.5rem;">{{ miniHrDashEmpIds().length }} selezionati</span>
+          </div>
+          <div class="mini-hr-emp-grid">
+            @for (op of data.activeCashOperators(); track op.id) {
+              <button type="button"
+                      class="mini-hr-emp-btn"
+                      [class.active]="miniHrDashEmpIds().includes(op.id)"
+                      (click)="miniHrDashEmpIds.set(
+                        miniHrDashEmpIds().includes(op.id)
+                          ? miniHrDashEmpIds().filter(x => x !== op.id)
+                          : [...miniHrDashEmpIds(), op.id]
+                      )">
+                <strong>{{ op.name }}</strong>
+                <span>{{ op.role || 'Dipendente' }} · {{ op.contractHoursWeekly || '40' }}h</span>
+              </button>
+            } @empty {
+              <div class="op-fast-empty">Nessun dipendente attivo — vai in Impostazioni → Dipendenti.</div>
+            }
+          </div>
+
+          <div class="form-actions mini-hr-footer" style="margin-top: 1.2rem;">
+            <button type="button" class="btn-ghost" (click)="miniHrDashOpen.set(false)">Annulla</button>
+            <button type="button" class="btn-primary" (click)="saveMiniHrDashAction()">
+              💾 Salva operazione HR
+            </button>
           </div>
         </div>
       </div>

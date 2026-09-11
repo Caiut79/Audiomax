@@ -287,6 +287,10 @@ export class AudiomaxDataService {
   readonly cashShifts = signal<CashShiftRecord[]>(initialAudiomaxState.cashShifts);
   readonly cashFiscalSettings = signal<CashFiscalSettings>(initialAudiomaxState.cashFiscalSettings);
   readonly serviceTickets = signal<ServiceTicketRecord[]>(initialAudiomaxState.serviceTickets);
+  // ===== NUOVI Task 1: negozio chiusure settimanali, aperture straordinarie, chiusure collettive =====
+  readonly storeClosingDaysWeekly = signal<Record<'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom', boolean>>(initialAudiomaxState.storeClosingDaysWeekly);
+  readonly storeExtraOpeningDates = signal<Array<{ id: string; date: string; note?: string }>>(initialAudiomaxState.storeExtraOpeningDates);
+  readonly storeBulkClosures = signal<Array<{ id: string; startDate: string; endDate: string; reason: string }>>(initialAudiomaxState.storeBulkClosures);
 
   readonly activeClients = computed(
     () => this.clients().filter((client) => client.status !== 'lead').length,
@@ -2086,6 +2090,10 @@ export class AudiomaxDataService {
       cashShifts: this.cashShifts(),
       cashFiscalSettings: this.cashFiscalSettings(),
       serviceTickets: this.serviceTickets(),
+      // ===== NUOVI Task 1: negozio chiusure =====
+      storeClosingDaysWeekly: this.storeClosingDaysWeekly(),
+      storeExtraOpeningDates: this.storeExtraOpeningDates(),
+      storeBulkClosures: this.storeBulkClosures(),
     };
   }
 
@@ -2138,6 +2146,11 @@ export class AudiomaxDataService {
       this.restoreValueState(this.cashFiscalSettings, parsedState.cashFiscalSettings);
       this.cashFiscalSettings.update((current) => ({ ...initialAudiomaxState.cashFiscalSettings, ...current }));
       this.restoreCollectionState(this.serviceTickets, parsedState.serviceTickets);
+      // ===== NUOVI Task 1: ripristina impostazioni negozio + fallback defaults per retrocompatibilità =====
+      this.restoreCollectionState(this.storeExtraOpeningDates, parsedState.storeExtraOpeningDates);
+      this.restoreCollectionState(this.storeBulkClosures, parsedState.storeBulkClosures);
+      this.restoreValueState(this.storeClosingDaysWeekly, parsedState.storeClosingDaysWeekly);
+      this.storeClosingDaysWeekly.update((current) => ({ ...initialAudiomaxState.storeClosingDaysWeekly, ...(current ?? ({} as any)) }));
       this.migrateLegacyWarehouseCablingState();
       this.lastPersistedState = rawState;
     } catch {

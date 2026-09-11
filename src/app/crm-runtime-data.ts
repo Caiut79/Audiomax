@@ -324,6 +324,7 @@ export interface CashOperatorRecord {
   contractHoursWeekly: number;
   shiftPatterns: Array<Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', string>>;
   shiftCycleStartDate: string;
+  defaultWeeklyShift: Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', string>;
 }
 
 export interface EmployeeLeaveRecord {
@@ -336,6 +337,10 @@ export interface EmployeeLeaveRecord {
   note: string;
   status: 'programmata' | 'approvata';
   returnShiftPatternIndex?: number | null;
+  // ===== NUOVI Task 7: permesso ORARIO PARZIALE (null = giornata intera) =====
+  startTimeMinutes?: number | null;
+  endTimeMinutes?: number | null;
+  hours?: number | null;
 }
 
 export interface EmployeeAttendanceRecord {
@@ -519,6 +524,10 @@ export interface AudiomaxState {
   cashShifts: CashShiftRecord[];
   cashFiscalSettings: CashFiscalSettings;
   serviceTickets: ServiceTicketRecord[];
+  // ===== NUOVI Task 1/2/4: negozio chiusure settimanali / aperture straordinarie / chiusure collettive =====
+  storeClosingDaysWeekly: Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>;
+  storeExtraOpeningDates: Array<{ id: string; date: string; note?: string }>;
+  storeBulkClosures: Array<{ id: string; startDate: string; endDate: string; reason: string }>;
 }
 
 export function createClientPrivacyProfile(config?: {
@@ -1143,6 +1152,7 @@ export const initialAudiomaxState: AudiomaxState = {
       contractHoursWeekly: 0,
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     },
     {
       id: 'cash-op-002',
@@ -1154,6 +1164,7 @@ export const initialAudiomaxState: AudiomaxState = {
       contractHoursWeekly: 40,
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     },
     {
       id: 'cash-op-003',
@@ -1165,6 +1176,7 @@ export const initialAudiomaxState: AudiomaxState = {
       contractHoursWeekly: 40,
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     },
     {
       id: 'cash-op-004',
@@ -1176,6 +1188,7 @@ export const initialAudiomaxState: AudiomaxState = {
       contractHoursWeekly: 40,
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     },
     {
       id: 'cash-op-005',
@@ -1187,6 +1200,7 @@ export const initialAudiomaxState: AudiomaxState = {
       contractHoursWeekly: 40,
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     },
     {
       id: 'cash-op-006',
@@ -1198,6 +1212,7 @@ export const initialAudiomaxState: AudiomaxState = {
       contractHoursWeekly: 40,
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     },
   ],
   employeeLeaves: [],
@@ -1551,4 +1566,8 @@ export const initialAudiomaxState: AudiomaxState = {
       updatedAt: null,
     },
   ],
+  // ===== NUOVI Task 1: valori DEFAULT per chiusure negozio =====
+  storeClosingDaysWeekly: { lun:false, mar:false, mer:false, gio:false, ven:false, sab:false, dom:true }, // Domenica = chiusa di default
+  storeExtraOpeningDates: [],
+  storeBulkClosures: [],
 };

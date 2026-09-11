@@ -1,5 +1,7 @@
-<div class="app-shell" [class.sidebar-collapsed]="sidebarCollapsed()">
-  <aside class="sidebar" [class.mobile-open]="mobileMenuOpen()">
+<div class="app-shell" [class.sidebar-collapsed]="sidebarCollapsed() && !sidebarHover()">
+  <aside class="sidebar" [class.mobile-open]="mobileMenuOpen()"
+         (mouseenter)="sidebarHover.set(true)"
+         (mouseleave)="sidebarHover.set(false)">
     <div class="sidebar-header">
       <a class="brand" routerLink="/dashboard">
         <span class="brand-mark">AM</span>

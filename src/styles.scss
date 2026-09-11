@@ -60,6 +60,15 @@
 
   --surface-light-rgb: 255, 255, 255;
 
+  // Layer di highlight bianco superiore sulle card (Modalità Light)
+  --card-grad-a: rgba(255, 255, 255, 0.60);
+  --card-grad-b: rgba(255, 255, 255, 0.08);
+  --card-grad-strong-a: rgba(255, 255, 255, 0.70);
+  --card-grad-strong-b: rgba(255, 255, 255, 0.12);
+  --card-grad-light-a: rgba(255, 255, 255, 0.45);
+  --card-grad-light-b: rgba(255, 255, 255, 0.06);
+  --card-inset: rgba(255, 255, 255, 0.56);
+
   color-scheme: light;
 }
 
@@ -114,6 +123,26 @@
 
   --surface-light-rgb: 255, 255, 255;
 
+  // Pulsanti CTA primari "Nuovo ..." (Light — verde smeraldo professionale)
+  --cta-primary-a: #0f9f6d;
+  --cta-primary-b: #0c7e57;
+  --cta-primary-shadow: 0 10px 22px rgba(15, 159, 109, 0.26);
+  --cta-primary-text: #ffffff;
+
+  // Colonne calendario paghe (weekend rosso + bordo bianco light)
+  --paghe-border: rgba(226, 232, 240, 0.9);
+  --paghe-we-text: #c2410c;
+  --paghe-we-bg: rgba(254, 242, 242, 0.72);
+
+  // Layer di highlight bianco superiore sulle card (Modalità Light — blocco esplicito light)
+  --card-grad-a: rgba(255, 255, 255, 0.60);
+  --card-grad-b: rgba(255, 255, 255, 0.08);
+  --card-grad-strong-a: rgba(255, 255, 255, 0.70);
+  --card-grad-strong-b: rgba(255, 255, 255, 0.12);
+  --card-grad-light-a: rgba(255, 255, 255, 0.45);
+  --card-grad-light-b: rgba(255, 255, 255, 0.06);
+  --card-inset: rgba(255, 255, 255, 0.56);
+
   color-scheme: light;
 }
 
@@ -154,6 +183,26 @@
   --shadow-lg: 0 32px 84px rgba(2, 6, 23, 0.58);
 
   --surface-light-rgb: 24, 36, 58;
+
+  // Pulsanti CTA primari "Nuovo ..." (Dark — verde profondo luminoso, testo bianco 100%)
+  --cta-primary-a: #10b981;
+  --cta-primary-b: #059669;
+  --cta-primary-shadow: 0 10px 26px rgba(16, 185, 129, 0.24);
+  --cta-primary-text: #ffffff;
+
+  // Colonne calendario paghe (weekend arancio-rosso + bordo scuro dark)
+  --paghe-border: rgba(100, 116, 139, 0.22);
+  --paghe-we-text: #fb7185;
+  --paghe-we-bg: rgba(127, 29, 29, 0.24);
+
+  // Layer di highlight attenuato DARK MODE — massimo 5-6% di bianco (non copre il navy!)
+  --card-grad-a: rgba(255, 255, 255, 0.05);
+  --card-grad-b: rgba(255, 255, 255, 0.01);
+  --card-grad-strong-a: rgba(255, 255, 255, 0.06);
+  --card-grad-strong-b: rgba(255, 255, 255, 0.02);
+  --card-grad-light-a: rgba(255, 255, 255, 0.04);
+  --card-grad-light-b: rgba(255, 255, 255, 0.01);
+  --card-inset: rgba(255, 255, 255, 0.07);
 
   color-scheme: dark;
 }

@@ -4,7 +4,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
 import { AudiomaxDataService } from './audiomax-data.service';
-import { AppointmentRecord } from './crm-runtime-data';
+import { AppointmentRecord, CashOperatorRecord, EmployeeLeaveRecord } from './crm-runtime-data';
 import { SupabaseService } from './supabase.service';
 
 @Component({
@@ -22,6 +22,234 @@ export class DashboardPageComponent {
   protected readonly dashboardSelectedDate = signal(new Date().toISOString().slice(0, 10));
   protected readonly calendarViewMode = signal<'giorno' | 'settimana' | 'mese'>('mese');
   protected readonly calendarReferenceDate = signal(new Date());
+
+  // Slot orari 30min per mini-modale HR permessi (00:00 → 24:00, 49 valori)
+  protected readonly planner30MinSlots: string[] = Array.from(
+    { length: 49 },
+    (_, i) => `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 === 0 ? '00' : '30'}`,
+  );
+
+  // ===================== MINI-MODALE HR (⚡ Operazioni Dipendenti) =====================
+  protected readonly miniHrDashOpen = signal(false);
+  protected readonly miniHrDashDate = signal(new Date().toISOString().slice(0, 10));
+  protected readonly miniHrDashAction = signal<'straordinario' | 'ferie' | 'malattia' | 'permesso'>('ferie');
+  protected readonly miniHrDashEmpIds = signal<string[]>([]);
+  protected readonly miniHrDashPermitStart = signal('09:00');
+  protected readonly miniHrDashPermitEnd = signal('13:00');
+  protected readonly miniHrDashNote = signal('');
+  // toast locale
+  protected readonly toastMessage = signal<string | null>(null);
+  protected readonly toastTone = signal<'success' | 'error'>('success');
+
+  /** Calcolo minuti permesso orario (template non ammette Math). */
+  protected miniHrDashPermitMinutesCalc(): number {
+    const s = this._dashHHMMtoMinutes(this.miniHrDashPermitStart());
+    const e = this._dashHHMMtoMinutes(this.miniHrDashPermitEnd());
+    return e - s > 0 ? e - s : 0;
+  }
+
+  private _dashHHMMtoMinutes(hhmm: string): number {
+    const [h, m] = hhmm.split(':').map(p => Number(p));
+    if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+    return Math.max(0, Math.min(24 * 60, h * 60 + m));
+  }
+
+  private _pushDashToast(message: string, tone: 'success' | 'error'): void {
+    this.toastMessage.set(message);
+    this.toastTone.set(tone);
+    setTimeout(() => {
+      if (this.toastMessage() === message) {
+        this.toastMessage.set(null);
+      }
+    }, 3200);
+  }
+
+  /** Apre il mini-modale HR in Dashboard per una data specifica (default oggi). */
+  protected openMiniHrDashboard(isoDate: string | null = null, action: 'straordinario' | 'ferie' | 'malattia' | 'permesso' = 'ferie'): void {
+    const date = isoDate || this.dashboardSelectedDate() || new Date().toISOString().slice(0, 10);
+    this.miniHrDashDate.set(date);
+    this.miniHrDashAction.set(action);
+    this.miniHrDashEmpIds.set([]);
+    this.miniHrDashPermitStart.set('09:00');
+    this.miniHrDashPermitEnd.set('13:00');
+    this.miniHrDashNote.set('');
+    this.miniHrDashOpen.set(true);
+  }
+
+  /** Salva l'azione HR selezionata (ferie/malattia/permesso/straordinario) per i dipendenti selezionati. */
+  protected saveMiniHrDashAction(): void {
+    const iso = this.miniHrDashDate();
+    const action = this.miniHrDashAction();
+    const selectedIds = this.miniHrDashEmpIds();
+    const activeOps = this.data.activeCashOperators();
+
+    if (!selectedIds.length) {
+      this._pushDashToast('Seleziona almeno 1 dipendente', 'error');
+      return;
+    }
+    const operators = activeOps.filter(op => selectedIds.includes(op.id));
+    if (!operators.length) {
+      this._pushDashToast('Dipendenti non trovati', 'error');
+      return;
+    }
+
+    const allLeaves = [...this.data.employeeLeaves()];
+    let saved = 0;
+
+    for (const op of operators) {
+      const empName = op.name;
+      if (action === 'straordinario') {
+        const ok = this._injectDashPlannerExtraShiftByName(empName, iso, '08:30', '17:00', '13:00', '14:00');
+        saved++;
+        this._pushDashToast(
+          ok
+            ? `Turno straordinario inserito per ${empName} · ${iso}.`
+            : `Turno straordinario salvato in ${empName} (data fuori mese planner).`,
+          'success',
+        );
+      } else {
+        const hours = action === 'permesso'
+          ? Math.max(0, (this._dashHHMMtoMinutes(this.miniHrDashPermitEnd()) - this._dashHHMMtoMinutes(this.miniHrDashPermitStart())) / 60)
+          : 8;
+        const permitStart = action === 'permesso' ? this._dashHHMMtoMinutes(this.miniHrDashPermitStart()) : null;
+        const permitEnd = action === 'permesso' ? this._dashHHMMtoMinutes(this.miniHrDashPermitEnd()) : null;
+        const note = this.miniHrDashNote().trim();
+
+        // Rimuovi vecchie entry duplicate per stessa data + tipo
+        const filtered = allLeaves.filter((l: any) =>
+          !(l.employeeId === op.id && l.startDate === iso && l.type === action)
+        );
+        filtered.push({
+          id: `leave-${crypto.randomUUID()}`,
+          employeeId: op.id,
+          type: action,
+          startDate: iso,
+          endDate: iso,
+          hours,
+          startTimeMinutes: permitStart ?? undefined,
+          endTimeMinutes: permitEnd ?? undefined,
+          notes: note || undefined,
+          createdAt: new Date().toISOString(),
+        } as unknown as EmployeeLeaveRecord);
+
+        // Inietta anche nel planner se data dentro il range planner
+        const plannerSynced = this._markDashPlannerCellAsTone(empName, iso, action, permitStart, permitEnd);
+
+        // Aggiorna le foglie una sola volta fuori dal loop dopo, ma per semplicità:
+        for (let i = allLeaves.length - 1; i >= 0; i--) allLeaves.splice(i, 1);
+        filtered.forEach(x => allLeaves.push(x));
+
+        saved++;
+        if (plannerSynced) {
+          this._pushDashToast(
+            `${empName} · ${action.toUpperCase()} registrato in pagine e planner (${iso}).`,
+            'success',
+          );
+        } else {
+          this._pushDashToast(
+            `${empName} · ${action.toUpperCase()} registrato (${iso}).`,
+            'success',
+          );
+        }
+      }
+    }
+
+    this.data.employeeLeaves.set(allLeaves);
+    if (saved) {
+      this._pushDashToast(`Azione HR completata: ${saved} dipendenti aggiornati.`, 'success');
+    }
+    this.miniHrDashOpen.set(false);
+  }
+
+  /** Inietta turno straordinario nel planner del dipendente se data è nel range settimanale attivo. */
+  private _injectDashPlannerExtraShiftByName(
+    empName: string, isoDate: string, startHH: string, endHH: string, brkFrom: string, brkTo: string,
+  ): boolean {
+    const emp = this.data.activeCashOperators().find(o => o.name === empName);
+    if (!emp) return false;
+    const patterns: string[][] = Array.isArray((emp as any).shiftPatterns) ? [...(emp as any).shiftPatterns] : [];
+    while (patterns.length < 4) patterns.push([]);
+    const date = new Date(`${isoDate}T00:00:00`);
+    const dayKey = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][date.getDay() === 0 ? 6 : date.getDay() - 1];
+    // Cerca la settimana contenente isoDate nel planner (4 settimane a partire dalla prima lunedì del mese)
+    let injected = false;
+    for (let w = 0; w < patterns.length; w++) {
+      if (!patterns[w]) patterns[w] = [];
+      const weekStart = this._dashWeekStartForIndex(emp, w);
+      if (!weekStart) continue;
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      if (date.getTime() >= weekStart.getTime() && date.getTime() <= weekEnd.getTime()) {
+        const cellStr = `[straordinario ${startHH}-${endHH} (pausa ${brkFrom}-${brkTo})]`;
+        const arr = patterns[w];
+        const idx = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].indexOf(dayKey);
+        if (idx >= 0) {
+          while (arr.length < 7) arr.push('');
+          arr[idx] = cellStr;
+          injected = true;
+          break;
+        }
+      }
+    }
+    const updated = { ...emp, shiftPatterns: patterns } as unknown as CashOperatorRecord;
+    this.data.updateCashOperator(updated);
+    return injected;
+  }
+
+  /** Marca una cella planner con tono ferie/malattia/permesso (se data nel range). */
+  private _markDashPlannerCellAsTone(
+    empName: string, isoDate: string,
+    tone: 'ferie' | 'malattia' | 'permesso',
+    permitStartMin: number | null, permitEndMin: number | null,
+  ): boolean {
+    const emp = this.data.activeCashOperators().find(o => o.name === empName);
+    if (!emp) return false;
+    const patterns: string[][] = Array.isArray((emp as any).shiftPatterns) ? [...(emp as any).shiftPatterns] : [];
+    while (patterns.length < 4) patterns.push([]);
+    const date = new Date(`${isoDate}T00:00:00`);
+    const dayKey = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][date.getDay() === 0 ? 6 : date.getDay() - 1];
+    let injected = false;
+    for (let w = 0; w < patterns.length; w++) {
+      if (!patterns[w]) patterns[w] = [];
+      const weekStart = this._dashWeekStartForIndex(emp, w);
+      if (!weekStart) continue;
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      if (date.getTime() >= weekStart.getTime() && date.getTime() <= weekEnd.getTime()) {
+        const toneMap: Record<string, string> = { ferie: 'F', malattia: 'M', permesso: 'P' };
+        const tm = toneMap[tone];
+        let cellStr = `[${tm}]`;
+        if (tone === 'permesso' && permitStartMin != null && permitEndMin != null) {
+          const sh = `${String(Math.floor(permitStartMin / 60)).padStart(2, '0')}:${String(permitStartMin % 60).padStart(2, '0')}`;
+          const eh = `${String(Math.floor(permitEndMin / 60)).padStart(2, '0')}:${String(permitEndMin % 60).padStart(2, '0')}`;
+          cellStr = `[${tm} ${sh}-${eh}]`;
+        }
+        const idx = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].indexOf(dayKey);
+        if (idx >= 0) {
+          const arr = patterns[w];
+          while (arr.length < 7) arr.push('');
+          arr[idx] = cellStr;
+          injected = true;
+          break;
+        }
+      }
+    }
+    const updated = { ...emp, shiftPatterns: patterns } as unknown as CashOperatorRecord;
+    this.data.updateCashOperator(updated);
+    return injected;
+  }
+
+  /** Stima inizio settimana index-esima per il planner (stesso logico di section). */
+  private _dashWeekStartForIndex(emp: CashOperatorRecord, weekIndex: number): Date | null {
+    const refMonth = (emp as any).plannerMonth ? new Date(`${(emp as any).plannerMonth}-01T00:00:00`) : new Date();
+    const firstMonthDay = new Date(refMonth.getFullYear(), refMonth.getMonth(), 1);
+    const offset = (firstMonthDay.getDay() + 6) % 7;
+    const firstMonday = new Date(firstMonthDay);
+    firstMonday.setDate(firstMonthDay.getDate() - offset);
+    const weekStart = new Date(firstMonday);
+    weekStart.setDate(firstMonday.getDate() + 7 * weekIndex);
+    return weekStart;
+  }
   private readonly italianHolidayLabels: Record<string, string> = {
     '01-01': 'Capodanno',
     '01-06': 'Epifania',
@@ -426,24 +654,24 @@ export class DashboardPageComponent {
   protected readonly calendarDisplayTitle = computed(() => {
     const refDate = this.calendarReferenceDate();
     const mode = this.calendarViewMode();
-    
+
     if (mode === 'giorno') {
-      return new Intl.DateTimeFormat('it-IT', { 
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' 
+      return new Intl.DateTimeFormat('it-IT', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
       }).format(refDate);
     } else if (mode === 'settimana') {
       const startOfWeek = new Date(refDate);
       startOfWeek.setDate(startOfWeek.getDate() - ((startOfWeek.getDay() + 6) % 7));
       const endOfWeek = new Date(startOfWeek);
       endOfWeek.setDate(startOfWeek.getDate() + 6);
-      
-      const startMonth = startOfWeek.getMonth() === endOfWeek.getMonth() 
+
+      const startMonth = startOfWeek.getMonth() === endOfWeek.getMonth()
         ? '' : new Intl.DateTimeFormat('it-IT', { month: 'short' }).format(startOfWeek) + ' - ';
-      
+
       return `${startOfWeek.getDate()} ${startMonth}al ${endOfWeek.getDate()} ${new Intl.DateTimeFormat('it-IT', { month: 'long', year: 'numeric' }).format(endOfWeek)}`;
     } else {
-      return new Intl.DateTimeFormat('it-IT', { 
-        month: 'long', year: 'numeric' 
+      return new Intl.DateTimeFormat('it-IT', {
+        month: 'long', year: 'numeric'
       }).format(refDate);
     }
   });

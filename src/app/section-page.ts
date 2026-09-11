@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, WritableSignal, computed, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -87,6 +87,41 @@ interface EmployeeShiftDraft {
 interface EmployeeShiftDayMeta {
   key: EmployeeShiftDayKey;
   label: string;
+}
+
+// ─── Planner turni (Settimane multiple)
+type PlannerLeaveTone =
+  | 'standard'   // Turno lavorativo
+  | 'ferie'      // Ferie
+  | 'permesso'   // Permesso
+  | 'malattia'   // Malattia
+  | 'riposo';    // Riposo / Libero
+
+const PLANNER_LEAVE_TONES: { tone: PlannerLeaveTone; label: string; badge: string }[] = [
+  { tone: 'standard', label: 'Turno',     badge: 'bg-blue-100 text-blue-800' },
+  { tone: 'ferie',    label: 'Ferie',     badge: 'bg-emerald-100 text-emerald-800' },
+  { tone: 'permesso', label: 'Permesso',  badge: 'bg-amber-100 text-amber-800' },
+  { tone: 'malattia', label: 'Malattia',  badge: 'bg-rose-100 text-rose-800' },
+  { tone: 'riposo',   label: 'Riposo',    badge: 'bg-slate-200 text-slate-700' },
+];
+
+interface PlannerShiftCell {
+  tone: PlannerLeaveTone;
+  // Turno (solo quando tone === 'standard')
+  startMinutes: number | null;
+  endMinutes:   number | null;
+  breakStart:   number | null;
+  breakEnd:     number | null;
+  // Permesso orario parziale (solo tone === 'permesso')
+  permitStartMinutes?: number | null;
+  permitEndMinutes?:   number | null;
+  permitHours?:        number | null;
+}
+
+interface PlannerSelectedCell {
+  employeeId: string;
+  weekIndex:  number;   // 0..N-1
+  dayKey:     EmployeeShiftDayKey;
 }
 
 interface ReportBarRow {
@@ -177,6 +212,10 @@ interface EmployeeResolvedAttendanceEntry {
   manualOverride: boolean;
   isLeave: boolean;
   isFuture: boolean;
+  // Task7: permesso orario parziale (ore di permesso)
+  leaveHours?: number | null;
+  leaveStartTimeMinutes?: number | null;
+  leaveEndTimeMinutes?: number | null;
 }
 
 interface EmployeeAttendanceRegisterCell extends EmployeeResolvedAttendanceEntry {
@@ -209,6 +248,39 @@ interface SupplierOrderHistoryEntry {
   purchase: WarehousePurchaseRecord;
   itemName: string;
   linkedExpense: ExpenseRecord | null;
+}
+
+// ══════════════════════════════════════════════
+// Tabelle esportazione mensile PDF · Ufficio paghe
+// ══════════════════════════════════════════════
+interface PagheGridCell {
+  dayNumber: number;       // 1..31 (fuori mese → kind='fuori')
+  isoDate: string;          // YYYY-MM-DD
+  weekdayShort: string;    // L/M/M/G/V/S/D
+  isWeekend: boolean;
+  display: string;           // Stringa mostrata: "9", "F", "P(4)", "M", "", "·"
+  kind: 'lavorato' | 'ferie' | 'malattia' | 'permesso' | 'riposo' | 'vuoto' | 'fuori';
+  minutes: number;       // minuti lavorati o di assenza
+  note?: string;
+}
+interface PagheGridRow {
+  employeeId: string;
+  employeeName: string;
+  jobTitle: string;
+  cells: PagheGridCell[];                 // sempre 31 (1..31)
+  workedMinutes: number;                // somma tutti i giorni
+  leaveMinutes: { ferie: number; permesso: number; malattia: number };
+  contractHoursWeekly: number;          // es. 40
+  contractHours: number;                  // ore contratto proporz. giorni nel mese lavorativi
+  workedHours: number;                   // ore effettive (lavorato)
+  overtimeHours: number;              // straordinari = workedHours - contratto
+}
+interface PagheNoteRow {
+  employeeName: string;
+  assenzaPer: 'Ferie' | 'Permesso' | 'Malattia';
+  dal: string;
+  al: string;
+  oreN: string;
 }
 
 @Component({
@@ -438,7 +510,7 @@ export class SectionPageComponent {
   protected readonly warehouseMovementDateTo = signal('');
   protected readonly cashCategoryFilter = signal('tutte');
   protected readonly expenseStatusFilter = signal<'tutte' | ExpenseRecord['status']>('tutte');
-  protected readonly expenseView = signal<'registro' | 'scadenze' | 'fornitori' | 'audit'>('registro');
+  protected readonly expenseView = signal<'registro' | 'scadenze' | 'fornitori' | 'audit' | 'statistiche'>('registro');
   protected readonly quoteDraftLines = signal<QuoteLineRecord[]>([
     {
       id: `qline-${crypto.randomUUID()}`,
@@ -594,6 +666,14 @@ export class SectionPageComponent {
   });
   protected readonly employeePanelView = signal<'elenco' | 'turni'>('turni');
   protected readonly employeeScheduleView = signal<'mese' | 'periodo'>('mese');
+  // ═══ Tab modale dipendente: Anagrafica | Turni Standard | Turni Settimanali
+  protected readonly employeeModalTab = signal<'anagrafica' | 'turni-standard' | 'turni-settimanali'>('anagrafica');
+  // ═══ Turni standard settimanali (profilo dipendente)
+  protected readonly employeeDefaultShiftDrafts = signal<Record<EmployeeShiftDayKey, EmployeeShiftDraft>>(
+    this.emptyEmployeeShiftDrafts(),
+  );
+  // ═══ Promemoria paghe 1° del mese
+  protected readonly pagheReminderOpen = signal(false);
   protected readonly employeeLeaves = this.data.employeeLeaves;
   protected readonly employeeScheduleMonth = signal<string>(this.startOfMonthIso(this.toIsoDate(new Date())));
   protected readonly employeePeriodFrom = signal<string>(this.startOfMonthIso(this.toIsoDate(new Date())));
@@ -619,6 +699,987 @@ export class SectionPageComponent {
     { key: 'sab', label: 'Sab' },
     { key: 'dom', label: 'Dom' },
   ] as const;
+
+  // ═══════════════════ PLANNER TURNI SETTIMANALE ═══════════════════
+  // Elenco slot orari step 30min da 00:00 a 24:00 (49 valori, in mezz'ore).
+  protected readonly planner30MinSlots: string[] = Array.from(
+    { length: 49 },
+    (_, index) =>
+      `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 === 0 ? '00' : '30'}`,
+  );
+  protected readonly plannerMaxWeeks = 4;
+  // Per coerenza con shiftPatterns array inizializzo sempre a 1.
+  // L'utente può aggiungere con pulsante +.
+  protected readonly plannerActiveWeekIndex = signal(0);
+  protected readonly plannerMonthAnchor = signal<string>('');  // Data ISO opzionale: "turno d'inizio mese"
+  protected readonly plannerSelectedCell = signal<PlannerSelectedCell | null>(null);
+
+  // ══ Selettori mese/anno per export PDF paghe ══
+  private readonly _oggi = new Date();
+  protected readonly pagheMese = signal<number>(this._oggi.getMonth());   // 0..11
+  protected readonly pagheAnno = signal<number>(this._oggi.getFullYear());
+  protected readonly pagheMesi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  // ══ Lista operatori Veloce (Impostazioni): toggle per mostrare anche quelli "nascosti" (active=false)
+  protected readonly showHiddenOperators = signal<boolean>(false);
+  protected readonly operatorsListVisible = computed(() => {
+    if (this.showHiddenOperators()) {
+      return this.allCashOperators();
+    }
+    return this.allCashOperators().filter((op) => op.active);
+  });
+  protected toggleShowHiddenOperators(checked: boolean): void {
+    this.showHiddenOperators.set(checked);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // TASK 2 · Impostazioni Orari Negozio · Giorni chiusura / Aperture straordinarie / Chiusure collettive
+  // ═══════════════════════════════════════════════════════════════════
+  protected readonly STORE_WEEKDAY_KEYS: Array<{ key: 'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom'; short: string; label: string; }> = [
+    { key: 'lun', short: 'L', label: 'Lunedì' },
+    { key: 'mar', short: 'M', label: 'Martedì' },
+    { key: 'mer', short: 'M', label: 'Mercoledì' },
+    { key: 'gio', short: 'G', label: 'Giovedì' },
+    { key: 'ven', short: 'V', label: 'Venerdì' },
+    { key: 'sab', short: 'S', label: 'Sabato' },
+    { key: 'dom', short: 'D', label: 'Domenica' },
+  ];
+
+  // ⚠️ Incapsulamento: `data` service è private. Wrapper computed leggibili dal template.
+  protected readonly storeClosingDaysWeekly = computed(() => this.data.storeClosingDaysWeekly());
+  protected readonly storeExtraOpeningDates = computed(() => this.data.storeExtraOpeningDates());
+  protected readonly storeBulkClosures = computed(() => this.data.storeBulkClosures());
+  // Draft per form inline Apertura Straordinaria (data odierna default)
+  protected readonly storeNewExtraOpening = signal<{ date: string; note: string; }>({
+    date: new Date(Date.now() + 86400000).toISOString().slice(0,10),  // default = domani
+    note: ''
+  });
+  // Draft per form inline Chiusura Collettiva (default: domani a +7gg, Ferie)
+  protected readonly storeNewBulkClosure = signal<{ startDate: string; endDate: string; reason: string; }>((() => {
+    const start = new Date(Date.now() + 86400000);
+    const end = new Date(start.getTime() + 6*86400000);
+    return {
+      startDate: start.toISOString().slice(0,10),
+      endDate: end.toISOString().slice(0,10),
+      reason: 'Ferie collettive del negozio'
+    };
+  })());
+
+  /** Toggle giorno di chiusura settimanale (Lun..Dom). Chiamato dalla card Impostazioni. */
+  protected toggleStoreClosingDay(key: 'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom'): void {
+    const curr = this.data.storeClosingDaysWeekly();
+    const nuovo = { ...curr, [key]: !curr[key] };
+    this.data.storeClosingDaysWeekly.set(nuovo);
+    const info = this.STORE_WEEKDAY_KEYS.find(g => g.key === key)!;
+    this.pushToast(`${info.label} ${nuovo[key] ? 'impostato come giorno di chiusura' : 'ripristinato giorno di apertura'}`, 'success');
+  }
+
+  /** Aggiunge un giorno di apertura straordinario (sovrascrive chiusura settimanale/bulk). */
+  protected addStoreExtraOpening(): void {
+    const d = this.storeNewExtraOpening();
+    if (!d.date) { this.pushToast('Inserisci una data per l\'apertura straordinaria', 'error'); return; }
+    const nuovo = {
+      id: 'exop_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      date: d.date,
+      note: (d.note || '').trim() || undefined
+    };
+    this.data.storeExtraOpeningDates.update(arr => [...arr, nuovo]);
+    this.storeNewExtraOpening.set({
+      date: new Date(new Date(d.date).getTime() + 86400000).toISOString().slice(0,10),
+      note: ''
+    });
+    this.pushToast(`Apertura straordinaria ${d.date} salvata`, 'success');
+  }
+  protected removeStoreExtraOpening(id: string): void {
+    this.data.storeExtraOpeningDates.update(arr => arr.filter(a => a.id !== id));
+    this.pushToast('Apertura straordinaria rimossa', 'success');
+  }
+
+  /** Aggiunge una chiusura collettiva completa negozio (Ferie, ferragosto, ecc.). */
+  protected addStoreBulkClosure(): void {
+    const d = this.storeNewBulkClosure();
+    if (!d.startDate || !d.endDate) { this.pushToast('Compila data inizio e fine chiusura collettiva', 'error'); return; }
+    if (d.endDate < d.startDate) { this.pushToast('Data fine deve essere >= inizio', 'error'); return; }
+    const nuovo = {
+      id: 'bulk_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      startDate: d.startDate,
+      endDate: d.endDate,
+      reason: d.reason.trim() || 'Chiusura negozio'
+    };
+    this.data.storeBulkClosures.update(arr => [...arr, nuovo]);
+    // reset form +1 giorno dopo fine
+    const afterEnd = new Date(new Date(d.endDate).getTime() + 86400000);
+    const afterEndEnd = new Date(afterEnd.getTime() + 6*86400000);
+    this.storeNewBulkClosure.set({
+      startDate: afterEnd.toISOString().slice(0,10),
+      endDate: afterEndEnd.toISOString().slice(0,10),
+      reason: 'Ferie collettive del negozio'
+    });
+    this.pushToast(`Chiusura collettiva ${nuovo.startDate} → ${nuovo.endDate} salvata (${nuovo.reason})`, 'success');
+  }
+  protected removeStoreBulkClosure(id: string): void {
+    this.data.storeBulkClosures.update(arr => arr.filter(c => c.id !== id));
+    this.pushToast('Chiusura collettiva rimossa', 'success');
+  }
+
+  // Helper per HTML template (Angular NON ammette `new Date(...)` negli expressions)
+  /** Ritorna il nome del giorno della settimana data una stringa YYYY-MM-DD. */
+  protected weekdayNameFromDate(dateStr: string): string {
+    if (!dateStr) return '';
+    return ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'][new Date(dateStr + 'T00:00:00').getDay()];
+  }
+  /** Calcola il numero di giorni inclusi tra startStr (YYYY-MM-DD) e endStr. */
+  protected daysBetweenDates(startStr: string, endStr: string): number {
+    if (!startStr || !endStr) return 0;
+    const s = new Date(startStr + 'T00:00:00').getTime();
+    const e = new Date(endStr + 'T23:59:59').getTime();
+    return Math.max(0, Math.round((e - s) / 86400000) + 1);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TASK 6 · Store apertura / chiusura per data (usato da paghe e agenda)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Mappa i giorni della settimana 0=Domenica..6=Sabato → chiavi record storeClosingDaysWeekly */
+  private static readonly _DOW_TO_WEEKDAY_KEY: Record<number, 'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom'> = {
+    0: 'dom', 1: 'lun', 2: 'mar', 3: 'mer', 4: 'gio', 5: 'ven', 6: 'sab'
+  };
+
+  /** Restituisce il motivo dell'apertura/chiusura per una certa data.
+   *  Priorità 0→4 (P0 extra-open vince sempre):
+   *   P0 = extra-open (apertura straordinaria sovrascrive chiusure)
+   *   P1 = bulk-closure (chiusura collettiva negozio → F ferie)
+   *   P2 = closed-weekly (chiusura settimanale → R riposo standard)
+   *   P3 = open (normale)
+   */
+  protected storeOpenStatusForDate(
+    d: Date | string
+  ):
+    | { kind: 'open' }
+    | { kind: 'extra-open'; note?: string }
+    | { kind: 'closed-weekly'; dayLabel: string }
+    | { kind: 'bulk-closure'; reason: string; from: string; to: string }
+  {
+    const date = typeof d === 'string' ? new Date(d + 'T12:00:00') : new Date(d.getTime() + 43200000);
+    const iso = date.toISOString().slice(0, 10);
+
+    // P0: apertura straordinaria → vince sempre
+    const extra = this.storeExtraOpeningDates().find(x => x.date === iso);
+    if (extra) {
+      return { kind: 'extra-open', note: extra.note };
+    }
+
+    // P1: chiusura collettiva → F per tutti
+    const bulk = this.storeBulkClosures().find(c => c.startDate <= iso && iso <= c.endDate);
+    if (bulk) {
+      return { kind: 'bulk-closure', reason: bulk.reason, from: bulk.startDate, to: bulk.endDate };
+    }
+
+    // P2: chiusura settimanale
+    const dow = date.getDay();
+    const wk = SectionPageComponent._DOW_TO_WEEKDAY_KEY[dow];
+    const closing = this.storeClosingDaysWeekly();
+    if (closing[wk]) {
+      const labels: Record<string, string> = { lun:'Lunedì', mar:'Martedì', mer:'Mercoledì', gio:'Giovedì', ven:'Venerdì', sab:'Sabato', dom:'Domenica' };
+      return { kind: 'closed-weekly', dayLabel: labels[wk] };
+    }
+
+    return { kind: 'open' };
+  }
+
+  /** Helper veloce: negozio è chiuso (weekly o bulk)? Le aperture straordinarie → false. */
+  protected isStoreClosedOnDate(d: Date | string): boolean {
+    const s = this.storeOpenStatusForDate(d);
+    return s.kind === 'closed-weekly' || s.kind === 'bulk-closure';
+  }
+
+  /** Ritorna la chiusura collettiva per data se esiste (per badge agenda). */
+  protected bulkClosureForDate(d: Date | string) {
+    const s = this.storeOpenStatusForDate(d);
+    return s.kind === 'bulk-closure' ? s : null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TASK 8 · Agenda · Controllo Tecnici 5 livelli Priorità 0→4
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /** Estrae la Data prevista dall'appuntamento (scheduledAt del form) o null se non compilata. */
+  private _appointmentDateOrNull(): Date | null {
+    try {
+      const v = (this as any).appointmentForm?.value?.scheduledAt;
+      if (!v || typeof v !== 'string' || v.length < 10) return null;
+      return new Date(v.length <= 10 ? (v + 'T12:00:00') : v);
+    } catch { return null; }
+  }
+
+  /**
+   * Calcola lo stato di un tecnico per la data/ora dell'appuntamento (6 livelli P0→P4 + OK).
+   *   P0 = extra-open (informativo, il negozio è aperto in via straordinaria)
+   *   P1 = NEGOZIO CHIUSO (weekly o bulk) → TUTTI i tecnici disabilitati 🔴 🔒
+   *   P2 = Tecnico ha FERIE / MALATTIA full-day → disabilitato ❌
+   *   P3 = Tecnico ha PERMESSO ORARIO sovrapposto all'appuntamento (non bloccante ⚠️ arancio)
+   *   P4 = Tecnico in RIPOSO (nessun turno standard/programmato) 💤 grigio (non bloccante)
+   *   P9 = Tecnico libero ✅
+   */
+  protected getAppointmentOperatorStatus(
+    operatorName: string
+  ): { level: 0|1|2|3|4|9; badge: string; classes: string; disabled: boolean; title: string } {
+    const emp = this.allCashOperators().find(o => o.name === operatorName);
+    const dateObj = this._appointmentDateOrNull();
+    if (!emp || !dateObj) {
+      return { level: 9, badge: '', classes: '', disabled: false, title: 'Seleziona data/ora appuntamento per vedere la disponibilità' };
+    }
+    const iso = dateObj.toISOString().slice(0, 10);
+    const dow = dateObj.getDay();
+    const apptStartMin = dateObj.getHours() * 60 + dateObj.getMinutes();
+    // Assumiamo durata appuntamento di default 90min, usiamo 120min come finestra di overlap
+    const apptEndMin = Math.min(24 * 60, apptStartMin + 120);
+
+    // P1 / P0: Controllo stato negozio (vale per TUTTI i tecnici)
+    const storeStatus = this.storeOpenStatusForDate(dateObj);
+    if (storeStatus.kind === 'closed-weekly' || storeStatus.kind === 'bulk-closure') {
+      const motivo = storeStatus.kind === 'bulk-closure'
+        ? `Chiusura collettiva: ${storeStatus.reason} (${storeStatus.from} → ${storeStatus.to}) · Puoi comunque selezionare per eventi speciali/dimostrazioni.`
+        : `Negozio chiuso · ${storeStatus.dayLabel} · Puoi comunque selezionare per eventi speciali/dimostrazioni.`;
+      return { level: 1, badge: `🔒 NEGOZIO CHIUSO`, classes: 'tech-warn tech-level1 tech-overridable', disabled: false, title: motivo };
+    }
+    // P0: Apertura straordinaria (solo informativo)
+    let extraBadge = '';
+    if (storeStatus.kind === 'extra-open') {
+      extraBadge = storeStatus.note ? `🌟 Apertura straordinaria · ${storeStatus.note}` : '🌟 Apertura straordinaria';
+    }
+
+    // P2 / P3: Leave records del dipendente oggi
+    const leaves = (emp as any).leaves ?? [];
+    const todayLeaves = leaves.filter((l: any) => l.startDate <= iso && iso <= (l.endDate || l.startDate));
+
+    const fullDayOff = todayLeaves.find((l: any) => l.type === 'ferie' || l.type === 'malattia');
+    if (fullDayOff) {
+      const tip = fullDayOff.type === 'ferie'
+        ? `❌ Ferie ${fullDayOff.startDate} → ${fullDayOff.endDate || fullDayOff.startDate}`
+        : `❌ Malattia ${fullDayOff.startDate} → ${fullDayOff.endDate || fullDayOff.startDate}`;
+      return { level: 2, badge: tip, classes: 'tech-dis tech-level2', disabled: true, title: tip };
+    }
+
+    const permesso = todayLeaves.find((l: any) => l.type === 'permesso');
+    if (permesso) {
+      // Calcola overlap tra permesso e appuntamento
+      let permStart = 0, permEnd = 24*60;
+      if (typeof permesso.startTimeMinutes === 'number' && typeof permesso.endTimeMinutes === 'number') {
+        permStart = permesso.startTimeMinutes;
+        permEnd = permesso.endTimeMinutes;
+      } else if (typeof permesso.hours === 'number' && permesso.hours > 0 && permesso.hours < 8) {
+        permStart = 8 * 60;
+        permEnd = permStart + Math.round(permesso.hours * 60);
+      } else {
+        // Permesso giornata intera senza orari → overlap pieno
+        permStart = 0; permEnd = 24*60;
+      }
+      const overlap = Math.max(0, Math.min(apptEndMin, permEnd) - Math.max(apptStartMin, permStart));
+      if (overlap > 15) { // oltre 15 minuti → avviso
+        const oreP = ((permEnd - permStart) / 60);
+        const orePTxt = (Math.round(oreP * 10) / 10).toFixed(1).replace('.',',');
+        const fmt = (m:number) => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+        const tip = `⚠️ Permesso ${fmt(permStart)}–${fmt(permEnd)} (${orePTxt.replace(',0','')}h) · appuntamento sovrapposto`;
+        return { level: 3, badge: tip, classes: 'tech-warn tech-level3', disabled: false, title: tip + '. Puoi comunque selezionare se necessario.' };
+      }
+    }
+
+    // P4: Riposo (nessun turno)
+    const wkKey = SectionPageComponent._DOW_TO_WEEKDAY_KEY[dow];
+    const defaultShift = (emp.defaultWeeklyShift?.[wkKey])?.trim() ?? '';
+    const hasProg = this.getShiftForDate(emp, iso) || '';
+    if (
+      (!defaultShift || /^\[(riposo|chiusura)\]\s*$/i.test(defaultShift)) &&
+      (!hasProg || /^\[(riposo|chiusura)\]\s*$/i.test(hasProg))
+    ) {
+      const tip = '💤 Riposo · nessun turno standard o programmato';
+      return { level: 4, badge: tip, classes: 'tech-info tech-level4', disabled: false, title: tip + '. Puoi comunque assegnare se serve.' };
+    }
+
+    return {
+      level: 9,
+      badge: extraBadge || '✅ Disponibile',
+      classes: 'tech-ok',
+      disabled: false,
+      title: 'Tecnico disponibile per questa fascia oraria.'
+    };
+  }
+
+  /** Badge AVVISO in cima ai chips tecnici (negozio chiuso / extra open). */
+  protected appointmentStoreNoticeBadge(): { show: boolean; text: string; classes: string } | null {
+    const d = this._appointmentDateOrNull();
+    if (!d) return null;
+    const s = this.storeOpenStatusForDate(d);
+    if (s.kind === 'closed-weekly') {
+      return { show: true, text: `🔒 Negozio chiuso · ${s.dayLabel} · Puoi comunque salvare appuntamenti speciali (eventi, dimostrazioni).`, classes: 'tech-badge tech-badge-level1' };
+    }
+    if (s.kind === 'bulk-closure') {
+      return { show: true, text: `🔒 Chiusura collettiva: ${s.reason} (${s.from} → ${s.to}) · Puoi comunque salvare eventi/dimostrazioni.`, classes: 'tech-badge tech-badge-level1' };
+    }
+    if (s.kind === 'extra-open') {
+      return { show: true, text: `🌟 Apertura straordinaria · negozio aperto eccezionalmente.${s.note ? ' ('+s.note+')' : ''}`, classes: 'tech-badge tech-badge-level0' };
+    }
+    return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  protected readonly plannerLeaveTones = PLANNER_LEAVE_TONES;
+  // Preset rapidi di orario standard per click singolo su una cella turno.
+  protected readonly plannerShiftPresets = [
+    { key: 'mattutino',  label: 'Mattina', start: '08:30', end: '17:00', breakFrom: '13:00', breakTo: '14:00' },
+    { key: 'pomeridiano', label: 'Pomeriggio', start: '14:00', end: '22:00', breakFrom: '18:00', breakTo: '18:30' },
+    { key: 'split',       label: 'Continuato', start: '08:00', end: '13:00 15:00 19:00', breakFrom: '13:00', breakTo: '15:00' },
+    { key: 'serale',      label: 'Serale', start: '17:00', end: '24:00', breakFrom: '20:00', breakTo: '20:30' },
+  ];
+
+  // Stato temporaneo dell'editor custom (per select orari senza riferimenti template fragili)
+  protected readonly plannerEditorTmp = signal<{ start: string; end: string; hasBreak: boolean; breakFrom: string; breakTo: string; }>({
+    start: '08:30', end: '17:00', hasBreak: true, breakFrom: '13:00', breakTo: '14:00'
+  });
+
+  // Stato temporaneo editor PERMESSO ORARIO (Task7)
+  protected readonly plannerPermitEditorTmp = signal<{ start: string; end: string; }>({
+    start: '09:00', end: '11:00',
+  });
+
+  // ========================================================================
+  // TASK 4: IMPOSTAZIONI · TABS ORIZZONTALI 7 CATEGORIE
+  // ========================================================================
+  protected readonly SETTINGS_TABS = [
+    { key: 'azienda',       label: 'Dati Azienda',      icon: '🏢' },
+    { key: 'dipendenti',    label: 'Dipendenti',        icon: '👥' },
+    { key: 'orari-negozio', label: 'Orari Negozio',     icon: '🏪' },
+    { key: 'listino',       label: 'Listino & Servizi', icon: '💰' },
+    { key: 'fiscale',       label: 'Fiscale',           icon: '🧾' },
+    { key: 'preferenze',    label: 'Preferenze',        icon: '⚙️' },
+    { key: 'privacy',       label: 'Privacy',           icon: '🔒' },
+  ] as const;
+  protected readonly activeSettingsTab: WritableSignal<string> = signal(
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('audiomax_settings_last_tab') : null) ?? 'azienda'
+  );
+  protected setActiveSettingsTab(key: string): void {
+    this.activeSettingsTab.set(key);
+    try { localStorage.setItem('audiomax_settings_last_tab', key); } catch (_) {}
+  }
+
+  // ========================================================================
+  // TASK 2: AGENDA PAGINA + DASHBOARD · MINI-MODALE HR ⚡ Operazioni Dipendenti
+  // ========================================================================
+  protected readonly miniHrModalOpen = signal(false);
+  protected readonly miniHrModalDate = signal<string>('');
+  protected readonly miniHrModalAction = signal<'appuntamento' | 'straordinario' | 'ferie' | 'malattia' | 'permesso'>('ferie');
+  protected readonly miniHrModalEmpName = signal<string>('');
+  protected readonly miniHrModalPermitStart = signal<string>('09:00');
+  protected readonly miniHrModalPermitEnd = signal<string>('11:00');
+  protected readonly miniHrModalNote = signal<string>('');
+
+  /** Apre il mini-modale ⚡ Operazioni Dipendenti per una data specifica. */
+  protected openMiniHrModal(isoDate: string, initialAction: 'straordinario' | 'ferie' | 'malattia' | 'permesso' | 'appuntamento' = 'ferie'): void {
+    if (initialAction === 'appuntamento') {
+      // shortcut → usa modale normale invece di mini-modale HR
+      this.openAppointmentModalForDate(isoDate);
+      return;
+    }
+    this.miniHrModalDate.set(isoDate);
+    this.miniHrModalAction.set(initialAction);
+    // default: primo operatore attivo (se esiste)
+    const firstOp = this.allCashOperators().find(o => o.active);
+    this.miniHrModalEmpName.set(firstOp?.name ?? '');
+    this.miniHrModalPermitStart.set('09:00');
+    this.miniHrModalPermitEnd.set('11:00');
+    this.miniHrModalNote.set('');
+    this.miniHrModalOpen.set(true);
+  }
+  protected closeMiniHrModal(): void { this.miniHrModalOpen.set(false); }
+
+  /** Helper calcolo minuti permesso orario per mini-modale HR (template non ammette Math). */
+  protected miniHrPermitMinutesCalc(): number {
+    const s = this.hhmmToMinutes(this.miniHrModalPermitStart());
+    const e = this.hhmmToMinutes(this.miniHrModalPermitEnd());
+    const m = e - s;
+    return m > 0 ? m : 0;
+  }
+
+  /** Salva l'azione scelta nel mini-modale HR → sync direct leaves + planner se applicabile. */
+  protected saveMiniHrAction(): void {
+    const empName = this.miniHrModalEmpName();
+    const iso = this.miniHrModalDate();
+    const action = this.miniHrModalAction();
+    if (!empName || !iso) {
+      this.pushToast('Seleziona dipendente e data.', 'error');
+      return;
+    }
+    const emp = this.allCashOperators().find(o => o.name === empName);
+    if (!emp) {
+      this.pushToast('Dipendente non trovato.', 'error');
+      return;
+    }
+    const leavesArr: any[] = Array.isArray((emp as any).leaves) ? [...(emp as any).leaves] : [];
+
+    if (action === 'straordinario') {
+      // Inserisce pattern [straordinario 08:30-17:00] nel planner del mese, se data presente.
+      const ok = this._injectPlannerExtraShiftByName(empName, iso, '08:30', '17:00', '13:00', '14:00');
+      this.pushToast(
+        ok ? `Turno straordinario inserito per ${empName} · ${iso}.`
+           : `Turno straordinario salvato in ${empName} (planner non aggiornato: data fuori mese corrente).`,
+        'success'
+      );
+    } else {
+      // azione: ferie | malattia | permesso
+      const hours = action === 'permesso'
+        ? Math.max(0, (this.hhmmToMinutes(this.miniHrModalPermitEnd()) - this.hhmmToMinutes(this.miniHrModalPermitStart())) / 60)
+        : 8;
+      const permitStart = action === 'permesso' ? this.hhmmToMinutes(this.miniHrModalPermitStart()) : null;
+      const permitEnd   = action === 'permesso' ? this.hhmmToMinutes(this.miniHrModalPermitEnd())   : null;
+      const note = this.miniHrModalNote().trim();
+      // Rimuovi entry leave duplicate per stessa data + tipo
+      const filtered = leavesArr.filter((l: any) =>
+        !(l.startDate === iso && l.type === action)
+      );
+      filtered.push({
+        id: `hr-quick-${action}-${iso}-${Date.now()}`,
+        type: action,
+        startDate: iso,
+        endDate: iso,
+        startTimeMinutes: permitStart,
+        endTimeMinutes: permitEnd,
+        hours: action === 'permesso' ? (hours > 0 && hours < 8 ? hours : null) : null,
+        reason: note || null,
+      } as any);
+      const payloadToSave: any = { ...(emp as any), leaves: filtered };
+      this.data.updateCashOperator(payloadToSave);
+      const actionLabel = action === 'ferie' ? 'Ferie' : action === 'malattia' ? 'Malattia' :
+                          (hours > 0 ? `Permesso ${hours}h` : 'Permesso');
+      this.pushToast(`${actionLabel} salvato per ${empName} · ${iso}.`, 'success');
+    }
+    this.closeMiniHrModal();
+  }
+
+  /** Inietta un turno extra (straordinario) nel planner del dipendente per la data data. */
+  private _injectPlannerExtraShiftByName(empName: string, isoDate: string, startHH: string, endHH: string, brkFrom: string, brkTo: string): boolean {
+    const emp = this.allCashOperators().find(o => o.name === empName);
+    if (!emp) return false;
+    const currentPatterns: string[][] = Array.isArray((emp as any).shiftPatterns) ? (emp as any).shiftPatterns : [];
+    // Copia profonda
+    const nextPatterns: string[][] = currentPatterns.map(week => week.map(cell => cell ?? ''));
+    if (!nextPatterns.length) {
+      nextPatterns.push(Array.from({ length: 7 }, () => '')); // 1 settimana vuota iniziale
+    }
+    // Trova weekIndex + dayKey per la data
+    const anchor = this.plannerMonthAnchor() || this.startOfMonthIso(isoDate);
+    const anchorDate = this.parseIsoDate(anchor);
+    const firstDay = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+    const firstWeekday = firstDay.getDay();
+    const mondayOffset = firstWeekday === 0 ? -6 : 1 - firstWeekday;
+    const firstMonday = new Date(firstDay);
+    firstMonday.setDate(firstDay.getDate() + mondayOffset);
+    const targetDate = this.parseIsoDate(isoDate);
+    const msPerDay = 86_400_000;
+    const daysDiff = Math.round((targetDate.getTime() - firstMonday.getTime()) / msPerDay);
+    if (daysDiff < 0 || daysDiff >= 7 * this.plannerMaxWeeks) {
+      return false; // fuori dalle settimane gestite → non si inietta
+    }
+    const weekIndex = Math.floor(daysDiff / 7);
+    const dayOffset = daysDiff % 7;
+    const keys: EmployeeShiftDayKey[] = ['lun', 'mar', 'mer', 'gio', 'ven', 'sab', 'dom'];
+    const dayKey = keys[dayOffset];
+    while (nextPatterns.length <= weekIndex) {
+      nextPatterns.push(Array.from({ length: 7 }, () => ''));
+    }
+    const cellText = `[straordinario ${startHH}-${endHH} (${brkFrom}-${brkTo})]`;
+    nextPatterns[weekIndex][keys.indexOf(dayKey)] = cellText;
+    const payloadToSave: any = { ...(emp as any), shiftPatterns: nextPatterns };
+    this.data.updateCashOperator(payloadToSave);
+    return true;
+  }
+
+  // Helper: calcola la data ISO di una cella planner (weekIndex + dayKey)
+  // Ritorna null se plannerMonthAnchor non è impostato
+  protected plannerIsoDateForCell(weekIndex: number, dayKey: EmployeeShiftDayKey): string | null {
+    const anchor = this.plannerMonthAnchor();
+    if (!anchor) return null;
+    const anchorDate = this.parseIsoDate(anchor);
+    const firstDay = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+    const firstWeekday = firstDay.getDay();
+    const mondayOffset = firstWeekday === 0 ? -6 : 1 - firstWeekday;
+    const firstMonday = new Date(firstDay);
+    firstMonday.setDate(firstDay.getDate() + mondayOffset);
+    const weekdayOrder: EmployeeShiftDayKey[] = ['lun', 'mar', 'mer', 'gio', 'ven', 'sab', 'dom'];
+    const offsetDays = weekIndex * 7 + weekdayOrder.indexOf(dayKey);
+    const cellDate = new Date(firstMonday);
+    cellDate.setDate(firstMonday.getDate() + offsetDays);
+    return this.toIsoDate(cellDate);
+  }
+
+  // Helper: indice slot 30min a partire da minuti (Math non accessibile nel template)
+  protected plannerSlotIndex(mins: number | null | undefined): number {
+    if (mins == null) return 0;
+    return Math.max(0, Math.min(this.planner30MinSlots.length - 1, Math.floor(mins / 30)));
+  }
+
+  // Applica il preset alla cella correntemente selezionata (dall'editor)
+  protected plannerApplyPresetToSelected(presetKey: string): void {
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyPreset(sel.employeeId, sel.weekIndex, sel.dayKey, presetKey);
+    const preset = this.plannerShiftPresets.find((p) => p.key === presetKey);
+    if (preset) {
+      this.plannerEditorTmp.set({ start: preset.start, end: preset.end === '13:00 15:00 19:00' ? '19:00' : preset.end, hasBreak: true, breakFrom: preset.breakFrom, breakTo: preset.breakTo });
+    }
+  }
+
+  // Quattro handler per i campi custom dell'editor: ognuno aggiorna plannerEditorTmp e salva subito sul record
+  protected plannerEditorSetStart(value: string): void {
+    const next = { ...this.plannerEditorTmp(), start: value };
+    this.plannerEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyCustom(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end, next.breakFrom, next.breakTo, next.hasBreak);
+  }
+  protected plannerEditorSetEnd(value: string): void {
+    const next = { ...this.plannerEditorTmp(), end: value };
+    this.plannerEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyCustom(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end, next.breakFrom, next.breakTo, next.hasBreak);
+  }
+  protected plannerEditorSetBreakToggle(checked: boolean): void {
+    const next = { ...this.plannerEditorTmp(), hasBreak: checked };
+    this.plannerEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyCustom(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end, next.breakFrom, next.breakTo, next.hasBreak);
+  }
+  protected plannerEditorSetBreakFrom(value: string): void {
+    const next = { ...this.plannerEditorTmp(), breakFrom: value, hasBreak: true };
+    this.plannerEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyCustom(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end, next.breakFrom, next.breakTo, next.hasBreak);
+  }
+  protected plannerEditorSetBreakTo(value: string): void {
+    const next = { ...this.plannerEditorTmp(), breakTo: value, hasBreak: true };
+    this.plannerEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyCustom(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end, next.breakFrom, next.breakTo, next.hasBreak);
+  }
+
+  // ══ Handler editor PERMESSO ORARIO (Task7) ══
+  protected plannerPermitEditorSetStart(value: string): void {
+    const next = { ...this.plannerPermitEditorTmp(), start: value };
+    this.plannerPermitEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyPermitHours(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end);
+  }
+  protected plannerPermitEditorSetEnd(value: string): void {
+    const next = { ...this.plannerPermitEditorTmp(), end: value };
+    this.plannerPermitEditorTmp.set(next);
+    const sel = this.plannerSelectedCell();
+    if (!sel) return;
+    this.plannerApplyPermitHours(sel.employeeId, sel.weekIndex, sel.dayKey, next.start, next.end);
+  }
+  // Calcola le ore e salva sul planner + sincronizza leave record
+  protected plannerApplyPermitHours(
+    employeeId: string,
+    weekIndex: number,
+    dayKey: EmployeeShiftDayKey,
+    startHHMM: string,
+    endHHMM: string,
+  ): void {
+    const startMin = this.hhmmToMinutes(startHHMM);
+    const endMin = this.hhmmToMinutes(endHHMM);
+    const hours = endMin > startMin ? Math.round(((endMin - startMin) / 60) * 10) / 10 : 0;
+    this.plannerSaveCell(employeeId, weekIndex, dayKey, {
+      tone: 'permesso',
+      startMinutes: null,
+      endMinutes: null,
+      breakStart: null,
+      breakEnd: null,
+      permitStartMinutes: startMin,
+      permitEndMinutes: endMin,
+      permitHours: hours,
+    });
+  }
+
+  // ══ Helper TEMPLATE per calcolare i minuti di un permesso (Task7: usato in HTML @let) ══
+  protected plannerPermitMinutesCalc(
+    currentStartMin: number | null | undefined,
+    currentEndMin: number | null | undefined,
+    tmpStart: string,
+    tmpEnd: string,
+  ): number {
+    if (currentStartMin != null && currentEndMin != null && currentEndMin > currentStartMin) {
+      return currentEndMin - currentStartMin;
+    }
+    if (tmpStart && tmpEnd) {
+      const s = this.hhmmToMinutes(tmpStart);
+      const e = this.hhmmToMinutes(tmpEnd);
+      return e > s ? e - s : 0;
+    }
+    return 0;
+  }
+
+  protected readonly plannerTotalWeeks = computed(() => {
+    const operators = this.allCashOperators();
+    if (!operators.length) return Math.max(this.plannerShiftWeeksFromAnchor().length, 1);
+    let maxLen = 1;
+    for (const op of operators) {
+      if (op.shiftPatterns?.length > maxLen) maxLen = op.shiftPatterns.length;
+    }
+    return Math.max(1, Math.min(this.plannerMaxWeeks, maxLen));
+  });
+
+  protected plannerShiftWeeksFromAnchor(): { label: string; index: number; startDate?: string }[] {
+    const weeks: { label: string; index: number; startDate?: string }[] = [];
+    const total = Math.max(1, this.plannerTotalWeeks());
+    for (let i = 0; i < total; i++) {
+      weeks.push({
+        label: `Settimana ${i + 1}`,
+        index: i,
+        startDate: undefined,
+      });
+    }
+    // Se è impostata la data di inizio mese calcola il lunedì
+    // della prima settimana e poi tutte le settimane seguenti.
+    if (this.plannerMonthAnchor()) {
+      const anchor = this.parseIsoDate(this.plannerMonthAnchor());
+      const firstDay = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+      const firstWeekday = firstDay.getDay();
+      const mondayOffset = firstWeekday === 0 ? -6 : 1 - firstWeekday;
+      const firstMonday = new Date(firstDay);
+      firstMonday.setDate(firstDay.getDate() + mondayOffset);
+      for (let i = 0; i < weeks.length; i++) {
+        const monday = new Date(firstMonday);
+        monday.setDate(firstMonday.getDate() + i * 7);
+        weeks[i].startDate = `${monday.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}`;
+      }
+    }
+    return weeks;
+  }
+
+  private hhmmToMinutes(hhmm: string): number {
+    const [h, m] = hhmm.split(':').map((part) => Number(part));
+    if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+    return Math.max(0, Math.min(24 * 60, h * 60 + m));
+  }
+
+  private minutesToHHMM(totalMinutes: number | null): string {
+    if (totalMinutes == null) return '';
+    const clamped = Math.max(0, Math.min(24 * 60, Math.round(totalMinutes / 30) * 30));
+    return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+  }
+
+  private plannerEmptyWeek(): Record<EmployeeShiftDayKey, string> {
+    return { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' };
+  }
+
+  // Parsa il testo shift già salvato nel pattern in una PlannerShiftCell
+  // per renderizzare badge e orari in griglia.
+  protected plannerParseCell(employee: CashOperatorRecord, weekIndex: number, dayKey: EmployeeShiftDayKey): PlannerShiftCell {
+    const patterns = employee.shiftPatterns ?? [];
+    const pattern = patterns[weekIndex] ?? this.plannerEmptyWeek();
+    const raw = (pattern[dayKey] ?? '').trim();
+    const cell: PlannerShiftCell = {
+      tone: 'standard',
+      startMinutes: null,
+      endMinutes: null,
+      breakStart: null,
+      breakEnd: null,
+      permitStartMinutes: null,
+      permitEndMinutes: null,
+      permitHours: null,
+    };
+    if (!raw) return cell;
+    const toneMatch = raw.match(/^\[(ferie|permesso|malattia|riposo)\]\s*(.*)$/i);
+    if (toneMatch) {
+      const tone = toneMatch[1].toLowerCase() as PlannerLeaveTone;
+      cell.tone = tone;
+      // Task7: Parser permesso orario formato: [permesso 09:00-11:00]
+      if (tone === 'permesso') {
+        const timePart = (toneMatch[2] ?? '').trim();
+        const rangeMatch = timePart.match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+        if (rangeMatch) {
+          const sMin = this.hhmmToMinutes(rangeMatch[1]);
+          const eMin = this.hhmmToMinutes(rangeMatch[2]);
+          cell.permitStartMinutes = sMin;
+          cell.permitEndMinutes = eMin;
+          cell.permitHours = eMin > sMin ? Math.round(((eMin - sMin) / 60) * 10) / 10 : 0;
+        }
+      }
+      return cell;
+    }
+    const parsed = this.parseShiftText(raw);
+    if (!parsed.startHour || !parsed.endHour) {
+      // Testo custom non riconosciuto come turno strutturato:
+      // restituisco standard con valori null per fallback.
+      return cell;
+    }
+    cell.startMinutes = Number(parsed.startHour) * 60 + Number(parsed.startMinute);
+    cell.endMinutes = Number(parsed.endHour) * 60 + Number(parsed.endMinute);
+    if (parsed.hasBreak && parsed.breakFromHour && parsed.breakToHour) {
+      cell.breakStart = Number(parsed.breakFromHour) * 60 + Number(parsed.breakFromMinute);
+      cell.breakEnd = Number(parsed.breakToHour) * 60 + Number(parsed.breakToMinute);
+    }
+    return cell;
+  }
+
+  // Salvataggio di una cella nel corrispondente shiftPatterns[weekIndex][dayKey]
+  private plannerSaveCell(employeeId: string, weekIndex: number, dayKey: EmployeeShiftDayKey, next: PlannerShiftCell): void {
+    const employee = this.allCashOperators().find((op) => op.id === employeeId);
+    if (!employee) return;
+    const currentPatterns = [...(employee.shiftPatterns ?? [])];
+    while (currentPatterns.length <= weekIndex) {
+      currentPatterns.push(this.plannerEmptyWeek());
+    }
+    let serialized = '';
+    if (next.tone !== 'standard') {
+      // Task7: serializza permesso orario se presente [permesso 09:00-11:00]
+      if (next.tone === 'permesso' && next.permitStartMinutes != null && next.permitEndMinutes != null && (next.permitHours ?? 0) > 0) {
+        const sHhmm = this.minutesToHHMM(next.permitStartMinutes);
+        const eHhmm = this.minutesToHHMM(next.permitEndMinutes);
+        serialized = `[${next.tone} ${sHhmm}-${eHhmm}]`;
+      } else {
+        serialized = `[${next.tone}]`;
+      }
+    } else if (next.startMinutes != null && next.endMinutes != null) {
+      const draft: EmployeeShiftDraft = {
+        ...this.emptyEmployeeShiftDraft(),
+        startHour: String(Math.floor(next.startMinutes / 60)).padStart(2, '0'),
+        startMinute: String(next.startMinutes % 60).padStart(2, '0'),
+        endHour: String(Math.floor(next.endMinutes / 60)).padStart(2, '0'),
+        endMinute: String(next.endMinutes % 60).padStart(2, '0'),
+        hasBreak: next.breakStart != null && next.breakEnd != null,
+        breakFromHour: next.breakStart != null ? String(Math.floor(next.breakStart / 60)).padStart(2, '0') : '00',
+        breakFromMinute: next.breakStart != null ? String(next.breakStart % 60).padStart(2, '0') : '00',
+        breakToHour: next.breakEnd != null ? String(Math.floor(next.breakEnd / 60)).padStart(2, '0') : '00',
+        breakToMinute: next.breakEnd != null ? String(next.breakEnd % 60).padStart(2, '0') : '00',
+      };
+      serialized = this.formatShiftDraft(draft);
+    }
+    const weekPattern = { ...currentPatterns[weekIndex] };
+    weekPattern[dayKey] = serialized;
+    currentPatterns[weekIndex] = weekPattern;
+
+    // Task7: Sincronizza con employee.leaves (source of truth per report/agenda)
+    const iso = this.plannerIsoDateForCell(weekIndex, dayKey);
+    let updatedLeaves = [...((employee as any).leaves ?? [])];
+    if (iso) {
+      // Rimuovi eventuali leave di questo dipendente per questa data (ri-sincronizza)
+      updatedLeaves = updatedLeaves.filter((l: any) => !(l.startDate <= iso && iso <= (l.endDate || l.startDate) && (l.type === next.tone || (l.type === 'ferie' || l.type === 'malattia' || l.type === 'permesso'))));
+      if (next.tone === 'ferie' || next.tone === 'malattia' || next.tone === 'permesso') {
+        const newLeave: any = {
+          id: `${employeeId}-${iso}-${next.tone}-${Date.now()}`,
+          employeeId: employeeId,
+          employeeName: employee.name,
+          type: next.tone,
+          startDate: iso,
+          endDate: iso,
+          visibleStart: iso,
+          visibleEnd: iso,
+          startTimeMinutes: next.permitStartMinutes ?? null,
+          endTimeMinutes: next.permitEndMinutes ?? null,
+          hours: next.permitHours ?? null,
+          note: next.tone === 'permesso' && (next.permitHours ?? 0) > 0 ? `Permesso ${this.minutesToHHMM(next.permitStartMinutes!)}-${this.minutesToHHMM(next.permitEndMinutes!)} (${next.permitHours}h)` : '',
+        };
+        updatedLeaves.push(newLeave);
+      }
+    }
+
+    const payloadToSave: any = {
+      ...(employee as any),
+      shiftPatterns: currentPatterns,
+      leaves: updatedLeaves,
+    };
+    this.data.updateCashOperator(payloadToSave);
+  }
+
+  protected plannerSetCellTone(
+    employeeId: string,
+    weekIndex: number,
+    dayKey: EmployeeShiftDayKey,
+    tone: PlannerLeaveTone,
+  ): void {
+    const employee = this.allCashOperators().find((op) => op.id === employeeId);
+    if (!employee) return;
+    if (tone === 'standard') {
+      // Ripristino il turno precedente del pattern
+      const preset = this.plannerShiftPresets[0];
+      const base: PlannerShiftCell = {
+        tone: 'standard',
+        startMinutes: this.hhmmToMinutes(preset.start),
+        endMinutes: this.hhmmToMinutes(preset.end),
+        breakStart: this.hhmmToMinutes(preset.breakFrom),
+        breakEnd: this.hhmmToMinutes(preset.breakTo),
+      };
+      this.plannerSaveCell(employeeId, weekIndex, dayKey, base);
+      return;
+    }
+    this.plannerSaveCell(employeeId, weekIndex, dayKey, {
+      tone,
+      startMinutes: null,
+      endMinutes: null,
+      breakStart: null,
+      breakEnd: null,
+    });
+  }
+
+  protected plannerApplyPreset(
+    employeeId: string,
+    weekIndex: number,
+    dayKey: EmployeeShiftDayKey,
+    presetKey: string,
+  ): void {
+    const preset = this.plannerShiftPresets.find((item) => item.key === presetKey);
+    if (!preset) return;
+    this.plannerSaveCell(employeeId, weekIndex, dayKey, {
+      tone: 'standard',
+      startMinutes: this.hhmmToMinutes(preset.start),
+      endMinutes: this.hhmmToMinutes(preset.end),
+      breakStart: this.hhmmToMinutes(preset.breakFrom),
+      breakEnd: this.hhmmToMinutes(preset.breakTo),
+    });
+  }
+
+  protected plannerApplyCustom(
+    employeeId: string,
+    weekIndex: number,
+    dayKey: EmployeeShiftDayKey,
+    startHHMM: string,
+    endHHMM: string,
+    breakFromHHMM: string,
+    breakToHHMM: string,
+    hasBreak: boolean,
+  ): void {
+    this.plannerSaveCell(employeeId, weekIndex, dayKey, {
+      tone: 'standard',
+      startMinutes: startHHMM ? this.hhmmToMinutes(startHHMM) : null,
+      endMinutes: endHHMM ? this.hhmmToMinutes(endHHMM) : null,
+      breakStart: hasBreak && breakFromHHMM ? this.hhmmToMinutes(breakFromHHMM) : null,
+      breakEnd: hasBreak && breakToHHMM ? this.hhmmToMinutes(breakToHHMM) : null,
+    });
+  }
+
+  protected plannerClearCell(employeeId: string, weekIndex: number, dayKey: EmployeeShiftDayKey): void {
+    const employee = this.allCashOperators().find((op) => op.id === employeeId);
+    if (!employee) return;
+    const currentPatterns = [...(employee.shiftPatterns ?? [])];
+    while (currentPatterns.length <= weekIndex) {
+      currentPatterns.push(this.plannerEmptyWeek());
+    }
+    currentPatterns[weekIndex] = { ...currentPatterns[weekIndex], [dayKey]: '' };
+    this.data.updateCashOperator({ ...employee, shiftPatterns: currentPatterns });
+  }
+
+  protected plannerFormatCell(cell: PlannerShiftCell): string {
+    if (cell.tone !== 'standard') {
+      return this.plannerLeaveTones.find((item) => item.tone === cell.tone)?.label ?? '';
+    }
+    if (cell.startMinutes == null || cell.endMinutes == null) return '';
+    let out = `${this.minutesToHHMM(cell.startMinutes)}–${this.minutesToHHMM(cell.endMinutes)}`;
+    if (cell.breakStart != null && cell.breakEnd != null) {
+      out += ` · 🥪 ${this.minutesToHHMM(cell.breakStart)}–${this.minutesToHHMM(cell.breakEnd)}`;
+    }
+    return out;
+  }
+
+  protected plannerCellToneClass(cell: PlannerShiftCell): string {
+    switch (cell.tone) {
+      case 'ferie':    return 'tone-ferie';
+      case 'permesso': return 'tone-permesso';
+      case 'malattia': return 'tone-malattia';
+      case 'riposo':   return 'tone-riposo';
+      default:
+        if (cell.startMinutes != null && cell.endMinutes != null) return 'tone-standard';
+        return 'tone-empty';
+    }
+  }
+
+  protected plannerWeekToneLabel(cell: PlannerShiftCell): string {
+    if (cell.tone !== 'standard') return this.plannerLeaveTones.find((t) => t.tone === cell.tone)?.label ?? '';
+    if (cell.startMinutes != null && cell.endMinutes != null) return 'Turno';
+    return 'Vuoto';
+  }
+
+  // ─── Gestione multi-settimana ───
+  protected plannerAddWeek(): void {
+    const currentTotal = this.plannerTotalWeeks();
+    if (currentTotal >= this.plannerMaxWeeks) return;
+    for (const op of this.allCashOperators()) {
+      const patterns = [...(op.shiftPatterns ?? [])];
+      while (patterns.length <= currentTotal) {
+        // Prova ad usare i turni standard del profilo del dipendente, se popolati
+        const defaults = op.defaultWeeklyShift;
+        const hasDefaults =
+          defaults &&
+          Object.values(defaults).some((v) => typeof v === 'string' && v.trim().length > 0);
+        patterns.push(hasDefaults ? { ...defaults } : this.plannerEmptyWeek());
+      }
+      this.data.updateCashOperator({ ...op, shiftPatterns: patterns });
+    }
+    this.plannerActiveWeekIndex.set(currentTotal);
+    this.pushToast('Nuova settimana aggiunta (turni standard applicati se configurati)', 'success');
+  }
+
+  protected plannerRemoveWeek(index: number): void {
+    if (index <= 0) return; // la settimana 1 non si cancella
+    for (const op of this.allCashOperators()) {
+      const patterns = [...(op.shiftPatterns ?? [])];
+      if (patterns.length <= index) continue;
+      patterns.splice(index, 1);
+      this.data.updateCashOperator({ ...op, shiftPatterns: patterns });
+    }
+    this.plannerActiveWeekIndex.update((current) => (current >= index ? index - 1 : current));
+  }
+
+  protected plannerCopyFromPreviousWeek(targetWeekIndex: number): void {
+    if (targetWeekIndex <= 0) return;
+    const sourceIndex = targetWeekIndex - 1;
+    for (const op of this.allCashOperators()) {
+      const patterns = [...(op.shiftPatterns ?? [])];
+      while (patterns.length <= targetWeekIndex) patterns.push(this.plannerEmptyWeek());
+      patterns[targetWeekIndex] = { ...(patterns[sourceIndex] ?? this.plannerEmptyWeek()) };
+      this.data.updateCashOperator({ ...op, shiftPatterns: patterns });
+    }
+  }
+
+  protected plannerApplyMonthAnchor(value: string): void {
+    this.plannerMonthAnchor.set(value);
+  }
+
+  protected plannerTotalMinutesForCell(cell: PlannerShiftCell): number {
+    if (cell.tone !== 'standard') return 0;
+    if (cell.startMinutes == null || cell.endMinutes == null) return 0;
+    let work = cell.endMinutes - cell.startMinutes;
+    if (cell.breakStart != null && cell.breakEnd != null) {
+      work -= Math.max(0, cell.breakEnd - cell.breakStart);
+    }
+    return Math.max(0, work);
+  }
+
+  // helper per etichetta badge ore nella cella
+  protected plannerHoursBadge(cell: PlannerShiftCell): string {
+    const mins = this.plannerTotalMinutesForCell(cell);
+    if (!mins) return '';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h${m}m` : `${h}h`;
+  }
+
+  // ─── Utility per i controlli rapidi (step 30min)
+  protected plannerPrevSlot(hhmm: string): string {
+    if (!hhmm) return '09:00';
+    let total = this.hhmmToMinutes(hhmm) - 30;
+    if (total < 0) total = 0;
+    return this.minutesToHHMM(total);
+  }
+  protected plannerNextSlot(hhmm: string): string {
+    if (!hhmm) return '09:00';
+    let total = this.hhmmToMinutes(hhmm) + 30;
+    if (total > 24 * 60) total = 24 * 60;
+    return this.minutesToHHMM(total);
+  }
   protected readonly employeeLeaveForm = this.formBuilder.group({
     employeeId: ['', Validators.required],
     leaveType: ['ferie' as EmployeeLeaveRecord['leaveType'], Validators.required],
@@ -4160,6 +5221,32 @@ export class SectionPageComponent {
       this.employeeScheduleMonth.set(this.startOfMonthIso(this.toIsoDate(new Date())));
       this.syncAutomaticEmployeeAttendanceForVisibleRange();
     });
+
+    // All'apertura di una cella nel planner turni, popola i campi custom editor
+    // con i valori correnti della cella (se già compilata)
+    effect(() => {
+      const sel = this.plannerSelectedCell();
+      if (!sel) return;
+      const employee = this.allCashOperators().find((op) => op.id === sel.employeeId);
+      if (!employee) return;
+      const cell = this.plannerParseCell(employee, sel.weekIndex, sel.dayKey);
+      if (cell.tone === 'standard' && cell.startMinutes != null && cell.endMinutes != null) {
+        const start = this.planner30MinSlots[this.plannerSlotIndex(cell.startMinutes)] ?? '08:30';
+        const end = this.planner30MinSlots[this.plannerSlotIndex(cell.endMinutes)] ?? '17:00';
+        const hasBreak = cell.breakStart != null && cell.breakEnd != null;
+        const breakFrom = hasBreak && cell.breakStart != null ? (this.planner30MinSlots[this.plannerSlotIndex(cell.breakStart)] ?? '13:00') : '13:00';
+        const breakTo = hasBreak && cell.breakEnd != null ? (this.planner30MinSlots[this.plannerSlotIndex(cell.breakEnd)] ?? '14:00') : '14:00';
+        this.plannerEditorTmp.set({ start, end, hasBreak, breakFrom, breakTo });
+      } else {
+        // Per Ferie/Permesso/Malattia/Riposo metto default comodo
+        this.plannerEditorTmp.set({ start: '08:30', end: '17:00', hasBreak: true, breakFrom: '13:00', breakTo: '14:00' });
+      }
+    });
+
+    // Promemoria paghe 1° del mese (dopo init asincrono)
+    setTimeout(() => {
+      this.checkPagheReminderOnStartup();
+    }, 400);
   }
 
   protected updatePrivacyBaseUrlOverride(event: Event): void {
@@ -4451,10 +5538,47 @@ export class SectionPageComponent {
     this.quoteModalOpen.set(false);
   }
 
+  /** Verifica se serve conferma override per salvataggio appuntamento (negozio chiuso o tecnici in riposo). */
+  protected _appointmentNeedsOverride(): { required: boolean; motivi: string[] } {
+    const motivi: string[] = [];
+    const d = this._appointmentDateOrNull();
+    if (d) {
+      const s = this.storeOpenStatusForDate(d);
+      if (s.kind === 'closed-weekly' || s.kind === 'bulk-closure') {
+        motivi.push(s.kind === 'bulk-closure' ? `Chiusura collettiva ${s.from}→${s.to} (${s.reason})` : `Negozio chiuso · ${s.dayLabel}`);
+      }
+    }
+    for (const op of this.selectedAppointmentOperators()) {
+      const st = this.getAppointmentOperatorStatus(op);
+      if (st.level === 1) motivi.push(`${op}: 🔒 NEGOZIO CHIUSO`);
+      if (st.level === 4) motivi.push(`${op}: 💤 Riposo (nessun turno)`);
+    }
+    // deduplica motivi
+    const dedup = Array.from(new Set(motivi));
+    return { required: dedup.length > 0, motivi: dedup };
+  }
+
   protected addAppointment(): void {
     if (this.appointmentForm.invalid) {
       this.appointmentForm.markAllAsTouched();
       return;
+    }
+
+    // ===== GUARD OVERRIDE (negozio chiuso o riposo tecnico) =====
+    const ov = this._appointmentNeedsOverride();
+    if (ov.required) {
+      const msg = [
+        '⚠️ STAI SALVANDO UN APPUNTAMENTO SPECIALE (OVERRIDE).',
+        'Motivo/i:',
+        ...ov.motivi.map((m) => '  · ' + m),
+        '',
+        'Confermi forzatamente il salvataggio?',
+      ].join('\n');
+      const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+      if (!ok) {
+        this.pushToast('Salvataggio annullato · appuntamento NON salvato.', 'success');
+        return;
+      }
     }
 
     const payload = this.appointmentForm.getRawValue();
@@ -4494,6 +5618,27 @@ export class SectionPageComponent {
       return;
     }
 
+    // ===== CONFERMA OBBLIGATORIA QUANDO SI SALVA UNA MODIFICA (non un nuovo inserimento) =====
+    // L'utente vuole protezione su "Salva modifica" per evitare di sovrascrivere dati dell'anagrafica per sbaglio.
+    if (this.editingInventoryId()) {
+      const target = this.allInventoryItems().find((item) => item.id === this.editingInventoryId());
+      const nameLabel = target?.name ?? normalizedPayload.name;
+      const msg = [
+        '⚠️ SALVATAGGIO MODIFICHE PRODOTTO.',
+        '',
+        `Applica definitivamente le modifiche a "${nameLabel}"?`,
+        '',
+        'Tutti i campi anagrafici (SKU, barcode, prezzi, scorta, fornitore, collocazione, ecc.) verranno aggiornati.',
+        '',
+        'Confermi?',
+      ].join('\n');
+      const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+      if (!ok) {
+        this.pushToast('Salvataggio annullato · modifiche NON applicate.', 'success');
+        return;
+      }
+    }
+
     if (this.editingInventoryId()) {
       this.data.updateInventoryItem({
         id: this.editingInventoryId()!,
@@ -4515,6 +5660,35 @@ export class SectionPageComponent {
     }
 
     const payload = this.warehouseReceiptForm.getRawValue();
+
+    // ===== CONFERMA OBBLIGATORIA CARICO / RICARICA MAGAZZINO =====
+    // Scrive un movimento permanente, i lotti e una eventuale spesa:
+    // chiediamo conferma per evitare carichi sbagliati (es. quantità sbagliate, costo sbagliato).
+    const isRestock = !!payload.inventoryItemId;
+    const baseTarget = this.allInventoryItems().find((item) => item.id === payload.inventoryItemId);
+    const productLabel = isRestock
+      ? `Ricarica ${baseTarget?.name ?? 'prodotto'} · ${Number(payload.quantity) || 0} unità`
+      : `Nuovo prodotto: ${payload.name.trim() || '(senza nome)'} · q.ta ${Number(payload.quantity) || 0}`;
+    const costLabel = `Costo u. € ${(Number(payload.unitCost) || 0).toFixed(2)} · Totale: € ${(((Number(payload.unitCost) || 0) * (Number(payload.quantity) || 0)) + (Number(payload.transportCost) || 0) + (Number(payload.customsCost) || 0) + (Number(payload.packagingCost) || 0)).toFixed(2)}`;
+    const msg = [
+      '⚠️ CARICO MAGAZZINO DEFINITIVO.',
+      '',
+      productLabel,
+      costLabel,
+      payload.supplier ? `Fornitore: ${payload.supplier}` : '',
+      payload.purchaseDocumentNumber ? `Doc.: ${payload.purchaseDocumentNumber}` : '',
+      this.isWarehouseExpenseMode() ? 'Modalità: registra anche come spesa di acquisto.' : '',
+      '',
+      'Verranno creati uno o più movimenti, i lotti e (se attivo) la registrazione contabile di spesa.',
+      '',
+      'Confermi il salvataggio?',
+    ].filter(Boolean).join('\n');
+    const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+    if (!ok) {
+      this.pushToast('Carico annullato · nessun movimento scritto.', 'success');
+      return;
+    }
+
     let resolvedCategory = payload.category.trim();
     if (resolvedCategory === '__new__') {
       const fresh = (payload.newCategory ?? '').trim();
@@ -4611,6 +5785,31 @@ export class SectionPageComponent {
     }
 
     const payload = this.warehouseAdjustmentForm.getRawValue();
+
+    // ===== CONFERMA OBBLIGATORIA RETTIFICA GIACENZA =====
+    // Modificare la quantità reale scrive un movimento permanente nel registro:
+    // chiediamo conferma all'utente per evitare rettifiche sbagliate (es. inventario errato).
+    const target = this.allInventoryItems().find((item) => item.id === payload.inventoryItemId);
+    const itemLabel = target ? `${target.name} · attuali ${target.stock}` : 'questo articolo';
+    const actualQty = Number(payload.actualQuantity) || 0;
+    const delta = target ? actualQty - target.stock : actualQty;
+    const deltaLabel = delta >= 0 ? `+${delta}` : `${delta}`;
+    const msg = [
+      '⚠️ RETTIFICA PERMANENTE GIACENZA.',
+      '',
+      `Imposta "${itemLabel}" a ${actualQty} unità (diff: ${deltaLabel}).`,
+      payload.reason ? `Causale dichiarata: ${payload.reason}` : '',
+      '',
+      'Questa operazione scrive un movimento nel registro e NON è reversibile senza una nuova rettifica.',
+      '',
+      'Confermi?',
+    ].filter(Boolean).join('\n');
+    const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+    if (!ok) {
+      this.pushToast('Rettifica annullata · giacenza NON modificata.', 'success');
+      return;
+    }
+
     this.data.adjustInventoryQuantity({
       inventoryItemId: payload.inventoryItemId,
       actualQuantity: Number(payload.actualQuantity) || 0,
@@ -4942,6 +6141,7 @@ export class SectionPageComponent {
         payload.employmentType === 'titolare' ? 0 : Math.max(0, Number(payload.contractHoursWeekly) || 40),
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: this.toIsoDate(new Date()),
+      defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
     });
 
     if (!this.cashOperators().length || this.cashCurrentOperator() === 'Banco') {
@@ -6294,18 +7494,26 @@ export class SectionPageComponent {
       return;
     }
 
+    const nuovoStato = !operator.active;
     this.data.updateCashOperator({
       ...operator,
-      active: !operator.active,
+      active: nuovoStato,
     });
 
-    if (this.cashCurrentOperator() === operator.name && operator.active) {
+    if (this.cashCurrentOperator() === operator.name && !nuovoStato) {
       const fallbackOperator = this.data
         .activeCashOperators()
         .find((item) => item.id !== operator.id)?.name;
 
       this.cashCurrentOperator.set(fallbackOperator ?? 'Banco');
     }
+
+    this.pushToast(
+      nuovoStato
+        ? `Dipendente ${operator.name} è nuovamente visibile`
+        : `Dipendente ${operator.name} nascosto (non eliminato — rimane nel gestionale per storico e fatturato)`,
+      'success',
+    );
   }
 
   protected removeCashOperator(id: string): void {
@@ -6331,18 +7539,21 @@ export class SectionPageComponent {
     this.selectedEmployeeId.set(id);
   }
 
-  protected openEmployeeModal(id: string): void {
+  protected openEmployeeModal(id: string, tab: 'anagrafica' | 'turni-standard' | 'turni-settimanali' = 'anagrafica'): void {
     this.selectEmployee(id);
     this.isCreatingEmployee.set(false);
+    this.employeeModalTab.set(tab);
 
     const employee = this.allCashOperators().find((item) => item.id === id);
     if (employee) {
       this.employeeDraft.set(JSON.parse(JSON.stringify(employee)));
       this.selectedShiftPatternIndex.set(0);
       this.employeeShiftDrafts.set(this.seedEmployeeShiftDrafts(employee, 0));
+      this.employeeDefaultShiftDrafts.set(this.seedEmployeeDefaultShiftDrafts(employee));
     } else {
       this.employeeDraft.set(null);
       this.employeeShiftDrafts.set(this.emptyEmployeeShiftDrafts());
+      this.employeeDefaultShiftDrafts.set(this.emptyEmployeeShiftDrafts());
     }
 
     this.employeeModalOpen.set(true);
@@ -6351,10 +7562,429 @@ export class SectionPageComponent {
   protected saveEmployeeModal(): void {
     const draft = this.employeeDraft();
     if (draft) {
-      this.data.updateCashOperator(draft);
+      // Prima di salvare, sincronizza qualsiasi default shift draft residuo nel record defaultWeeklyShift
+      const syncDefault = draft.defaultWeeklyShift ?? this.emptyWeeklyShiftRecord();
+      const newDefaults = { ...syncDefault };
+      const currentDrafts = this.employeeDefaultShiftDrafts();
+      for (const k of Object.keys(currentDrafts) as EmployeeShiftDayKey[]) {
+        const formatted = this.formatShiftDraft(currentDrafts[k]);
+        // Preserva i valori speciali [riposo] [chiusura] se presenti
+        const existing = syncDefault[k] ?? '';
+        if (/^\[(riposo|chiusura)\]\s*$/i.test(existing.trim())) {
+          newDefaults[k] = existing;
+        } else {
+          newDefaults[k] = formatted;
+        }
+      }
+      this.data.updateCashOperator({ ...draft, defaultWeeklyShift: newDefaults });
       this.pushToast('Modifiche salvate correttamente', 'success');
     }
     this.closeEmployeeModal();
+  }
+
+  // ═══ Helpers Turni Standard Settimanali (Profilo Dipendente) ═══
+  private emptyWeeklyShiftRecord(): Record<EmployeeShiftDayKey, string> {
+    return { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' };
+  }
+
+  protected seedEmployeeDefaultShiftDrafts(
+    employee: CashOperatorRecord,
+  ): Record<EmployeeShiftDayKey, EmployeeShiftDraft> {
+    const def = employee.defaultWeeklyShift ?? this.emptyWeeklyShiftRecord();
+    return {
+      lun: this.parseShiftText(def.lun),
+      mar: this.parseShiftText(def.mar),
+      mer: this.parseShiftText(def.mer),
+      gio: this.parseShiftText(def.gio),
+      ven: this.parseShiftText(def.ven),
+      sab: this.parseShiftText(def.sab),
+      dom: this.parseShiftText(def.dom),
+    };
+  }
+
+  protected persistEmployeeDefaultShiftDraft(day: EmployeeShiftDayKey, draft: EmployeeShiftDraft): void {
+    const employee = this.selectedEmployee();
+    if (!employee) return;
+    const nextDrafts = { ...this.employeeDefaultShiftDrafts(), [day]: draft };
+    this.employeeDefaultShiftDrafts.set(nextDrafts);
+
+    const formatted = this.formatShiftDraft(draft);
+    const currentDefaults = employee.defaultWeeklyShift ?? this.emptyWeeklyShiftRecord();
+    const updated = { ...currentDefaults, [day]: formatted };
+    this.employeeDraft.set({ ...employee, defaultWeeklyShift: updated });
+  }
+
+  protected updateDefaultShiftField(
+    day: EmployeeShiftDayKey,
+    field: keyof EmployeeShiftDraft,
+    value: string | boolean,
+  ): void {
+    const current = this.employeeDefaultShiftDrafts()[day];
+    const next: EmployeeShiftDraft = { ...current, [field]: value };
+    this.persistEmployeeDefaultShiftDraft(day, next);
+  }
+
+  protected setDefaultShiftDayTone(
+    day: EmployeeShiftDayKey,
+    tone: 'standard' | 'riposo' | 'chiusura',
+  ): void {
+    const employee = this.selectedEmployee();
+    if (!employee) return;
+    let value = '';
+    if (tone === 'riposo') value = '[riposo]';
+    if (tone === 'chiusura') value = '[chiusura]';
+    const currentDefaults = employee.defaultWeeklyShift ?? this.emptyWeeklyShiftRecord();
+    const updated = { ...currentDefaults, [day]: value };
+    this.employeeDraft.set({ ...employee, defaultWeeklyShift: updated });
+    const blank = this.emptyEmployeeShiftDraft();
+    this.employeeDefaultShiftDrafts.update((d) => ({ ...d, [day]: blank }));
+  }
+
+  protected getDefaultShiftDayTone(day: EmployeeShiftDayKey): 'standard' | 'riposo' | 'chiusura' {
+    const employee = this.selectedEmployee();
+    const raw = ((employee?.defaultWeeklyShift ?? this.emptyWeeklyShiftRecord())[day] ?? '').trim();
+    if (/^\[(riposo)\]\s*$/i.test(raw)) return 'riposo';
+    if (/^\[(chiusura)\]\s*$/i.test(raw)) return 'chiusura';
+    return 'standard';
+  }
+
+  protected applyDefaultShiftPreset(
+    presetKey: 'mattina' | 'pomeriggio' | 'continuato' | 'serale',
+    days: EmployeeShiftDayKey[] = ['lun', 'mar', 'mer', 'gio', 'ven'],
+  ): void {
+    const employee = this.selectedEmployee();
+    if (!employee) return;
+    // Mappa chiavi UI → chiavi interne plannerShiftPresets
+    const keyMap: Record<typeof presetKey, string> = {
+      mattina: 'mattutino',
+      pomeriggio: 'pomeridiano',
+      continuato: 'split',
+      serale: 'serale',
+    };
+    const preset = this.plannerShiftPresets.find((p) => p.key === keyMap[presetKey]);
+    if (!preset) return;
+    const currentDefaults = employee.defaultWeeklyShift ?? this.emptyWeeklyShiftRecord();
+    const updated = { ...currentDefaults };
+    const nextDrafts = { ...this.employeeDefaultShiftDrafts() };
+    // Calcola start/end minuti
+    let endForCalc = preset.end;
+    // Per lo split "Continuato" l'end è "13:00 15:00 19:00" → usiamo l'ultimo orario
+    if (/\s/.test(endForCalc)) {
+      const parts = endForCalc.split(/\s+/).filter(Boolean);
+      endForCalc = parts[parts.length - 1] ?? endForCalc;
+    }
+    const startMin = this.hhmmToMinutes(preset.start);
+    const endMin = this.hhmmToMinutes(endForCalc);
+    const hasBreak = !!(preset.breakFrom && preset.breakTo);
+    const breakFromMin = hasBreak ? this.hhmmToMinutes(preset.breakFrom) : 0;
+    const breakToMin = hasBreak ? this.hhmmToMinutes(preset.breakTo) : 0;
+    for (const day of days) {
+      const draft: EmployeeShiftDraft = {
+        ...this.emptyEmployeeShiftDraft(),
+        startHour: String(Math.floor(startMin / 60)).padStart(2, '0'),
+        startMinute: String(startMin % 60).padStart(2, '0'),
+        endHour: String(Math.floor(endMin / 60)).padStart(2, '0'),
+        endMinute: String(endMin % 60).padStart(2, '0'),
+        hasBreak,
+        breakFromHour: hasBreak ? String(Math.floor(breakFromMin / 60)).padStart(2, '0') : '00',
+        breakFromMinute: hasBreak ? String(breakFromMin % 60).padStart(2, '0') : '00',
+        breakToHour: hasBreak ? String(Math.floor(breakToMin / 60)).padStart(2, '0') : '00',
+        breakToMinute: hasBreak ? String(breakToMin % 60).padStart(2, '0') : '00',
+      };
+      nextDrafts[day] = draft;
+      updated[day] = this.formatShiftDraft(draft);
+    }
+    this.employeeDefaultShiftDrafts.set(nextDrafts);
+    this.employeeDraft.set({ ...employee, defaultWeeklyShift: updated });
+    this.pushToast(`Preset ${preset.label} applicato a ${days.length} giorni`, 'success');
+  }
+
+  // ═══ Esporta PDF (stampa browser) ═══
+  protected plannerExportPdf(): void {
+    // Attendiamo 50ms per permettere al browser di riapplicare stili prima del print
+    setTimeout(() => {
+      window.print();
+    }, 50);
+  }
+
+  // ═══ Gestione Promemoria Paghe 1° del mese ═══
+  private readonly PAGHE_REMINDER_KEY = 'audiomax_paghe_reminder_last_date';
+
+  protected checkPagheReminderOnStartup(): void {
+    try {
+      const oggi = new Date();
+      const giornoMese = oggi.getDate();
+      if (giornoMese !== 1) return;
+      const isoOggi = oggi.toISOString().slice(0, 7); // YYYY-MM
+      const lastShown = localStorage.getItem(this.PAGHE_REMINDER_KEY) ?? '';
+      if (lastShown === isoOggi) return; // già mostrato questo mese
+      localStorage.setItem(this.PAGHE_REMINDER_KEY, isoOggi);
+      this.pagheReminderOpen.set(true);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  protected acknowledgePagheReminder(): void {
+    this.pagheReminderOpen.set(false);
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  EXPORT PDF MENSILE · TABELLA UFFICIO PAGHE (31 giorni)
+  // ══════════════════════════════════════════════════════
+  // (interfaces: PagheGridCell, PagheGridRow, PagheNoteRow — definite FUORI dalla classe, prima di @Component)
+
+  // Date del calendario del mese/anno corrente selezionato:
+  protected readonly pagheDatesComputed = computed<{ iso: string; dayNum: number; dow: number }[]>(() => {
+    const m = this.pagheMese();
+    const a = this.pagheAnno();
+    const arr: { iso: string; dayNum: number; dow: number }[] = [];
+    const daysInMonth = new Date(a, m + 1, 0).getDate();
+    for (let d = 1; d <= 31; d++) {
+      if (d <= daysInMonth) {
+        const dt = new Date(a, m, d);
+        arr.push({ iso: this.toIsoDate(dt), dayNum: d, dow: dt.getDay() });
+      } else {
+        arr.push({ iso: '', dayNum: d, dow: -1 });
+      }
+    }
+    return arr;
+  });
+
+  protected readonly pagheExportGrid = computed<PagheGridRow[]>(() => {
+    const dates = this.pagheDatesComputed();
+    const ops = this.allCashOperators().filter(o => o.active);
+    const dowShort = ['D','L','M','M','G','V','S'];  // Sunday=0 → D
+    const risultato: PagheGridRow[] = [];
+    const noteTutte: PagheNoteRow[] = []; // temporaneo (riempito dopo in computed note)
+    for (const op of ops) {
+      let sommaLavoro = 0;
+      let sommaFerie = 0;
+      let sommaPermesso = 0;
+      let sommaMalattia = 0;
+      const cells: PagheGridCell[] = dates.map(d => {
+        if (d.dow === -1 || !d.iso) {
+          return { dayNumber: d.dayNum, isoDate: '', weekdayShort: '', isWeekend: false, display: '', kind: 'fuori', minutes: 0 };
+        }
+
+        // TASK 6: Valutazione chiusure negozio PRIMA di ogni altra logica
+        const storeStatus = this.storeOpenStatusForDate(d.iso);
+        // P0 = apertura straordinaria: niente si forza, comportamento resolver standard
+        // P1 = chiusura collettiva → FERIE (F) per TUTTI i dipendenti, sovrascrive qualsiasi altro valore
+        if (storeStatus.kind === 'bulk-closure') {
+          const minuti = 480; // 8h giornata standard contratto
+          sommaFerie += minuti;
+          return {
+            dayNumber: d.dayNum, isoDate: d.iso,
+            weekdayShort: dowShort[d.dow] ?? '',
+            isWeekend: d.dow === 0 || d.dow === 6,
+            display: 'F', kind: 'ferie', minutes: minuti,
+            note: `[Chiusura collettiva] ${storeStatus.reason} · ${storeStatus.from} → ${storeStatus.to}`
+          };
+        }
+
+        const dowShortTxt = dowShort[d.dow] ?? '';
+        const isWeekend = d.dow === 0 || d.dow === 6;
+        const att = this.resolveEmployeeAttendance(op, d.iso);
+        let kind: PagheGridCell['kind'] = 'vuoto';
+        let display = '·';
+        let minuti = 0;
+        if (att.isLeave) {
+          // Assenza gestita da leave record:
+          if (att.status === 'ferie') { kind = 'ferie'; display = 'F'; minuti = att.plannedMinutes > 0 ? att.plannedMinutes : (op.contractHoursWeekly ? (op.contractHoursWeekly*60/5) : 480); sommaFerie += minuti; }
+          else if (att.status === 'malattia') { kind = 'malattia'; display = 'M'; minuti = att.plannedMinutes > 0 ? att.plannedMinutes : (op.contractHoursWeekly ? (op.contractHoursWeekly*60/5) : 480); sommaMalattia += minuti; }
+          else if (att.status === 'permesso') {
+            kind = 'permesso';
+            // Task7: Permesso ORARIO - priorità a leaveHours, poi plannedMinutes
+            let hoursVal: number | null = null;
+            if (att.leaveHours != null && att.leaveHours > 0) hoursVal = att.leaveHours;
+            else if (att.plannedMinutes > 0) hoursVal = att.plannedMinutes / 60;
+            // Formato display: P intero giornata vs P(2h) orario parziale (< 8h)
+            if (hoursVal != null && hoursVal > 0 && hoursVal < 8) {
+              const isIntero = Math.round(hoursVal * 10) / 10 === Math.floor(hoursVal);
+              const strOre = isIntero ? String(Math.round(hoursVal)) : hoursVal.toFixed(1).replace('.', ',');
+              display = `P(${strOre}h)`;
+              minuti = Math.round(hoursVal * 60);
+            } else {
+              display = 'P';
+              minuti = hoursVal != null ? Math.round(hoursVal * 60) : 0;
+            }
+            sommaPermesso += minuti;
+          }
+          else { kind = 'vuoto'; display = '·'; }
+          if (att.note?.trim()) noteTutte.push({employeeName:op.name, assenzaPer: att.status==='ferie'?'Ferie': att.status==='malattia'?'Malattia':'Permesso', dal: d.iso, al: d.iso, oreN: (minuti/60).toFixed(1)});
+        } else if (att.status === 'lavorato' || att.status === 'programmato') {
+          const min = att.workedMinutes || att.plannedMinutes || 0;
+          if (min <= 0) {
+            // Non ha turno = riposo
+            kind = 'riposo'; display = 'R'; minuti = 0;
+          } else {
+            kind = 'lavorato';
+            sommaLavoro += min;
+            const ore = min / 60;
+            if (Math.round(ore * 2) / 2 === Math.floor(ore)) {
+              display = String(Math.round(ore));
+            } else {
+              display = ore.toFixed(1).replace('.',',');
+            }
+          }
+        } else if (att.status === 'ferie' || att.status === 'malattia' || att.status === 'permesso') {
+          // manual override → attendances
+          const mBase = att.plannedMinutes || 0;
+          minuti = mBase;
+          if (att.status === 'ferie') { kind='ferie'; display='F'; sommaFerie += minuti || 480; if(!minuti) minuti=480; }
+          else if (att.status === 'malattia') { kind='malattia'; display='M'; sommaMalattia += minuti || 480; if(!minuti) minuti=480; }
+          else {
+            kind='permesso';
+            // Task7: uniforma display permesso orario a P(Xh) per manual override
+            if (minuti > 0 && minuti < 480) {
+              const h = minuti / 60;
+              const isIntero = Math.round(h * 10) / 10 === Math.floor(h);
+              const strOre = isIntero ? String(Math.round(h)) : h.toFixed(1).replace('.', ',');
+              display = `P(${strOre}h)`;
+            } else {
+              display = minuti ? 'P' : 'P';
+            }
+            sommaPermesso += minuti;
+          }
+        }
+
+        // TASK 6 P2: Chiusura settimanale (Domenica, ecc.) → se nessuna assenza/ferie già assegnata, forza R (Riposo).
+        // Non sovrascrive F/P/M leave record (utente può voler indicare malattia in Domenica per forza)
+        if (storeStatus.kind === 'closed-weekly') {
+          if ((kind === 'vuoto' || (kind === 'riposo')) && minuti === 0) {
+            kind = 'riposo'; display = 'R'; minuti = 0;
+            const noteAuto = `[Negozio chiuso · ${storeStatus.dayLabel}]`;
+            const finalNote = att.note?.trim() ? `${att.note} · ${noteAuto}` : noteAuto;
+            return {
+              dayNumber: d.dayNum, isoDate: d.iso,
+              weekdayShort: dowShortTxt, isWeekend,
+              display, kind, minutes: minuti, note: finalNote
+            };
+          }
+        }
+
+        return {
+          dayNumber: d.dayNum,
+          isoDate: d.iso,
+          weekdayShort: dowShortTxt,
+          isWeekend,
+          display,
+          kind,
+          minutes: minuti,
+          note: att.note || ''
+        };
+      });
+      // Calcolo ore contratto + straordinari:
+      const workedHrs = Math.round(sommaLavoro / 60 * 10) / 10;
+      // Calcolo il monte ore contrattuale previsto per questo dipendente in questo mese:
+      // numero di "giorni lavorativi" = giorni non weekend dove il dipendente ha turni standard
+      let giorniLavAttesi = 0;
+      for (let d = 1; d <= 31; d++) {
+        const info = dates[d-1];
+        if (info.dow === -1) continue;
+        if (info.dow === 0 || info.dow === 6) continue; // ignore weekend per default
+        const stdShift = (op.defaultWeeklyShift ?? {})[['lun','mar','mer','gio','ven','sab','dom'][info.dow === 0 ? 6 : info.dow - 1] as keyof typeof op.defaultWeeklyShift] ?? '';
+        if (stdShift && !/^\[(riposo|chiusura)\]\s*$/i.test(stdShift)) {
+          giorniLavAttesi++;
+        } else if (info.dow >= 1 && info.dow <= 5) {
+          // Niente default shift → fallback: considera il giorno se esiste uno shift programmato
+          const prog = this.getShiftForDate(op, info.iso) ?? '';
+          if (prog && !/^\[(riposo|chiusura)\]\s*$/i.test(prog)) giorniLavAttesi++;
+        }
+      }
+      const hrsPerDay = op.contractHoursWeekly ? op.contractHoursWeekly / 5 : 8;
+      const contrHrs = Math.round(giorniLavAttesi * hrsPerDay * 10) / 10;
+      const overHrs = Math.max(0, Math.round((workedHrs - contrHrs) * 10) / 10);
+      risultato.push({
+        employeeId: op.id,
+        employeeName: op.name,
+        jobTitle: op.jobTitle,
+        cells,
+        workedMinutes: sommaLavoro,
+        leaveMinutes: { ferie: sommaFerie, permesso: sommaPermesso, malattia: sommaMalattia },
+        contractHoursWeekly: op.contractHoursWeekly,
+        contractHours: contrHrs,
+        workedHours: workedHrs,
+        overtimeHours: overHrs
+      });
+    }
+    return risultato;
+  });
+
+  // Tabella NOTE (ferie/permessi/malattie aggregati):
+  protected readonly pagheNoteList = computed<PagheNoteRow[]>(() => {
+    const res: PagheNoteRow[] = [];
+    const dates = this.pagheDatesComputed();
+    const ops = this.allCashOperators().filter(o => o.active);
+    for (const op of ops) {
+      // Raggruppa per (employee, tipo) → intervalli consecutivi
+      type K = { kind: 'ferie' | 'permesso' | 'malattia'; start: string; end: string; minutes: number };
+      const gruppi: K[] = [];
+      let corrente: K | null = null;
+      for (let d = 0; d < 31; d++) {
+        const info = dates[d];
+        if (!info.iso) { if (corrente) { res.push(this._pagheNota(op.name, corrente)); corrente = null; } continue; }
+        const att = this.resolveEmployeeAttendance(op, info.iso);
+        let kindCurr: 'ferie' | 'permesso' | 'malattia' | null = null;
+        if (att.status === 'ferie' || att.status === 'permesso' || att.status === 'malattia') kindCurr = att.status;
+        if (kindCurr) {
+          const minuti = att.plannedMinutes || (op.contractHoursWeekly ? op.contractHoursWeekly*12 : 480);
+          if (corrente && corrente.kind === kindCurr) {
+            corrente.end = info.iso;
+            corrente.minutes += minuti;
+          } else {
+            if (corrente) res.push(this._pagheNota(op.name, corrente));
+            corrente = { kind: kindCurr, start: info.iso, end: info.iso, minutes: minuti };
+          }
+        } else {
+          if (corrente) { res.push(this._pagheNota(op.name, corrente)); corrente = null; }
+        }
+      }
+      if (corrente) res.push(this._pagheNota(op.name, corrente));
+    }
+    return res;
+  });
+  private _pagheNota(name: string, g: { kind: 'ferie' | 'permesso' | 'malattia'; start: string; end: string; minutes: number }): PagheNoteRow {
+    const tipMap = { ferie: 'Ferie', permesso: 'Permesso', malattia: 'Malattia' } as const;
+    return { employeeName: name, assenzaPer: tipMap[g.kind], dal: g.start, al: g.end, oreN: (g.minutes / 60).toFixed(1).replace('.',',') + 'h' };
+  }
+
+  // Titolo da stampare: "Presenze · Mese di Settembre 2026"
+  protected readonly pagheTitolo = computed(() => {
+    return `Presenze dipendenti · ${this.pagheMesi[this.pagheMese()]} ${this.pagheAnno()}`;
+  });
+
+  protected onPagheMeseChange(e: Event): void {
+    const v = (e.target as HTMLSelectElement).value;
+    this.pagheMese.set(Number(v));
+  }
+  protected onPagheAnnoChange(e: Event): void {
+    const v = (e.target as HTMLSelectElement).value;
+    this.pagheAnno.set(Number(v));
+  }
+
+  protected pagheAnniRange(): number[] {
+    const y = new Date().getFullYear();
+    return [y - 2, y - 1, y, y + 1];
+  }
+
+  protected fmtNumOre(n: number): string {
+    if (!n || !isFinite(n)) return '0';
+    const rounded = Math.round(n * 10) / 10;
+    if (rounded === Math.floor(rounded)) return String(Math.round(rounded));
+    return rounded.toFixed(1).replace('.', ',');
+  }
+
+  protected plannerExportPdfPaghe(): void {
+    // Aggiungo classe al body per indicare al @media print di usare il layout PAGHE
+    document.body.classList.add('printing-paghe');
+    setTimeout(() => {
+      try { window.print(); } finally {
+        // rimuovi classe dopo un attimo (la preview stampa si è già scattata)
+        setTimeout(() => { document.body.classList.remove('printing-paghe'); }, 600);
+      }
+    }, 80);
   }
 
   protected toggleAnonymousQuote(event: Event): void {
@@ -6414,6 +8044,8 @@ export class SectionPageComponent {
     this.employeeModalOpen.set(false);
     this.isCreatingEmployee.set(false);
     this.employeeDraft.set(null);
+    this.employeeDefaultShiftDrafts.set(this.emptyEmployeeShiftDrafts());
+    this.employeeModalTab.set('anagrafica');
   }
 
   protected openCreateEmployeeModal(): void {
@@ -6421,8 +8053,13 @@ export class SectionPageComponent {
       active: true,
       employmentType: 'dipendente',
       role: 'vendita',
+      jobTitle: '',
+      contractHoursWeekly: 40,
+      name: '',
     });
     this.isCreatingEmployee.set(true);
+    this.employeeModalTab.set('anagrafica');
+    this.employeeDefaultShiftDrafts.set(this.emptyEmployeeShiftDrafts());
     this.employeeModalOpen.set(true);
   }
 
@@ -6607,6 +8244,21 @@ export class SectionPageComponent {
       breakFromMinute: hasBreak ? currentDraft.breakFromMinute : '',
       breakToHour: hasBreak ? currentDraft.breakToHour : '',
       breakToMinute: hasBreak ? currentDraft.breakToMinute : '',
+      unparsedText: '',
+    });
+  }
+
+  // Wrapper per toggle usabile da button-switch (senza input checkbox checked)
+  protected toggleEmployeeShiftBreakSwitch(day: EmployeeShiftDayKey): void {
+    const currentDraft = this.employeeShiftDraft(day);
+    const hasBreak = !currentDraft.hasBreak;
+    this.persistEmployeeShiftDraft(day, {
+      ...currentDraft,
+      hasBreak,
+      breakFromHour: hasBreak ? (currentDraft.breakFromHour || '13') : '',
+      breakFromMinute: hasBreak ? (currentDraft.breakFromMinute || '00') : '',
+      breakToHour: hasBreak ? (currentDraft.breakToHour || '14') : '',
+      breakToMinute: hasBreak ? (currentDraft.breakToMinute || '00') : '',
       unparsedText: '',
     });
   }
@@ -6952,12 +8604,17 @@ export class SectionPageComponent {
     }
 
     if (leave) {
+      // Task7: permesso orario parziale → popola leaveHours (e leave plannedMinutes)
+      const hours = (leave as any).hours ?? null;
+      const startMin = (leave as any).startTimeMinutes ?? null;
+      const endMin = (leave as any).endTimeMinutes ?? null;
+      const isPartialPermit = leave.leaveType === 'permesso' && hours != null && hours > 0 && hours < 8;
       return {
         employee,
         date,
         status: leave.leaveType,
-        plannedShift: '',
-        plannedMinutes: 0,
+        plannedShift: startMin != null && endMin != null && isPartialPermit ? `Permesso ${this.minutesToHHMM(startMin)}-${this.minutesToHHMM(endMin)}` : '',
+        plannedMinutes: isPartialPermit && hours != null ? Math.round(hours * 60) : 0,
         actualStartTime: '',
         actualEndTime: '',
         breakMinutes: 0,
@@ -6967,6 +8624,9 @@ export class SectionPageComponent {
         manualOverride: false,
         isLeave: true,
         isFuture: date >= today,
+        leaveHours: hours,
+        leaveStartTimeMinutes: startMin,
+        leaveEndTimeMinutes: endMin,
       };
     }
 
@@ -7031,6 +8691,10 @@ export class SectionPageComponent {
       case 'ferie':
         return 'F';
       case 'permesso':
+        // Task7: permesso orario parziale mostra P(2h) se 0<hours<8
+        if (entry.leaveHours != null && entry.leaveHours > 0 && entry.leaveHours < 8) {
+          return `P(${entry.leaveHours % 1 === 0 ? String(entry.leaveHours) : entry.leaveHours.toFixed(1)}h)`;
+        }
         return 'P';
       case 'malattia':
         return 'M';
@@ -8279,6 +9943,16 @@ export class SectionPageComponent {
   }
 
   protected editInventoryItem(id: string): void {
+    // ===== TOGGLE SELEZIONE: se il prodotto è già quello aperto, chiude il dettaglio =====
+    // L'utente vuole che cliccando due volte la stessa riga, il pannello si chiuda invece di rimanere fermo.
+    // Uso selectedInventoryId per decidere lo stato: se combacia, resetto sia selezione che eventuale editing in corso.
+    if (this.selectedInventoryId() === id) {
+      this.selectedInventoryId.set(null);
+      this.editingInventoryId.set(null);
+      this.resetInventoryForm();
+      return;
+    }
+
     const record = this.allInventoryItems().find((item) => item.id === id);
 
     if (!record) {
@@ -8305,6 +9979,25 @@ export class SectionPageComponent {
   }
 
   protected removeInventoryItem(id: string): void {
+    // ===== CONFERMA OBBLIGATORIA PRIMA DI ELIMINARE UN PRODOTTO =====
+    // L'utente ha chiesto popup di conferma sui tasti distruttivi per evitare cancellazioni per sbaglio.
+    const target = this.allInventoryItems().find((item) => item.id === id);
+    const label = target ? `${target.name}${target.barcode ? ' · ' + target.barcode : ''}` : 'questo prodotto';
+    const msg = [
+      '⚠️ ELIMINAZIONE PRODOTTO DEFINITIVA.',
+      '',
+      `Rimuovi "${label}" da magazzino?`,
+      '',
+      'Questa operazione NON è reversibile: movimenti, lotti e rettifiche collegate potrebbero perdere l\'aggancio all\'articolo.',
+      '',
+      'Confermi definitivamente?',
+    ].join('\n');
+    const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+    if (!ok) {
+      this.pushToast('Eliminazione annullata · prodotto NON rimosso.', 'success');
+      return;
+    }
+
     this.data.deleteInventoryItem(id);
 
     if (this.editingInventoryId() === id) {
@@ -9428,7 +11121,7 @@ export class SectionPageComponent {
     this.expenseSupplierFilter.set(target?.value ?? 'tutti');
   }
 
-  protected setExpenseView(view: 'registro' | 'scadenze' | 'fornitori' | 'audit'): void {
+  protected setExpenseView(view: 'registro' | 'scadenze' | 'fornitori' | 'audit' | 'statistiche'): void {
     this.expenseView.set(view);
   }
 
@@ -10758,5 +12451,236 @@ export class SectionPageComponent {
 
   private toDateTimeLocal(value: string): string {
     return value.length >= 16 ? value.slice(0, 16) : value;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GENERAZIONE BARCODE MAGAZZINO (EAN-13 standard) +
+  // ETICHETTA SCARICABILE (SVG vettoriale → PNG ad alta DPI)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Genera un EAN-13 valido (prefisso Italia 80 + 10 cifre + check digit)
+  // Utilizza parte casuale + parte dal timestamp per evitare collisioni
+  protected generateProductEan13(): string {
+    // Prefisso internazionale Italia + parte random + parte derivata da tempo ms
+    const prefix = '80';
+    const rnd = Math.floor(10000 + Math.random() * 89999).toString(); // 5 cifre
+    const timePart = (Date.now() % 100000).toString().padStart(5, '0');   // 5 cifre
+    const first12 = prefix + rnd + timePart;
+    return first12 + this.ean13CheckDigit(first12);
+  }
+
+  // Calcola check digit EAN-13 (algoritmo standard GS1)
+  private ean13CheckDigit(first12: string): string {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      const d = Number(first12[i]) || 0;
+      sum += (i % 2 === 0) ? d : d * 3;
+    }
+    const mod = sum % 10;
+    return mod === 0 ? '0' : String(10 - mod);
+  }
+
+  // Tabella di codifica EAN-13
+  // L (odd parity), G (even parity), R (inverso L)
+  private readonly EAN_L: string[] = [
+    '0001101', '0011001', '0010011', '0111101', '0100011',
+    '0110001', '0101111', '0111011', '0110111', '0001011',
+  ];
+  private readonly EAN_G: string[] = [
+    '0100111', '0110111', '0011011', '0100001', '0011101',
+    '0111001', '0000101', '0010001', '0001001', '0010111',
+  ];
+  private readonly EAN_R: string[] = this.EAN_L.map((p) =>
+    p.split('').map((b) => (b === '0' ? '1' : '0')).join(''),
+  );
+  private readonly EAN_PARITY: string[] = [
+    'LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG',
+    'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL',
+  ];
+
+  // Codifica EAN-13 in sequenza di bit (1 = nero, 0 = bianco)
+  private encodeEan13(ean13: string): string {
+    if (!ean13 || ean13.length !== 13 || !/^\d+$/.test(ean13)) {
+      // Fallback: usa Code128 minimal per stringhe non EAN (generato come semplice barcode 39)
+      return this.encodeFallbackBarcode(ean13 || '0000000000000');
+    }
+    const firstDigit = Number(ean13[0]);
+    const parityRow = this.EAN_PARITY[firstDigit] ?? 'LLLLLL';
+    const leftDigits = ean13.slice(1, 7);
+    const rightDigits = ean13.slice(7, 13);
+
+    const start = '101';
+    const sep = '01010';
+    const stop = '101';
+    let left = '';
+    for (let i = 0; i < 6; i++) {
+      const d = Number(leftDigits[i]);
+      const pattern = parityRow[i] === 'G' ? this.EAN_G[d] : this.EAN_L[d];
+      left += pattern;
+    }
+    let right = '';
+    for (let i = 0; i < 6; i++) {
+      const d = Number(rightDigits[i]);
+      right += this.EAN_R[d];
+    }
+    return start + left + sep + right + stop;
+  }
+
+  // Fallback encoder per stringhe non numeriche (pattern semplice 3 of 9 style)
+  private encodeFallbackBarcode(text: string): string {
+    const clean = text.slice(0, 20).toUpperCase();
+    let out = '1010'; // quiet start
+    for (const ch of clean) {
+      // Ogni carattere -> 5 barre larghe + 4 strette (pattern 9 moduli semplificato)
+      const val = ((ch.charCodeAt(0) * 13 + 7) % 511) + 512;
+      out += val.toString(2).padStart(10, '0') + '0';
+    }
+    out += '101';
+    return out;
+  }
+
+  // Genera SVG markup barcode EAN-13 con testo leggibile e spazio bianco (quiet zone)
+  // width/height in mm (per stampa), il modulo base è 1px di unità viewBox
+  protected renderBarcodeLabelSvg(
+    barcodeValue: string,
+    productLabel?: string,
+    opts?: { moduleWidthPx?: number; heightPx?: number; fontSizePx?: number },
+  ): { svg: string; widthPx: number; heightPx: number } {
+    const value = (barcodeValue || '').trim() || '0000000000000';
+    const mw = opts?.moduleWidthPx ?? 2;
+    const h = opts?.heightPx ?? 80;
+    const fontSize = opts?.fontSizePx ?? 11;
+    const bits = this.encodeEan13(value);
+    const totalModules = bits.length;
+    const paddingPx = 12; // quiet zone sx/dx
+    const labelExtra = productLabel ? fontSize + 10 : 0;
+    const textExtra = fontSize + 6;
+    const wPx = totalModules * mw + paddingPx * 2;
+    const hPx = h + paddingPx + labelExtra + textExtra;
+
+    // Costruisci path barre (per qualità vettoriale elevata)
+    const bars: string[] = [];
+    let x = paddingPx;
+    for (let i = 0; i < bits.length; i++) {
+      if (bits[i] === '1') {
+        bars.push(`M${x},${paddingPx + labelExtra}h${mw}v${h}h-${mw}z`);
+      }
+      x += mw;
+    }
+
+    const textY = paddingPx + labelExtra + h + fontSize + 2;
+    const centerX = wPx / 2;
+    const productName = (productLabel || '').trim();
+
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${wPx} ${hPx}" width="${wPx}px" height="${hPx}px" shape-rendering="crispEdges">
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  ${productName ? `<text x="${centerX}" y="${paddingPx + fontSize - 1}" font-family="'Helvetica Neue', Arial, sans-serif" font-size="${fontSize}" font-weight="700" text-anchor="middle" fill="#0f172a">${this.escapeXml(productName)}</text>` : ''}
+  <g fill="#0f172a">
+    <path d="${bars.join(' ')}"/>
+  </g>
+  <text x="${centerX}" y="${textY}" font-family="'Courier New', monospace" font-size="${fontSize}" font-weight="700" letter-spacing="1.2" text-anchor="middle" fill="#0f172a">${this.escapeXml(value)}</text>
+</svg>`;
+    return { svg, widthPx: wPx, heightPx: hPx };
+  }
+
+  private escapeXml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  // Scarica etichetta barcode come PNG ad alta risoluzione (6x) — scalabile senza perdita
+  // perché generato da sorgente SVG vettoriale con scale 6x. Scale 3x ≈ 300dpi per stampa A4
+  protected async downloadBarcodeLabelPng(
+    barcodeValue: string,
+    productLabel?: string,
+    scale = 6,
+  ): Promise<void> {
+    if (!barcodeValue) return;
+    const { svg, widthPx, heightPx } = this.renderBarcodeLabelSvg(barcodeValue, productLabel);
+    const outW = Math.round(widthPx * scale);
+    const outH = Math.round(heightPx * scale);
+
+    // 1. Crea Blob SVG
+    const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    try {
+      // 2. Carica immagine SVG in un HTMLImageElement
+      const img = await this.loadImageElement(url);
+      // 3. Disegna su canvas ad alta risoluzione (filtro none per bordi netti)
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D non disponibile');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0, outW, outH);
+      // 4. Esporta PNG e scarica
+      const safeName = (productLabel || barcodeValue)
+        .toLowerCase()
+        .replace(/[^a-z0-9\-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'barcode';
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return;
+          const dl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = dl;
+          a.download = `etichetta-${safeName}.png`;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(dl);
+          }, 150);
+        },
+        'image/png',
+        1.0,
+      );
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+  }
+
+  private loadImageElement(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img');
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  // Genera un nuovo barcode EAN-13 e lo scrive nel form ricevimento merce (campo barcode)
+  protected generateAndSetReceiptBarcode(): void {
+    const newBarcode = this.generateProductEan13();
+    this.warehouseReceiptForm.controls.barcode.patchValue(newBarcode, { emitEvent: true });
+  }
+
+  // Genera barcode per il prodotto selezionato nel dettaglio e lo salva in anagrafica
+  protected generateAndAssignBarcodeToSelectedInventory(): void {
+    const item = this.selectedInventoryItem();
+    if (!item) return;
+    const newBarcode = this.generateProductEan13();
+    // Salvataggio nel record (patch locale e poi persist code-side)
+    const updated: InventoryItemRecord = { ...item, barcode: newBarcode };
+    this.data.updateInventoryItem(updated);
+    // Aggiorna segnali derivati per garantire reattività immediata
+    this.allInventoryItems.update((list) =>
+      list.map((it) => (it.id === item.id ? updated : it)),
+    );
+  }
+
+  // Restituisce data URL SVG del barcode (per anteprima diretta nel DOM come <img>)
+  protected barcodeImgDataUrl(barcodeValue: string, productLabel?: string): string {
+    if (!barcodeValue) return '';
+    const { svg } = this.renderBarcodeLabelSvg(barcodeValue, productLabel);
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
   }
 }

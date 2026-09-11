@@ -2,27 +2,6 @@
 
 <section class="section-page" [class.pos-mode]="currentSection.id === 'cassa'" [class.agenda-mode]="currentSection.id === 'agenda'">
 
-  @if (currentSection.id !== 'cassa' && currentSection.id !== 'agenda' && currentSection.id !== 'servizi' && currentSection.id !== 'preventivi' && currentSection.id !== 'orari') {
-  <div class="page-header">
-    <div class="page-title-block">
-      <div class="page-title-row">
-        <span class="page-icon">{{ currentSection.icon }}</span>
-        <div>
-          <h1>{{ currentSection.label }}</h1>
-        </div>
-      </div>
-    </div>
-    <div class="page-actions">
-      <a routerLink="/dashboard" class="btn-ghost">Dashboard</a>
-      @if (currentSection.id === 'report') {
-        <button type="button" class="btn-primary" (click)="navigateToCash()">Torna in cassa</button>
-      } @else {
-        <span class="page-status-pill">{{ content().primaryAction }}</span>
-      }
-    </div>
-  </div>
-  }
-
   @if (currentSection.id === 'cassa') {
   <div class="pos-topbar">
     <div class="pos-topbar-left">
@@ -68,64 +47,27 @@
   </div>
   }
 
-  @if (currentSection.id !== 'cassa' && currentSection.id !== 'clienti' && currentSection.id !== 'agenda' && currentSection.id !== 'magazzino' && currentSection.id !== 'servizi' && currentSection.id !== 'preventivi' && currentSection.id !== 'orari') {
-  <div class="module-hero module-hero-compact">
-    <div class="module-hero-main op-card">
-      <div class="module-hero-head">
-        <span class="module-inline-chip">{{ content().owner }}</span>
-        <span class="module-inline-chip module-inline-chip-accent">{{ content().primaryAction }}</span>
-      </div>
-      <div class="module-metrics">
-        @for (metric of content().metrics; track metric.label) {
-          <div class="module-metric-card">
-            <span>{{ metric.label }}</span>
-            <strong>{{ metric.value }}</strong>
-          </div>
-        }
-      </div>
-    </div>
-  </div>
-  }
-
-  @if (currentSection.id === 'clienti') {
-    <div class="module-hero">
-      <div class="module-hero-main op-card client-hero-card">
-        <div class="module-hero-head">
-          <div class="module-hero-label">
-            <span class="detail-subtitle">Responsabile</span>
-            <strong>{{ content().owner }}</strong>
-          </div>
-          <div class="module-hero-label">
-            <span class="detail-subtitle">Azione principale</span>
-            <strong>{{ content().primaryAction }}</strong>
-          </div>
-        </div>
-        <div class="module-metrics">
-          <div class="module-metric-card" (click)="focusClientSearch()">
-            <span>Totale Contatti</span>
-            <strong>{{ allClients().length }}</strong>
-            <small>Apri rubrica operativa</small>
-          </div>
-        </div>
-      </div>
-    </div>
-    }
-
   @switch (currentSection.id) {
 
     <!-- ═══════════════ CLIENTI ═══════════════ -->
         @case ('clienti') {
-      <div class="op-card">
+      <div class="op-card op-card-operativa expenses-toolbar-card">
         <div class="op-card-title-row">
-          <h2 class="op-card-title">Rubrica Contatti</h2>
-          <div class="form-actions">
-            <button type="button" class="btn-add" (click)="openClientModal()">+ Nuovo Contatto</button>
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="section-toolbar-text">
+              <h2 class="op-card-title">Rubrica Contatti</h2>
+              <small class="section-toolbar-eyebrow">{{ content().primaryAction }}</small>
+            </div>
+          </div>
+          <div class="section-toolbar-actions">
+            <button type="button" class="btn-primary section-main-cta" (click)="openClientModal()">+ Nuovo Contatto</button>
           </div>
         </div>
       </div>
 
       <div class="op-grid">
-        <div class="op-card">
+        <div class="op-card op-card-operativa">
           <nav class="warehouse-tabs" aria-label="Selettore contatti">
             <button type="button" class="warehouse-tab" [class.active]="contactsSegment() === 'clienti'" (click)="setContactsSegment('clienti')">Clienti</button>
             <button type="button" class="warehouse-tab" [class.active]="contactsSegment() === 'aziende'" (click)="setContactsSegment('aziende')">Aziende</button>
@@ -663,88 +605,90 @@
 
     <!-- ═══════════════ PREVENTIVI ═══════════════ -->
     @case ('preventivi') {
-      <div class="op-card compact-section-toolbar mb-4">
-        <div class="compact-toolbar-main">
-          <div class="compact-toolbar-title">
-            <h2 class="op-card-title">Preventivi</h2>
-            <div class="compact-toolbar-meta">
-              <span>{{ filteredQuotes().length }} visibili</span>
-              <span>{{ quoteConversionRate() }}% conversione</span>
-              <span>{{ dueQuotesCount() }} in scadenza</span>
+      <div class="op-card compact-section-toolbar op-card-operativa">
+        <div class="compact-toolbar-main section-toolbar">
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="section-toolbar-text">
+              <div class="compact-toolbar-title">
+                <h2 class="op-card-title">Preventivi</h2>
+                <div class="compact-toolbar-meta">
+                  <span>{{ filteredQuotes().length }} visibili</span>
+                  <span>{{ quoteConversionRate() }}% conversione</span>
+                  <span>{{ dueQuotesCount() }} in scadenza</span>
+                </div>
+              </div>
+              <small class="section-toolbar-eyebrow">{{ content().primaryAction }}</small>
             </div>
           </div>
-          <div class="compact-toolbar-actions">
-            <div class="compact-switcher">
-              <button type="button" class="compact-switch-btn" [class.active]="!quoteModalOpen()" (click)="closeQuoteModal()">
-                Elenco
-              </button>
-              <button type="button" class="compact-switch-btn" [class.active]="quoteModalOpen()" (click)="openQuoteModal()">
-                Nuovo
-              </button>
-            </div>
+          <div class="compact-toolbar-actions section-toolbar-actions">
+            <button
+              type="button"
+              class="btn-ghost section-view-toggle"
+              [class.is-active]="!quoteModalOpen()"
+              (click)="closeQuoteModal()"
+            >
+              Elenco
+            </button>
+            <button type="button" class="btn-primary section-main-cta" (click)="openQuoteModal()">
+              + Nuovo Preventivo
+            </button>
           </div>
         </div>
-      </div>
 
-      @if (!quoteModalOpen()) {
-        <div class="op-grid">
-          <div class="op-card">
-            <div class="op-card-title-row">
-              <h2 class="op-card-title">Registro preventivi</h2>
-            </div>
-            <div class="filters-row">
-              <input class="filter-input" type="search" placeholder="Cerca..." [value]="quoteQuery()" (input)="updateQuoteQuery($event)">
-              <select class="filter-select" (change)="updateQuoteStageFilter($event)">
-                <option value="tutte">Tutte le fasi</option><option value="bozza">Bozza</option><option value="trattativa">Trattativa</option><option value="ordine">Ordine</option>
-              </select>
-            </div>
-            <div class="warehouse-table-wrap">
-              <table class="warehouse-table">
-                <thead>
-                  <tr>
-                    <th scope="col">N. Prev.</th>
-                    <th scope="col">Cliente</th>
-                    <th scope="col">Progetto</th>
-                    <th scope="col">Fase</th>
-                    <th scope="col">Scadenza</th>
-                    <th scope="col">Valore</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (quote of filteredQuotes(); track quote.id) {
-                    <tr [class.active]="selectedQuoteId() === quote.id" (click)="selectQuote(quote.id)" class="clickable-row">
-                      <td>{{ quoteCode(quote.id) }}</td>
-                      <td>{{ quote.customerName }}</td>
-                      <td>{{ quote.projectType }}</td>
-                      <td>
-                        <span class="badge" [class.badge-warning]="quote.stage === 'bozza'" [class.badge-info]="quote.stage === 'trattativa'" [class.badge-success]="quote.stage === 'ordine' || quote.stage === 'confermato'">
-                          {{ quoteStageLabel(quote.stage) }}
-                        </span>
-                      </td>
-                      <td>
-                        <div class="quote-due-cell">
-                          <span>{{ quote.dueDate }}</span>
-                          <span
-                            class="badge"
-                            [class.badge-danger]="quoteDaysToDue(quote.dueDate) < 0"
-                            [class.badge-warning]="quoteDaysToDue(quote.dueDate) >= 0 && quoteDaysToDue(quote.dueDate) <= 7"
-                            [class.badge-neutral]="quoteDaysToDue(quote.dueDate) > 7"
-                          >
-                            {{ quoteDueBadgeLabel(quote.dueDate) }}
-                          </span>
-                        </div>
-                      </td>
-                      <td>€ {{ quote.value.toLocaleString('it-IT') }}</td>
-                    </tr>
-                  } @empty {
-                    <tr><td colspan="6" class="empty">Nessun preventivo presente con i filtri correnti.</td></tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+        @if (!quoteModalOpen()) {
+          <div class="filters-row">
+            <input class="filter-input" type="search" placeholder="Cerca..." [value]="quoteQuery()" (input)="updateQuoteQuery($event)">
+            <select class="filter-select" (change)="updateQuoteStageFilter($event)">
+              <option value="tutte">Tutte le fasi</option><option value="bozza">Bozza</option><option value="trattativa">Trattativa</option><option value="ordine">Ordine</option>
+            </select>
           </div>
-        </div>
-      }
+          <div class="warehouse-table-wrap">
+            <table class="warehouse-table">
+              <thead>
+                <tr>
+                  <th scope="col">N. Prev.</th>
+                  <th scope="col">Cliente</th>
+                  <th scope="col">Progetto</th>
+                  <th scope="col">Fase</th>
+                  <th scope="col">Scadenza</th>
+                  <th scope="col">Valore</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (quote of filteredQuotes(); track quote.id) {
+                  <tr [class.active]="selectedQuoteId() === quote.id" (click)="selectQuote(quote.id)" class="clickable-row">
+                    <td>{{ quoteCode(quote.id) }}</td>
+                    <td>{{ quote.customerName }}</td>
+                    <td>{{ quote.projectType }}</td>
+                    <td>
+                      <span class="badge" [class.badge-warning]="quote.stage === 'bozza'" [class.badge-info]="quote.stage === 'trattativa'" [class.badge-success]="quote.stage === 'ordine' || quote.stage === 'confermato'">
+                        {{ quoteStageLabel(quote.stage) }}
+                      </span>
+                    </td>
+                    <td>
+                      <div class="quote-due-cell">
+                        <span>{{ quote.dueDate }}</span>
+                        <span
+                          class="badge"
+                          [class.badge-danger]="quoteDaysToDue(quote.dueDate) < 0"
+                          [class.badge-warning]="quoteDaysToDue(quote.dueDate) >= 0 && quoteDaysToDue(quote.dueDate) <= 7"
+                          [class.badge-neutral]="quoteDaysToDue(quote.dueDate) > 7"
+                        >
+                          {{ quoteDueBadgeLabel(quote.dueDate) }}
+                        </span>
+                      </div>
+                    </td>
+                    <td>€ {{ quote.value.toLocaleString('it-IT') }}</td>
+                  </tr>
+                } @empty {
+                  <tr><td colspan="6" class="empty">Nessun preventivo presente con i filtri correnti.</td></tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
 
       @if (quoteDetailModalOpen()) {
         <div class="ui-modal-overlay" (click)="closeQuoteDetailModal()">
@@ -1256,7 +1200,14 @@
                         <span class="agenda-page-day">{{ day.isoDate.slice(8, 10) }}</span>
                         <span class="agenda-page-weekday">{{ day.label }}</span>
                       </div>
-                      <button type="button" class="btn-sm" (click)="openAppointmentModalForDate(day.isoDate)">+ Aggiungi</button>
+                      <div class="agenda-header-actions">
+                        <button type="button" class="btn-sm btn-sm-secondary"
+                                title="⚡ Operazioni Dipendenti: Ferie, Malattia, Permesso, Straordinario"
+                                (click)="openMiniHrModal(day.isoDate, 'ferie')">
+                          ⚡ Dip
+                        </button>
+                        <button type="button" class="btn-sm" (click)="openAppointmentModalForDate(day.isoDate)">+ Aggiungi</button>
+                      </div>
                     </div>
 
                     <div class="agenda-page-timeline-container">
@@ -1309,7 +1260,14 @@
                       <span class="agenda-week-dayname">{{ day.label.split(' ')[0] }}</span>
                       <span class="agenda-week-date">{{ day.isoDate.slice(8, 10) }}</span>
                     </div>
-                    <button type="button" class="btn-sm btn-icon-only" title="Aggiungi appuntamento" (click)="openAppointmentModalForDate(day.isoDate)">+</button>
+                    <div class="agenda-week-header-actions">
+                      <button type="button" class="btn-sm btn-icon-only btn-icon-only-secondary"
+                              title="⚡ Operazioni Dipendenti"
+                              (click)="openMiniHrModal(day.isoDate, 'ferie')">
+                        ⚡
+                      </button>
+                      <button type="button" class="btn-sm btn-icon-only" title="Aggiungi appuntamento" (click)="openAppointmentModalForDate(day.isoDate)">+</button>
+                    </div>
                   </div>
                 }
               </div>
@@ -1626,15 +1584,35 @@
                     <div class="appointment-form-grid">
                       <div class="appointment-field appointment-field-wide">
                         <span>Operatori presenti</span>
-                        <div class="operator-chips">
+                        @if (appointmentStoreNoticeBadge(); as notice) {
+                          @if (notice?.show) {
+                            <div class="appointment-field-notice" [class]="notice?.classes">{{ notice?.text }}</div>
+                          }
+                        }
+                        @let overrideInfo = _appointmentNeedsOverride();
+                        @if (overrideInfo.required) {
+                          <div class="appointment-field-notice appointment-field-notice-override">
+                            <span class="override-icon">⚠️</span>
+                            <strong>OVERRIDE ATTIVO</strong> · puoi forzatamente selezionare tecnici anche in chiusura o riposo per eventi speciali o dimostrazioni.
+                            <em>Il salvataggio richiederà una conferma esplicita.</em>
+                          </div>
+                        }
+                        <div class="operator-chips operator-chips--v2">
                           @for (op of cashOperators(); track op) {
+                            @let st = getAppointmentOperatorStatus(op);
                             <button
                               type="button"
-                              class="btn-chip"
+                              class="btn-chip btn-chip-technician"
                               [class.active]="selectedAppointmentOperators().includes(op)"
+                              [ngClass]="st.classes"
+                              [disabled]="st.disabled"
+                              [attr.title]="st.title"
                               (click)="toggleAppointmentOperator(op)"
                             >
-                              {{ op }}
+                              <span class="tech-name">{{ op }}</span>
+                              @if (st.badge) {
+                                <span class="tech-badge-inline" [attr.data-level]="st.level">{{ st.badge }}</span>
+                              }
                             </button>
                           }
                         </div>
@@ -1662,6 +1640,129 @@
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      }
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- MINI-MODALE HR · ⚡ Operazioni Dipendenti (Task2 Agenda)       -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      @if (miniHrModalOpen()) {
+        <div class="ui-modal-overlay" (click)="closeMiniHrModal()">
+          <div class="ui-modal mini-hr-modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+            <div class="ui-modal-head">
+              <div>
+                <span class="detail-subtitle">Operazioni Dipendenti</span>
+                <h2 class="op-card-title">⚡ Azione rapida · {{ miniHrModalDate() }}</h2>
+              </div>
+              <button type="button" class="btn-ghost" (click)="closeMiniHrModal()">Chiudi</button>
+            </div>
+            <div class="ui-modal-body mini-hr-body">
+              <!-- 1 · Scelta azione -->
+              <section class="mini-hr-sec">
+                <h3 class="mini-hr-sec-title">Azione</h3>
+                <div class="mini-hr-actions">
+                  <button type="button" class="mini-hr-action-btn"
+                          [class.active]="miniHrModalAction()==='straordinario'"
+                          (click)="miniHrModalAction.set('straordinario')">
+                    <span class="ic">✨</span><span class="lbl">Turno Extra</span>
+                  </button>
+                  <button type="button" class="mini-hr-action-btn"
+                          [class.active]="miniHrModalAction()==='ferie'"
+                          (click)="miniHrModalAction.set('ferie')">
+                    <span class="ic">🏖️</span><span class="lbl">Ferie</span>
+                  </button>
+                  <button type="button" class="mini-hr-action-btn"
+                          [class.active]="miniHrModalAction()==='malattia'"
+                          (click)="miniHrModalAction.set('malattia')">
+                    <span class="ic">🤒</span><span class="lbl">Malattia</span>
+                  </button>
+                  <button type="button" class="mini-hr-action-btn"
+                          [class.active]="miniHrModalAction()==='permesso'"
+                          (click)="miniHrModalAction.set('permesso')">
+                    <span class="ic">⏱️</span><span class="lbl">Permesso</span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- 2 · Scelta dipendente -->
+              <section class="mini-hr-sec">
+                <h3 class="mini-hr-sec-title">Dipendente</h3>
+                <div class="mini-hr-emp-grid">
+                  @for (op of cashOperators(); track op) {
+                    <button type="button" class="mini-hr-emp-btn"
+                            [class.active]="miniHrModalEmpName()===op"
+                            (click)="miniHrModalEmpName.set(op)">
+                      {{ op }}
+                    </button>
+                  }
+                </div>
+              </section>
+
+              <!-- 3 · Data (modificabile) -->
+              <section class="mini-hr-sec mini-hr-sec-row">
+                <label class="mini-hr-field">
+                  <span>Data</span>
+                  <input type="date" [value]="miniHrModalDate()"
+                         (change)="miniHrModalDate.set($any($event.target).value)">
+                </label>
+                <label class="mini-hr-field mini-hr-note-field">
+                  <span>Nota (opzionale)</span>
+                  <input type="text" [value]="miniHrModalNote()" placeholder="Motivo, note aggiuntive..."
+                         (input)="miniHrModalNote.set($any($event.target).value)">
+                </label>
+              </section>
+
+              <!-- 4 · Permesso orario: campi orari -->
+              @if (miniHrModalAction() === 'permesso') {
+                <section class="mini-hr-sec">
+                  <h3 class="mini-hr-sec-title">Permesso orario</h3>
+                  <div class="mini-hr-sec-row">
+                    <label class="mini-hr-field">
+                      <span>Da (HH:MM)</span>
+                      <select [value]="miniHrModalPermitStart()"
+                              (change)="miniHrModalPermitStart.set($any($event.target).value)">
+                        @for (slot of planner30MinSlots; track slot) {
+                          <option [value]="slot">{{ slot }}</option>
+                        }
+                      </select>
+                    </label>
+                    <label class="mini-hr-field">
+                      <span>A (HH:MM)</span>
+                      <select [value]="miniHrModalPermitEnd()"
+                              (change)="miniHrModalPermitEnd.set($any($event.target).value)">
+                        @for (slot of planner30MinSlots; track slot) {
+                          <option [value]="slot">{{ slot }}</option>
+                        }
+                      </select>
+                    </label>
+                    <div class="mini-hr-hours">
+                      @let minuti = miniHrPermitMinutesCalc();
+                      @if (minuti > 0 && minuti < 480) {
+                        <span class="chip chip-info chip-big">
+                          ⏱️ <strong>{{ ((minuti / 6) / 10).toFixed(1).replace('.0','') }}h</strong> di permesso
+                        </span>
+                      } @else if (minuti >= 480) {
+                        <span class="chip chip-warning chip-big">
+                          📅 Giornata intera
+                        </span>
+                      }
+                    </div>
+                  </div>
+                </section>
+              }
+
+              <!-- 5 · Footer azioni -->
+              <div class="mini-hr-footer form-actions">
+                <button type="button" class="btn-ghost" (click)="closeMiniHrModal()">Annulla</button>
+                <button type="button" class="btn-primary" (click)="saveMiniHrAction()">
+                  @if (miniHrModalAction()==='straordinario') { ✨ Salva Turno Extra }
+                  @if (miniHrModalAction()==='ferie')       { 🏖️ Segna Ferie }
+                  @if (miniHrModalAction()==='malattia')    { 🤒 Segna Malattia }
+                  @if (miniHrModalAction()==='permesso')    { ⏱️ Segna Permesso }
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       }
@@ -2614,120 +2715,92 @@
 
     <!-- ═══════════════ SERVIZIO TECNICO ═══════════════ -->
     @case ('tecnico') {
-      <div class="op-grid two-col">
-        <div class="op-card">
-          <div class="op-card-title-row">
-            <h2 class="op-card-title">Ticket tecnici</h2>
-            <button type="button" class="btn-primary" (click)="openTicketModal()">Nuovo</button>
+      <div class="op-card op-card-operativa">
+        <div class="op-card-title-row">
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="section-toolbar-text">
+              <h2 class="op-card-title">Ticket tecnici</h2>
+              <small class="section-toolbar-eyebrow">{{ content().primaryAction }}</small>
+            </div>
           </div>
-          <div class="filters-row">
-            <input class="filter-input" type="search" placeholder="Cerca..." [value]="ticketQuery()" (input)="updateTicketQuery($event)">
-            <select class="filter-select" (change)="updateTicketStatusFilter($event)">
-              <option value="tutti">Tutti</option><option value="aperto">Aperto</option><option value="pianificato">Pianificato</option><option value="in-lavorazione">In lavorazione</option><option value="chiuso">Chiuso</option>
-            </select>
-            <select class="filter-select" (change)="updateTicketPriorityFilter($event)">
-              <option value="tutte">Tutte</option><option value="alta">Alta</option><option value="media">Media</option><option value="bassa">Bassa</option>
-            </select>
-          </div>
-          <div class="record-list">
-            @for (ticket of filteredServiceTickets(); track ticket.id) {
-              <div class="record-row" [class.selected]="selectedTicketId() === ticket.id" (click)="selectTicket(ticket.id)">
-                <div class="record-info"><strong>{{ ticket.title }}</strong><span>{{ ticket.customerName }} · {{ ticket.technician }}</span></div>
-                <div class="record-actions">
-                  <span class="badge" [class.badge-danger]="ticket.priority === 'alta'" [class.badge-warning]="ticket.priority === 'media'" [class.badge-success]="ticket.priority === 'bassa'">{{ ticket.priority }}</span>
-                  <span class="badge" [class.badge-danger]="ticket.status === 'aperto'" [class.badge-info]="ticket.status === 'in-lavorazione'" [class.badge-success]="ticket.status === 'chiuso'" [class.badge-warning]="ticket.status === 'pianificato'">{{ ticket.status }}</span>
-                  <button class="btn-sm" (click)="progressTicket(ticket.id); $event.stopPropagation()">Avanza</button>
-                  <button class="btn-sm" (click)="editServiceTicket(ticket.id); $event.stopPropagation()">Modifica</button>
-                </div>
-              </div>
-            }
+          <div class="section-toolbar-actions">
+            <button type="button" class="btn-primary section-main-cta" (click)="openTicketModal()">+ Nuovo Ticket</button>
           </div>
         </div>
-        <div class="op-card">
-          @if (selectedServiceTicket(); as ticket) {
-            <div class="op-card-title-row">
-              <div class="appointment-modal-head-copy">
-                <span class="detail-subtitle">Servizio tecnico {{ ticketCode(ticket.id) }}</span>
-                <h2 class="op-card-title">{{ ticket.title }}</h2>
-                <p class="appointment-modal-head-text">Scheda operativa completa con anagrafica, collegamenti e passaggio rapido in cassa.</p>
-              </div>
-              <div class="detail-actions">
-                <button type="button" class="btn-ghost" (click)="editServiceTicket(ticket.id)">Modifica</button>
-                <button type="button" class="btn-primary" (click)="openTicketInCash(ticket.id)">Porta in cassa</button>
-              </div>
-            </div>
-            <div class="detail-fields">
-              <div class="detail-field"><span>Cliente</span><strong>{{ ticket.customerName }}</strong></div>
-              <div class="detail-field"><span>Tipo</span><strong>{{ ticket.serviceType }}</strong></div>
-              <div class="detail-field"><span>Luogo</span><strong>{{ ticket.locationType }}</strong></div>
-              <div class="detail-field"><span>Priorita</span><strong>{{ ticket.priority }}</strong></div>
-              <div class="detail-field"><span>Stato</span><strong>{{ ticket.status }}</strong></div>
-              <div class="detail-field"><span>Tecnico</span><strong>{{ ticket.technician }}</strong></div>
-              <div class="detail-field"><span>Costo mat.</span><strong>€ {{ ticket.materialCost.toLocaleString('it-IT') }}</strong></div>
-              <div class="detail-field"><span>Esito</span><strong>{{ ticket.resolutionStatus }}</strong></div>
-            </div>
-            @if (selectedTicketClient(); as client) {
-              <div class="detail-section">
-                <span class="detail-section-title">Cliente collegato</span>
-                <div class="detail-fields">
-                  <div class="detail-field"><span>Telefono</span><strong>{{ client.phone }}</strong></div>
-                  <div class="detail-field"><span>Email</span><strong>{{ client.email }}</strong></div>
-                  <div class="detail-field"><span>Citta</span><strong>{{ client.city }}</strong></div>
-                  <div class="detail-field"><span>Indirizzo</span><strong>{{ client.address }}</strong></div>
-                </div>
-              </div>
+        <!-- KPI 1 riga compatto -->
+        <div class="kpi-inline-row">
+          <span class="kpi-inline"><em>Aperti</em><strong>{{ allServiceTickets().filter(t => t.status === 'aperto').length }}</strong></span>
+          <span class="kpi-sep">·</span>
+          <span class="kpi-inline"><em>In lavorazione</em><strong>{{ allServiceTickets().filter(t => t.status === 'in-lavorazione').length }}</strong></span>
+          <span class="kpi-sep">·</span>
+          <span class="kpi-inline">
+            <em>Priorità alta</em>
+            @if (allServiceTickets().filter(t => t.priority === 'alta' && t.status !== 'chiuso').length > 0) {
+              <strong class="badge badge-danger badge-soft-pulse" style="font-size:.75rem;padding:.1rem .55rem;height:auto;min-height:auto">
+                {{ allServiceTickets().filter(t => t.priority === 'alta' && t.status !== 'chiuso').length }}
+              </strong>
+            } @else {
+              <strong>{{ allServiceTickets().filter(t => t.priority === 'alta' && t.status !== 'chiuso').length }}</strong>
             }
-            @if (selectedTicketQuote(); as quote) {
-              <div class="detail-section">
-                <span class="detail-section-title">Preventivo collegato</span>
-                <div class="detail-fields">
-                  <div class="detail-field"><span>Riferimento</span><strong>{{ quoteCode(quote.id) }}</strong></div>
-                  <div class="detail-field"><span>Progetto</span><strong>{{ quote.projectType }}</strong></div>
-                  <div class="detail-field"><span>Cliente</span><strong>{{ quote.customerName }}</strong></div>
-                  <div class="detail-field"><span>Valore</span><strong>€ {{ quote.value.toLocaleString('it-IT') }}</strong></div>
-                </div>
+          </span>
+        </div>
+        <div class="filters-row">
+          <input class="filter-input" type="search" placeholder="Cerca per titolo, cliente, tecnico..." [value]="ticketQuery()" (input)="updateTicketQuery($event)">
+          <select class="filter-select" (change)="updateTicketStatusFilter($event)">
+            <option value="tutti">Tutti stati</option>
+            <option value="aperto">Aperto</option>
+            <option value="pianificato">Pianificato</option>
+            <option value="in-lavorazione">In lavorazione</option>
+            <option value="chiuso">Chiuso</option>
+          </select>
+          <select class="filter-select" (change)="updateTicketPriorityFilter($event)">
+            <option value="tutte">Tutte priorità</option>
+            <option value="alta">Alta</option>
+            <option value="media">Media</option>
+            <option value="bassa">Bassa</option>
+          </select>
+        </div>
+        <div class="record-list">
+          @for (ticket of filteredServiceTickets(); track ticket.id) {
+            <div class="record-row" (click)="editServiceTicket(ticket.id)">
+              <div class="record-info">
+                <strong>{{ ticket.title }}</strong>
+                <span>🧑 Cliente: {{ ticket.customerName }} · 🔧 Tecnico: {{ ticket.technician || 'Non assegnato' }}</span>
+                <small>Tipo: {{ ticket.serviceType }} · Luogo: {{ ticket.locationType }} · Costo mat: € {{ ticket.materialCost.toLocaleString('it-IT') }}</small>
               </div>
-            }
-            @if (selectedTicketAppointment(); as appointment) {
-              <div class="detail-section">
-                <span class="detail-section-title">Appuntamento collegato</span>
-                <div class="detail-fields">
-                  <div class="detail-field"><span>Data</span><strong>{{ appointment.scheduledAt.slice(0, 16).replace('T', ' ') }}</strong></div>
-                  <div class="detail-field"><span>Tipologia</span><strong>{{ appointment.appointmentType }}</strong></div>
-                  <div class="detail-field"><span>Cliente</span><strong>{{ appointment.customerName }}</strong></div>
-                  <div class="detail-field"><span>Operatori</span><strong>{{ appointment.technician }}</strong></div>
-                </div>
-              </div>
-            }
-            @if (ticket.materialSummary) { <div class="detail-note"><span>Materiali</span><p>{{ ticket.materialSummary }}</p></div> }
-            @if (ticket.workSummary) { <div class="detail-note"><span>Report</span><p>{{ ticket.workSummary }}</p></div> }
-            <!-- Assegna materiale -->
-            <div class="detail-section">
-              <span class="detail-section-title">Assegna materiale</span>
-              <form class="inline-assign" [formGroup]="ticketMaterialForm" (ngSubmit)="assignMaterialToSelectedTicket()">
-                <select formControlName="inventoryItemId">
-                  <option value="">Seleziona</option>
-                  @for (item of allInventoryItems(); track item.id) { <option [value]="item.id">{{ item.name }} ({{ item.stock }})</option> }
-                </select>
-                <input type="number" formControlName="quantity" placeholder="Qta">
-                <button type="submit" class="btn-primary">Assegna</button>
-              </form>
-              @if (ticket.materialLines.length) {
-                @for (line of ticket.materialLines; track line.inventoryItemId) {
-                  <div class="material-row"><span>{{ line.itemName }}</span><strong>{{ line.quantity }} pz · € {{ line.totalCost.toLocaleString('it-IT') }}</strong></div>
+              <div class="record-actions">
+                <span class="badge"
+                      [class.badge-danger]="ticket.priority === 'alta'"
+                      [class.badge-warning]="ticket.priority === 'media'"
+                      [class.badge-success]="ticket.priority === 'bassa'"
+                      [class.badge-soft-pulse]="ticket.priority === 'alta' && ticket.status !== 'chiuso'">
+                  {{ ticket.priority }}
+                </span>
+                <span class="badge"
+                      [class.badge-danger]="ticket.status === 'aperto'"
+                      [class.badge-info]="ticket.status === 'in-lavorazione'"
+                      [class.badge-success]="ticket.status === 'chiuso'"
+                      [class.badge-warning]="ticket.status === 'pianificato'">
+                  {{ ticket.status }}
+                </span>
+                @if (ticket.resolutionStatus) {
+                  <span class="badge badge-success">{{ ticket.resolutionStatus }}</span>
                 }
-              }
+                <button class="btn-sm btn-warning-ghost" (click)="progressTicket(ticket.id); $event.stopPropagation()">▶ Avanza</button>
+                <button class="btn-sm btn-primary-sm" (click)="openTicketInCash(ticket.id); $event.stopPropagation()">💵 In cassa</button>
+                <button class="btn-sm" (click)="selectTicket(ticket.id); scheduleFromSelectedTicket(); $event.stopPropagation()">📅 Agenda</button>
+                @if (ticket.status !== 'chiuso') {
+                  <button class="btn-sm btn-danger-sm" (click)="selectTicket(ticket.id); closeSelectedTicket(); $event.stopPropagation()">✓ Chiudi</button>
+                }
+              </div>
             </div>
-            <div class="form-actions">
-              <button type="button" class="btn-primary" (click)="openTicketInCash(ticket.id)">Porta in cassa</button>
-              <button class="btn-primary" (click)="scheduleFromSelectedTicket()">Crea appuntamento</button>
-              <button class="btn-primary" (click)="closeSelectedTicket()">Chiudi ticket</button>
-            </div>
-          } @else {
-            <div class="empty-state"><p>Seleziona un ticket</p></div>
+          } @empty {
+            <div class="empty">Nessun ticket trovato. Crea il primo ticket con il pulsante "+ Nuovo Ticket" in alto a destra.</div>
           }
         </div>
       </div>
+
 
       @if (ticketModalOpen()) {
         <div class="ui-modal-overlay ui-modal-overlay-fullscreen" (click)="closeTicketModal()">
@@ -3037,6 +3110,16 @@
     <!-- ═══════════════ MAGAZZINO ═══════════════ -->
     @case ('magazzino') {
       <div class="warehouse-shell">
+        <div class="op-card-title-row warehouse-toolbar-title section-toolbar">
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="section-toolbar-text">
+              <h2 class="op-card-title">Magazzino</h2>
+              <small class="section-toolbar-eyebrow">{{ content().primaryAction }}</small>
+            </div>
+          </div>
+          <button type="button" class="btn-primary" (click)="openWarehouseModal()">+ Nuovo Prodotto / Carico</button>
+        </div>
         <nav class="warehouse-tabs" aria-label="Navigazione magazzino">
           <button type="button" class="warehouse-tab" [class.active]="warehouseView() === 'ricerca'" (click)="setWarehouseView('ricerca')">Ricerca</button>
           <button type="button" class="warehouse-tab" [class.active]="warehouseView() === 'acquisto'" (click)="setWarehouseView('acquisto')">Acquisto Prodotti</button>
@@ -3079,7 +3162,7 @@
               </thead>
               <tbody>
                 @for (item of warehouseTableItems(); track item.id) {
-                  <tr [class.active]="selectedInventoryId() === item.id" (click)="selectInventoryItem(item.id)">
+                  <tr [class.active]="selectedInventoryId() === item.id" (click)="editInventoryItem(item.id)">
                     <td>{{ item.supplier }}</td>
                     <td>{{ warehouseUsageTypeLabel(item.usageType) }}</td>
                     <td>{{ item.category }}</td>
@@ -3099,7 +3182,7 @@
             </table>
           </div>
 
-          <div class="op-grid two-col">
+          <div class="op-grid">
             <div class="op-card">
               <h2 class="op-card-title">Dettaglio prodotto selezionato</h2>
               @if (selectedInventoryItem(); as item) {
@@ -3108,7 +3191,47 @@
                   <div class="detail-field"><span>Destinazione</span><strong>{{ warehouseUsageTypeLabel(item.usageType) }}</strong></div>
                   <div class="detail-field"><span>Categoria</span><strong>{{ item.category }}</strong></div>
                   <div class="detail-field"><span>SKU</span><strong>{{ item.sku }}</strong></div>
-                  <div class="detail-field"><span>Barcode</span><strong>{{ item.barcode || 'Non impostato' }}</strong></div>
+                  <div class="detail-field warehouse-barcode-detail-row">
+                    <div class="warehouse-barcode-left">
+                      <span>Barcode</span>
+                      @if (item.barcode) {
+                        <strong>{{ item.barcode }}</strong>
+                        <button
+                          type="button"
+                          class="btn-sm btn-ghost warehouse-barcode-download"
+                          (click)="downloadBarcodeLabelPng(item.barcode, item.name)"
+                          title="Scarica etichetta PNG ad alta risoluzione"
+                        >
+                          ⬇ Etichetta PNG
+                        </button>
+                      } @else {
+                        <strong class="text-muted">Non impostato</strong>
+                        <button
+                          type="button"
+                          class="btn-sm warehouse-barcode-generate"
+                          (click)="generateAndAssignBarcodeToSelectedInventory()"
+                          title="Genera un codice EAN-13 e salvalo sul prodotto"
+                        >
+                          ✦ Genera
+                        </button>
+                      }
+                    </div>
+                    <div class="warehouse-barcode-right" [class.is-empty]="!item.barcode">
+                      @if (item.barcode) {
+                        <img
+                          class="warehouse-barcode-label"
+                          [src]="barcodeImgDataUrl(item.barcode, item.name)"
+                          alt="Etichetta barcode {{ item.barcode }}"
+                          loading="lazy"
+                        >
+                      } @else {
+                        <div class="warehouse-barcode-empty">
+                          <span>Nessuna etichetta</span>
+                          <small>Genera un barcode per creare l'etichetta stampabile</small>
+                        </div>
+                      }
+                    </div>
+                  </div>
                   <div class="detail-field"><span>Fornitore</span><strong>{{ item.supplier }}</strong></div>
                   <div class="detail-field"><span>Posizione</span><strong>{{ item.location }}</strong></div>
                   <div class="detail-field"><span>Prezzo acquisto</span><strong>€ {{ formatCurrency(item.unitCost) }}</strong></div>
@@ -3156,7 +3279,7 @@
             </div>
           </div>
         } @else if (warehouseView() === 'acquisto') {
-          <div class="op-grid two-col">
+          <div class="op-grid">
             <div class="op-card">
               <h2 class="op-card-title">Fornitori più attivi</h2>
               <div class="record-list compact">
@@ -3253,7 +3376,7 @@
             </table>
           </div>
         } @else if (warehouseView() === 'utilizzo') {
-          <div class="op-grid two-col">
+          <div class="op-grid">
             <div class="op-card">
               <h2 class="op-card-title">Prodotti uso negozio</h2>
               <div class="detail-note">
@@ -3358,7 +3481,7 @@
             <button type="button" class="btn-primary" (click)="exportWarehouseInventoryCsv()">Esporta CSV</button>
             <button type="button" class="btn-ghost" (click)="exportWarehouseInventoryPdf()">Esporta PDF</button>
           </div>
-          <div class="op-grid two-col">
+          <div class="op-grid">
             <div class="op-card">
               <h2 class="op-card-title">Valore per articolo</h2>
               <div class="record-list compact">
@@ -3610,7 +3733,20 @@
                         </div>
                         <div class="form-grid">
                           <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'quantity')"><span>Quantita da ricaricare *</span><input type="number" min="0" formControlName="quantity" placeholder="0">@if (hasFieldError(warehouseReceiptForm, 'quantity')) { <small class="field-error">{{ fieldError(warehouseReceiptForm, 'quantity', 'Quantità') }}</small> }</label>
-                          <label><span>Codice a barre variato</span><input type="text" formControlName="barcode" placeholder="Lascia vuoto se resta lo stesso"></label>
+                          <label class="warehouse-barcode-form-field">
+                            <span class="warehouse-barcode-form-label">
+                              Codice a barre variato
+                              <button
+                                type="button"
+                                class="btn-tiny btn-ghost warehouse-barcode-form-generate"
+                                (click)="generateAndSetReceiptBarcode()"
+                                title="Genera un nuovo codice EAN-13 per questo lotto"
+                              >
+                                ✦ Genera
+                              </button>
+                            </span>
+                            <input type="text" formControlName="barcode" placeholder="Lascia vuoto se resta lo stesso">
+                          </label>
                           <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitCost')"><span>Nuovo prezzo acquisto €</span><input type="number" min="0" step="0.01" formControlName="unitCost" placeholder="0,00"></label>
                           <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'salePrice')"><span>Nuovo prezzo rivendita €</span><input type="number" min="0" step="0.01" formControlName="salePrice" placeholder="0,00"></label>
                           <label><span>Nuova sottoscorta</span><input type="number" min="0" formControlName="minStock" placeholder="0"></label>
@@ -3655,7 +3791,20 @@
                       </div>
                       <div class="form-grid">
                         <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'sku')"><span>Codice SKU *</span><input type="text" formControlName="sku" placeholder="Es. AUD-0001">@if (hasFieldError(warehouseReceiptForm, 'sku')) { <small class="field-error">{{ fieldError(warehouseReceiptForm, 'sku', 'Codice prodotto') }}</small> }</label>
-                        <label><span>Barcode</span><input type="text" formControlName="barcode" placeholder="EAN / UPC / codice a barre"></label>
+                        <label class="warehouse-barcode-form-field">
+                          <span class="warehouse-barcode-form-label">
+                            Barcode
+                            <button
+                              type="button"
+                              class="btn-tiny btn-ghost warehouse-barcode-form-generate"
+                              (click)="generateAndSetReceiptBarcode()"
+                              title="Genera un codice EAN-13 valido per questo prodotto"
+                            >
+                              ✦ Genera
+                            </button>
+                          </span>
+                          <input type="text" formControlName="barcode" placeholder="EAN / UPC / codice a barre">
+                        </label>
                         <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'name')"><span>Nome prodotto *</span><input type="text" formControlName="name" placeholder="Nome articolo">@if (hasFieldError(warehouseReceiptForm, 'name')) { <small class="field-error">{{ fieldError(warehouseReceiptForm, 'name', 'Nome prodotto') }}</small> }</label>
                         <label class="wide-field"><span>Descrizione</span><input type="text" formControlName="description" placeholder="Descrizione estesa della merce"></label>
                         <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'category')"><span>Categoria *</span>
@@ -3763,13 +3912,16 @@
     <!-- ═══════════════ SERVIZI ═══════════════ -->
     @case ('servizi') {
       <div class="services-page">
-        <section class="op-card services-hero-card">
-          <div class="services-hero-copy">
-            <span class="detail-subtitle">Catalogo servizi</span>
-            <h2 class="op-card-title">Listino professionale, categorie e report operativi</h2>
+        <section class="op-card services-hero-card op-card-operativa">
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="services-hero-copy section-toolbar-text">
+              <span class="detail-subtitle">Catalogo servizi</span>
+              <h2 class="op-card-title">Listino e scorciatoie cassa</h2>
+            </div>
           </div>
-          <div class="form-actions">
-            <button type="button" class="btn-primary" (click)="openServiceModal()">Nuovo servizio</button>
+          <div class="section-toolbar-actions">
+            <button type="button" class="btn-primary section-main-cta" (click)="openServiceModal()">+ Nuovo Servizio</button>
           </div>
         </section>
 
@@ -3792,7 +3944,7 @@
           </div>
         </div>
 
-        <div class="services-layout">
+        <div class="services-layout services-layout-single">
           <div class="services-main">
             <section class="op-card services-list-card">
               <div class="services-toolbar">
@@ -3894,12 +4046,10 @@
                 }
               </div>
             </section>
-          </div>
 
-          <aside class="services-side">
-            <section class="op-card services-side-card">
+            <section class="op-card services-side-card services-inline-panel">
               <div class="op-card-title-row">
-                <h2 class="op-card-title">Categorie</h2>
+                <h2 class="op-card-title">Categorie rapide</h2>
               </div>
               <div class="services-category-summary">
                 @for (category of serviceCategorySummary().slice(0, 6); track category.category) {
@@ -3929,7 +4079,7 @@
             </section>
 
             @if (selectedService(); as svc) {
-              <section class="op-card services-side-card">
+              <section class="op-card services-side-card services-inline-panel">
                 <div class="op-card-title-row">
                   <h2 class="op-card-title">Dettaglio servizio</h2>
                 </div>
@@ -3948,7 +4098,7 @@
                 </div>
               </section>
             }
-          </aside>
+          </div>
         </div>
       </div>
       @if (serviceModalOpen()) {
@@ -4121,35 +4271,67 @@
 
     <!-- ═══════════════ IMPOSTAZIONI ═══════════════ -->
     @case ('spese') {
-      <div class="op-grid three-col">
-        <div class="op-card">
-          <div class="op-card-title-row">
-            <h2 class="op-card-title">Inserimento nuova spesa</h2>
-            <button type="button" class="btn-add" (click)="openExpenseModal()" [disabled]="!expensePermissions()['expense:create']">+ Nuova Spesa</button>
+      <!-- =========================================== TOOLBAR E REGISTRO SPESE (FULL WIDTH) =========================================== -->
+      <div class="op-card op-card-operativa">
+        <div class="op-card-title-row">
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="section-toolbar-text">
+              <h2 class="op-card-title">Registro Spese</h2>
+              <div class="expenses-toolbar-meta">
+                <span>{{ allExpenseRecords().length }} movimenti</span>
+                <span>{{ allExpenseSuppliers().length }} fornitori</span>
+                <span>{{ expenseUpcomingInstallments().length }} alert attivi</span>
+              </div>
+              <small class="section-toolbar-eyebrow">{{ content().primaryAction }}</small>
+            </div>
           </div>
-          <nav class="warehouse-tabs" aria-label="Navigazione spese">
-            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'registro'" (click)="setExpenseView('registro')">Registro</button>
-            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'scadenze'" (click)="setExpenseView('scadenze')">Scadenze</button>
-            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'fornitori'" (click)="setExpenseView('fornitori')">Fornitori</button>
-            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'audit'" (click)="setExpenseView('audit')">Audit</button>
-          </nav>
-          <div class="filters-row">
-            <select class="filter-select" [value]="currentExpenseRole()" (change)="setExpenseUserRole($any($event.target).value)">
-              <option value="admin">Admin</option><option value="finance">Finance</option><option value="operations">Operations</option><option value="viewer">Viewer</option>
-            </select>
-            <span class="badge badge-info">Permessi: @if (expensePermissions()['expense:create']) { crea } @else { sola lettura }</span>
+          <div class="section-toolbar-actions">
+            <button type="button" class="btn-sm" (click)="exportExpensesCsv()" [disabled]="!expensePermissions()['expense:create']" title="Esporta in formato Excel/CSV">Excel/CSV</button>
+            <button type="button" class="btn-sm" (click)="exportExpensesPdf()" [disabled]="!expensePermissions()['expense:create']" title="Esporta PDF stampabile">PDF</button>
+            <button type="button" class="btn-primary section-main-cta" (click)="openExpenseModal()" [disabled]="!expensePermissions()['expense:create']" title="Crea una nuova spesa o fattura da pagare">+ Nuova Spesa</button>
           </div>
         </div>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Registro spese</h2>
-          <div class="kpi-mini-row">
-            <div class="kpi-mini"><span>Spese mese</span><strong>€ {{ expenseMonthlyTotal().toLocaleString('it-IT') }}</strong></div>
-            <div class="kpi-mini"><span>Record</span><strong>{{ allExpenseRecords().length }}</strong></div>
-            <div class="kpi-mini"><span>Rate aperte</span><strong>{{ expenseUpcomingInstallments().length }}</strong></div>
+        <div class="expenses-overview-strip">
+          <!-- Tabs navigazione orizzontale sticky (76px come da impostazioni app) -->
+          <nav class="warehouse-tabs expenses-tabs" aria-label="Navigazione spese">
+            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'registro'" (click)="setExpenseView('registro')">Registro</button>
+            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'scadenze'" (click)="setExpenseView('scadenze')">Scadenze</button>
+            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'fornitori'" (click)="setExpenseView('fornitori')">Fornitori</button>
+            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'statistiche'" (click)="setExpenseView('statistiche')">Statistiche</button>
+            <button type="button" class="warehouse-tab" [class.active]="expenseView() === 'audit'" (click)="setExpenseView('audit')">Audit</button>
+          </nav>
+
+          <!-- KPI compatti 1 riga (no scroll) -->
+          <div class="kpi-inline-row expenses-kpi-row">
+            <span class="kpi-inline"><em>Spese mese</em><strong>€ {{ expenseMonthlyTotal().toLocaleString('it-IT') }}</strong></span>
+            <span class="kpi-sep">·</span>
+            <span class="kpi-inline"><em>Record</em><strong>{{ allExpenseRecords().length }}</strong></span>
+            <span class="kpi-sep">·</span>
+            <span class="kpi-inline">
+              <em>Rate aperte</em>
+              @if (expenseUpcomingInstallments().length > 0) {
+                <strong class="badge badge-warning badge-danger badge-soft-pulse" style="font-size:.75rem;padding:.1rem .55rem;height:auto;min-height:auto">
+                  {{ expenseUpcomingInstallments().length }} in arrivo
+                </strong>
+              } @else {
+                <strong>{{ expenseUpcomingInstallments().length }}</strong>
+              }
+            </span>
           </div>
-          <div class="filters-row">
-            <input class="filter-input" type="search" placeholder="Cerca..." [value]="expenseQuery()" (input)="updateExpenseQuery($event)">
+        </div>
+
+        <!-- Filtri (unificati: ruolo + ricerca + stato + pagamenti + fornitori) -->
+        @if (expenseView() === 'registro') {
+          <div class="filters-row expenses-filters-row">
+            <select class="filter-select" [value]="currentExpenseRole()" (change)="setExpenseUserRole($any($event.target).value)">
+              <option value="admin">Admin</option>
+              <option value="finance">Finance</option>
+              <option value="operations">Operations</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            <input class="filter-input" type="search" placeholder="Cerca spesa..." [value]="expenseQuery()" (input)="updateExpenseQuery($event)">
             <select class="filter-select" (change)="updateExpenseStatusFilter($event)">
               <option value="tutte">Tutti stati</option>
               <option value="prevista">Prevista</option>
@@ -4169,10 +4351,19 @@
                 <option [value]="supplier.id">{{ supplier.businessName }}</option>
               }
             </select>
-            <button type="button" class="btn-sm" (click)="exportExpensesCsv()">Export Excel/CSV</button>
-            <button type="button" class="btn-sm" (click)="exportExpensesPdf()">Export PDF</button>
           </div>
-          <div class="warehouse-table-wrap">
+
+          <div class="expenses-inline-table-head">
+            <h2 class="op-card-title">Registro operativo</h2>
+            <div class="expenses-status-inline">
+              <span>Totali <strong>{{ filteredExpenseRecords().length }}</strong></span>
+              <span>Previste <strong>{{ filteredExpenseRecords().filter(expense => expense.status === 'prevista').length }}</strong></span>
+              <span>Parziali <strong>{{ filteredExpenseRecords().filter(expense => expense.status === 'parziale').length }}</strong></span>
+              <span>Pagate <strong>{{ filteredExpenseRecords().filter(expense => expense.status === 'pagata').length }}</strong></span>
+            </div>
+          </div>
+
+          <div class="warehouse-table-wrap expenses-register-table-wrap expenses-inline-table-wrap">
             <table class="warehouse-table">
               <thead>
                 <tr>
@@ -4193,7 +4384,14 @@
                     <td>{{ expense.categoryLabel }}</td>
                     <td>{{ expense.supplierLabel }}</td>
                     <td>{{ expense.paymentMode }}</td>
-                    <td>{{ expense.status }}</td>
+                    <td>
+                      <span class="badge"
+                            [class.badge-success]="expense.status === 'pagata'"
+                            [class.badge-warning]="expense.status === 'prevista' || expense.status === 'parziale'"
+                            [class.badge-soft-pulse]="expense.status === 'prevista'">
+                        {{ expense.status }}
+                      </span>
+                    </td>
                     <td>€ {{ expense.amountGross.toLocaleString('it-IT') }}</td>
                   </tr>
                 } @empty {
@@ -4202,40 +4400,64 @@
               </tbody>
             </table>
           </div>
-        </div>
+        }
+      </div>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Promemoria pagamenti</h2>
-          @if (selectedExpenseRecord(); as expense) {
-            <div class="detail-note">
-              <span>Spesa selezionata</span>
-              <p>{{ expense.description }} · {{ expense.categoryLabel }} · € {{ expense.amountGross.toLocaleString('it-IT') }}</p>
+      <!-- =========================================== CONTENUTI TAB CONDIZIONALI (FULL WIDTH) =========================================== -->
+
+      <!-- TAB 1: REGISTRO → tabella principale FULL WIDTH -->
+      <!-- TAB 2: SCADENZE → Promemoria pagamenti + rate + notifiche FULL WIDTH -->
+      @if (expenseView() === 'scadenze') {
+        <div class="expenses-card-grid">
+          <div class="op-card expenses-panel">
+            <div class="expenses-panel-head">
+              <div class="expenses-panel-copy">
+                <h2 class="op-card-title">Scadenze e promemoria</h2>
+                <p>Controllo rapido delle rate in arrivo e attivazione dei promemoria operativi.</p>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-sm" (click)="requestExpenseBrowserNotifications()">Abilita push browser</button>
+                <button type="button" class="btn-primary" (click)="runExpenseReminderSweep()">Esegui controllo 7/3/1</button>
+              </div>
             </div>
-          }
-          <div class="form-actions">
-            <button type="button" class="btn-sm" (click)="requestExpenseBrowserNotifications()">Abilita push browser</button>
-            <button type="button" class="btn-primary" (click)="runExpenseReminderSweep()">Esegui controllo 7/3/1</button>
-          </div>
-          <div class="record-list">
-            @for (installment of expenseUpcomingInstallments(); track installment.id) {
-              <div class="record-row">
-                <div class="record-info">
-                  <strong>Rata {{ installment.installmentNumber }} · {{ installment.dueDate }}</strong>
-                  <span>Preavviso {{ installment.noticeDaysBefore }} giorni</span>
-                </div>
-                <div class="record-actions">
-                  <strong>€ {{ installment.amount.toLocaleString('it-IT') }}</strong>
-                  <button type="button" class="btn-sm" [disabled]="installment.status === 'pagata'" (click)="markInstallmentAsPaid(installment.id)">Segna pagata</button>
-                </div>
+            @if (selectedExpenseRecord(); as expense) {
+              <div class="detail-note">
+                <span>Spesa selezionata</span>
+                <p>{{ expense.description }} · {{ expense.categoryLabel }} · € {{ expense.amountGross.toLocaleString('it-IT') }}</p>
               </div>
             }
+            <h3 class="form-section-title">Rate aperte e prossime scadenze</h3>
+            <div class="record-list">
+              @for (installment of expenseUpcomingInstallments(); track installment.id) {
+                <div class="record-row">
+                  <div class="record-info">
+                    <strong>Rata {{ installment.installmentNumber }} · {{ installment.dueDate }}</strong>
+                    <span>Preavviso {{ installment.noticeDaysBefore }} giorni</span>
+                  </div>
+                  <div class="record-actions">
+                    <strong class="badge badge-warning badge-soft-pulse">€ {{ installment.amount.toLocaleString('it-IT') }}</strong>
+                    <button type="button" class="btn-sm" [disabled]="installment.status === 'pagata'" (click)="markInstallmentAsPaid(installment.id)">Segna pagata</button>
+                  </div>
+                </div>
+              } @empty {
+                <div class="empty">Nessuna rata in arrivo. 🎉 Tutte le rate sono state saldate.</div>
+              }
+            </div>
           </div>
-          <div class="detail-section">
-            <span class="detail-section-title">Notifiche inviate</span>
+          <div class="op-card expenses-panel">
+            <div class="expenses-panel-head">
+              <div class="expenses-panel-copy">
+                <h2 class="op-card-title">Storico notifiche</h2>
+                <p>Log compatto dei promemoria inviati e dello stato di lettura.</p>
+              </div>
+            </div>
             <div class="record-list compact">
               @for (notification of allExpenseNotifications(); track notification.id) {
                 <div class="record-row">
-                  <div class="record-info"><strong>{{ notification.channel }}</strong><span>{{ notification.sentAt.slice(0, 16).replace('T', ' ') }} · -{{ notification.daysBeforeDue }} giorni</span></div>
+                  <div class="record-info">
+                    <strong>{{ notification.channel }}</strong>
+                    <span>{{ notification.sentAt.slice(0, 16).replace('T', ' ') }} · -{{ notification.daysBeforeDue }} giorni</span>
+                  </div>
                   <div class="record-actions">
                     <span class="badge" [class.badge-warning]="!notification.readAt" [class.badge-success]="!!notification.readAt">
                       @if (notification.readAt) { Letta } @else { Nuova }
@@ -4245,68 +4467,136 @@
                     }
                   </div>
                 </div>
+              } @empty {
+                <div class="empty">Nessuna notifica registrata.</div>
               }
             </div>
           </div>
         </div>
-      </div>
+      }
 
-      <div class="op-grid three-col">
-        <div class="op-card">
-          <h2 class="op-card-title">Anagrafica fornitori</h2>
-          <form class="op-form" [formGroup]="expenseSupplierForm" (ngSubmit)="addExpenseSupplier()">
-            <label><span>Ragione sociale</span><input type="text" formControlName="businessName"></label>
-            <label><span>Partita IVA</span><input type="text" formControlName="vatNumber"></label>
-            <label><span>Indirizzo</span><input type="text" formControlName="address"></label>
-            <label><span>Contatto</span><input type="text" formControlName="contactName"></label>
-            <label><span>Email</span><input type="email" formControlName="email"></label>
-            <label><span>Telefono</span><input type="text" formControlName="phone"></label>
-            <label><span>Tipo fornitura</span><input type="text" formControlName="supplyType"></label>
-            <div class="form-actions"><button type="submit" class="btn-primary" [disabled]="!expensePermissions()['expense:update']">Aggiungi fornitore</button></div>
-          </form>
-          <div class="record-list compact">
-            @for (supplier of allExpenseSuppliers(); track supplier.id) {
-              <div class="record-row">
-                <div class="record-info"><strong>{{ supplier.businessName }}</strong><span>{{ supplier.supplyType }} · {{ supplier.vatNumber }}</span></div>
+      <!-- TAB 3: FORNITORI → Anagrafica fornitori FULL WIDTH -->
+      @if (expenseView() === 'fornitori') {
+        <div class="expenses-card-grid">
+          <div class="op-card">
+            <div class="expenses-panel-head">
+              <div class="expenses-panel-copy">
+                <h2 class="op-card-title">Anagrafica fornitori</h2>
+                <p>Inserisci o aggiorna i fornitori senza uscire dal flusso amministrativo.</p>
               </div>
-            }
-          </div>
-        </div>
-
-        <div class="op-card">
-          <h2 class="op-card-title">Statistiche per categoria</h2>
-          <div class="record-list compact">
-            @for (entry of expenseByCategorySummary(); track entry.categoryLabel) {
-              <div class="record-row">
-                <div class="record-info"><strong>{{ entry.categoryLabel }}</strong><span>{{ entry.count }} movimenti</span></div>
-                <div class="record-actions"><strong>€ {{ entry.total.toLocaleString('it-IT') }}</strong></div>
+              <div class="form-actions">
+                <span class="badge badge-info">{{ allExpenseSuppliers().length }} fornitori memorizzati</span>
+                <button type="button" class="btn-primary" (click)="openClientModal(); contactModalKind.set('fornitore')">+ Nuovo fornitore</button>
               </div>
-            }
-          </div>
-        </div>
-
-        <div class="op-card">
-          <h2 class="op-card-title">Top fornitori e audit</h2>
-          <div class="record-list compact">
-            @for (supplier of expenseSuppliersSummary(); track supplier.supplier) {
-              <div class="record-row">
-                <div class="record-info"><strong>{{ supplier.supplier }}</strong><span>{{ supplier.count }} spese</span></div>
-                <div class="record-actions"><strong>€ {{ supplier.total.toLocaleString('it-IT') }}</strong></div>
+            </div>
+            <form class="op-form" [formGroup]="expenseSupplierForm" (ngSubmit)="addExpenseSupplier()">
+              <div class="form-grid">
+                <label><span>Ragione sociale</span><input type="text" formControlName="businessName"></label>
+                <label><span>Partita IVA</span><input type="text" formControlName="vatNumber"></label>
+                <label><span>Indirizzo</span><input type="text" formControlName="address"></label>
+                <label><span>Contatto</span><input type="text" formControlName="contactName"></label>
+                <label><span>Email</span><input type="email" formControlName="email"></label>
+                <label><span>Telefono</span><input type="text" formControlName="phone"></label>
+                <label class="wide-field"><span>Tipo fornitura</span><input type="text" formControlName="supplyType"></label>
               </div>
-            }
+              <div class="form-actions">
+                <button type="submit" class="btn-primary" [disabled]="!expensePermissions()['expense:update']">Aggiungi fornitore</button>
+              </div>
+            </form>
           </div>
-          <div class="detail-section">
-            <span class="detail-section-title">Audit modifiche critiche</span>
-            <div class="record-list compact">
-              @for (entry of allExpenseAuditLog().slice(0, 12); track entry.id) {
+          <div class="op-card">
+            <div class="expenses-panel-head">
+              <div class="expenses-panel-copy">
+                <h2 class="op-card-title">Elenco fornitori</h2>
+                <p>Vista compatta con dati essenziali per consultazione rapida.</p>
+              </div>
+            </div>
+            <div class="record-list">
+              @for (supplier of allExpenseSuppliers(); track supplier.id) {
                 <div class="record-row">
-                  <div class="record-info"><strong>{{ entry.action }} · {{ entry.entityType }}</strong><span>{{ entry.actor }} · {{ entry.createdAt.slice(0, 16).replace('T', ' ') }}</span></div>
+                  <div class="record-info">
+                    <strong>{{ supplier.businessName }}</strong>
+                    <span>{{ supplier.supplyType }} · P.IVA {{ supplier.vatNumber || 'n.d.' }}</span>
+                    <small>📧 {{ supplier.email || '—' }} · 📞 {{ supplier.phone || '—' }}</small>
+                  </div>
                 </div>
               }
             </div>
           </div>
         </div>
-      </div>
+      }
+
+      <!-- TAB 4: STATISTICHE → Raggruppamenti per categoria / periodo FULL WIDTH -->
+      @if (expenseView() === 'statistiche') {
+        <div class="expenses-card-grid">
+          <div class="op-card">
+            <div class="expenses-panel-head">
+              <div class="expenses-panel-copy">
+                <h2 class="op-card-title">Spese per categoria</h2>
+                <p>Distribuzione dei costi per capire subito dove si concentra la spesa.</p>
+              </div>
+            </div>
+            <div class="record-list">
+              @for (entry of expenseByCategorySummary(); track entry.categoryLabel) {
+                <div class="record-row">
+                  <div class="record-info">
+                    <strong>{{ entry.categoryLabel }}</strong>
+                    <span>{{ entry.count }} movimenti</span>
+                  </div>
+                  <div class="record-actions">
+                    <strong>€ {{ entry.total.toLocaleString('it-IT') }}</strong>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+          <div class="op-card">
+            <div class="expenses-panel-head">
+              <div class="expenses-panel-copy">
+                <h2 class="op-card-title">Top fornitori per importo</h2>
+                <p>Ranking rapido dei fornitori con maggiore impatto sul budget.</p>
+              </div>
+            </div>
+            <div class="record-list">
+              @for (supplier of expenseSuppliersSummary(); track supplier.supplier) {
+                <div class="record-row">
+                  <div class="record-info">
+                    <strong>{{ supplier.supplier }}</strong>
+                    <span>{{ supplier.count }} spese</span>
+                  </div>
+                  <div class="record-actions">
+                    <strong>€ {{ supplier.total.toLocaleString('it-IT') }}</strong>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        </div>
+      }
+
+      <!-- TAB 5: AUDIT → Modifiche critiche + storico FULL WIDTH -->
+      @if (expenseView() === 'audit') {
+        <div class="op-card expenses-panel">
+          <div class="expenses-panel-head">
+            <div class="expenses-panel-copy">
+              <h2 class="op-card-title">Audit modifiche critiche</h2>
+              <p>Storico sintetico delle modifiche rilevanti per controllo amministrativo.</p>
+            </div>
+          </div>
+          <div class="record-list">
+            @for (entry of allExpenseAuditLog().slice(0, 50); track entry.id) {
+              <div class="record-row">
+                <div class="record-info">
+                  <strong>{{ entry.action }} · {{ entry.entityType }}</strong>
+                  <span>{{ entry.actor }} · {{ entry.createdAt.slice(0, 16).replace('T', ' ') }}</span>
+                </div>
+              </div>
+            } @empty {
+              <div class="empty">Nessuna modifica critica registrata.</div>
+            }
+          </div>
+        </div>
+      }
 
       @if (expenseModalOpen()) {
         <div class="ui-modal-overlay" (click)="closeExpenseModal()">
@@ -4346,7 +4636,10 @@
                 </header>
                 <div class="form-grid">
                   <label [class.has-error]="hasFieldError(expenseForm, 'categoryId')"><span>Categoria *</span><select formControlName="categoryId"><option value="">Seleziona categoria…</option>@for (category of allExpenseCategories(); track category.id) {<option [value]="category.id">{{ category.parentCategory }} · {{ category.label }}</option>}</select>@if (hasFieldError(expenseForm, 'categoryId')) { <small class="field-error">Categoria obbligatoria</small> }</label>
-                  <label><span>Fornitore anagrafica</span><select formControlName="supplierId"><option value="">Utenza generica</option>@for (supplier of allExpenseSuppliers(); track supplier.id) {<option [value]="supplier.id">{{ supplier.businessName }}</option>}</select></label>
+                  <div style="display:flex; gap:.5rem; align-items:end;">
+                    <label style="flex:1; margin:0"><span>Fornitore anagrafica</span><select formControlName="supplierId"><option value="">Utenza generica</option>@for (supplier of allExpenseSuppliers(); track supplier.id) {<option [value]="supplier.id">{{ supplier.businessName }}</option>}</select></label>
+                    <button type="button" class="btn-sm btn-primary-sm" (click)="openClientModal(); contactModalKind.set('fornitore')">+ Nuovo fornitore</button>
+                  </div>
                   <label class="wide-field"><span>Fornitore generico</span><input type="text" formControlName="genericSupplierLabel" placeholder="Solo se non presente in anagrafica"></label>
                 </div>
               </section>
@@ -4393,8 +4686,8 @@
 
     <!-- ═══════════════ DIPENDENTI ═══════════════ -->
     @case ('orari') {
-      <div class="employees-page">
-        <div class="op-card employees-toolbar-shell">
+      <div class="employees-page planner-page">
+        <div class="op-card employees-toolbar-shell planner-toolbar-shell">
           <div class="compact-toolbar-main">
             <div class="compact-toolbar-title">
               <h2 class="op-card-title">Orari e Dipendenti</h2>
@@ -4407,246 +4700,811 @@
                 }
               </div>
             </div>
-            <div class="compact-toolbar-actions">
+            <div class="compact-toolbar-actions planner-topbar-actions">
               <button type="button" class="btn-primary employee-action-cta" (click)="openCreateEmployeeModal()">
                 Nuovo dipendente
               </button>
             </div>
           </div>
 
-          <div class="employee-toolbar-secondary">
-            <div class="employee-month-toolbar">
-              <button type="button" class="btn-sm" (click)="prevEmployeeScheduleMonth()">Mese prec.</button>
-              <input type="month" [value]="employeeScheduleMonth().slice(0, 7)" (change)="updateEmployeeScheduleMonth($event)">
-              <button type="button" class="btn-sm" (click)="nextEmployeeScheduleMonth()">Mese succ.</button>
-              <button type="button" class="btn-ghost" (click)="resetEmployeeScheduleMonth()">Oggi</button>
+          <!-- Planner toolbar -->
+          <div class="planner-toolbar">
+            <div class="planner-week-pills" role="tablist" aria-label="Settimane">
+              @for (week of plannerShiftWeeksFromAnchor(); track week.index) {
+                <button type="button"
+                        role="tab"
+                        [attr.aria-selected]="plannerActiveWeekIndex() === week.index"
+                        class="planner-week-pill"
+                        [class.active]="plannerActiveWeekIndex() === week.index"
+                        (click)="plannerActiveWeekIndex.set(week.index)">
+                  <span class="pill-label">{{ week.label }}</span>
+                  @if (week.startDate) { <span class="pill-sub">{{ week.startDate }}</span> }
+                  @if (week.index > 0) {
+                    <span class="pill-remove"
+                          (click)="$event.stopPropagation(); plannerRemoveWeek(week.index)"
+                          title="Rimuovi settimana" aria-label="Rimuovi settimana">×</span>
+                  }
+                </button>
+              }
+              <button type="button" class="planner-week-add" [disabled]="plannerTotalWeeks() >= plannerMaxWeeks" (click)="plannerAddWeek()">
+                + Aggiungi settimana
+              </button>
             </div>
 
-            <div class="employee-planning-summary employee-planning-summary-inline">
-              <div class="employee-planning-stat">
-                <span>Ore</span>
-                <strong>{{ formatMinutesToHoursLabel(employeeScheduleSummary().workedMinutes) }}</strong>
+            <div class="planner-toolbar-right">
+              <label class="planner-date-field">
+                <span>Inizio mese (opzionale)</span>
+                <input type="date" [value]="plannerMonthAnchor()" (change)="plannerApplyMonthAnchor($any($event.target).value)" />
+              </label>
+              <button type="button" class="btn-sm"
+                      [disabled]="plannerActiveWeekIndex() === 0"
+                      (click)="plannerCopyFromPreviousWeek(plannerActiveWeekIndex())">
+                📋 Copia da settimana precedente
+              </button>
+              <button type="button" class="btn-sm btn-primary-sm" (click)="plannerExportPdfPaghe()">
+                📄 Esporta PDF · Ufficio Paghe
+              </button>
+            </div>
+          </div>
+
+          <!-- ════════════════════════════════════════════════════════════ -->
+          <!-- REPORT MENSILE PAGHE · Anteprima griglia 31 giorni × dip.    -->
+          <!-- ════════════════════════════════════════════════════════════ -->
+          <div class="op-card paghe-monthly-card"
+               [attr.data-paghe-nome-mese]="pagheMesi[pagheMese()].toUpperCase()"
+               [attr.data-paghe-anno]="pagheAnno()">
+            <header class="paghe-monthly-head">
+              <div>
+                <h3 class="op-card-title">📊 Report mensile · Ufficio paghe</h3>
+                <span class="text-muted small">Griglia 31 giorni · Ore giornaliere · Codici F / M / P · Totali e straordinari</span>
               </div>
-              <div class="employee-planning-stat">
-                <span>Straord.</span>
-                <strong>{{ formatMinutesToHoursLabel(employeeScheduleSummary().overtimeMinutes) }}</strong>
+              <div class="paghe-monthly-actions">
+                <label class="paghe-filter">
+                  <span>Mese</span>
+                  <select (change)="onPagheMeseChange($event)">
+                    @for (m of pagheMesi; track m; let mi = $index) {
+                      <option [value]="mi" [selected]="mi === pagheMese()">{{ m }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="paghe-filter">
+                  <span>Anno</span>
+                  <select (change)="onPagheAnnoChange($event)">
+                    @for (y of pagheAnniRange(); track y) {
+                      <option [value]="y" [selected]="y === pagheAnno()">{{ y }}</option>
+                    }
+                  </select>
+                </label>
+                <button type="button" class="btn-sm btn-primary-sm" (click)="plannerExportPdfPaghe()">
+                  🖨️ Stampa PDF
+                </button>
               </div>
-              <div class="employee-planning-stat">
-                <span>Assenze</span>
-                <strong>{{ employeeScheduleSummary().days }} gg</strong>
+            </header>
+
+            <div class="paghe-monthly-scroll">
+              <!-- Intestazione: riga 1 = giorni 1..31 + colonne finali -->
+              <table class="paghe-monthly-table" role="grid">
+                <thead>
+                  <tr class="paghe-tr-head-days">
+                    <th class="paghe-th-dip" rowspan="2">Dipendente</th>
+                    @for (d of pagheDatesComputed(); track d.dayNum; let di = $index) {
+                      <th class="paghe-th-day paghe-th-day-{{ (d.dow === 0 || d.dow === 6) ? 'we' : (d.dow === -1 ? 'off' : 'wd') }}"
+                          [class.paghe-th-off]="d.dow === -1"
+                          [class.paghe-th-we]="d.dow === 0 || d.dow === 6">
+                        <strong>{{ d.dayNum }}</strong>
+                      </th>
+                    }
+                    <th class="paghe-th-tot paghe-th-tot-lav" rowspan="2" title="Ore lavorate totali">Ore<br/>Lavorate</th>
+                    <th class="paghe-th-tot paghe-th-tot-contr" rowspan="2" title="Monte ore contrattuale del mese">Ore<br/>Contratto</th>
+                    <th class="paghe-th-tot paghe-th-tot-stra" rowspan="2" title="Straordinari (eccedenza su contratto)">Straord.<br/>(h)</th>
+                    <th class="paghe-th-tot paghe-th-tot-ass" rowspan="2" title="Giorni ferie / permesso / malattia">F / P / M</th>
+                  </tr>
+                  <tr class="paghe-tr-head-dow">
+                    @for (d of pagheDatesComputed(); track d.dayNum) {
+                      <td class="paghe-th-dow paghe-th-dow-{{ (d.dow === 0 || d.dow === 6) ? 'we' : (d.dow === -1 ? 'off' : 'wd') }}"
+                          [class.paghe-th-off]="d.dow === -1"
+                          [class.paghe-th-we]="d.dow === 0 || d.dow === 6">
+                        {{ d.dow === -1 ? '' : ['D','L','M','M','G','V','S'][d.dow] }}
+                      </td>
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of pagheExportGrid(); track row.employeeId; let ri = $index) {
+                    <tr class="paghe-tr-row paghe-tr-row-{{ ri % 2 === 0 ? 'even' : 'odd' }}">
+                      <td class="paghe-td-dip"
+                          (click)="openEmployeeModal(row.employeeId, 'turni-standard')"
+                          title="Clicca per modificare i turni standard di {{ row.employeeName }}">
+                        <div class="paghe-dip-nome">{{ row.employeeName }}</div>
+                        <div class="paghe-dip-role text-muted small">{{ row.jobTitle || ' — ' }} · {{ row.contractHoursWeekly || 40 }}h/sett</div>
+                      </td>
+                      @for (cell of row.cells; track cell.dayNumber) {
+                        <td class="paghe-td-cell paghe-cell paghe-cell-{{ cell.kind }}"
+                            [class.paghe-cell-we]="cell.isWeekend"
+                            [class.paghe-cell-off]="cell.kind === 'fuori'">
+                          <span class="paghe-cell-inner">{{ cell.display }}</span>
+                        </td>
+                      }
+                      <td class="paghe-td-tot paghe-td-tot-lav"><strong>{{ fmtNumOre(row.workedHours) }}</strong></td>
+                      <td class="paghe-td-tot paghe-td-tot-contr"><strong>{{ fmtNumOre(row.contractHours) }}</strong></td>
+                      <td class="paghe-td-tot paghe-td-tot-stra" [class.paghe-tot-pos]="row.overtimeHours > 0">
+                        <strong>{{ row.overtimeHours > 0 ? '+' + fmtNumOre(row.overtimeHours) : fmtNumOre(row.overtimeHours) }}</strong>
+                      </td>
+                      <td class="paghe-td-tot paghe-td-tot-ass">
+                        @if (row.leaveMinutes.ferie) { <span class="tag-ass tag-ass-f">F {{ fmtNumOre(row.leaveMinutes.ferie/60) }}h</span> }
+                        @if (row.leaveMinutes.permesso) { <span class="tag-ass tag-ass-p">P {{ fmtNumOre(row.leaveMinutes.permesso/60) }}h</span> }
+                        @if (row.leaveMinutes.malattia) { <span class="tag-ass tag-ass-m">M {{ fmtNumOre(row.leaveMinutes.malattia/60) }}h</span> }
+                        @if (!row.leaveMinutes.ferie && !row.leaveMinutes.permesso && !row.leaveMinutes.malattia) { <span class="text-muted">—</span> }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            <footer class="paghe-monthly-foot">
+              <div class="paghe-foot-title">
+                <h4>📝 Note assenze</h4>
+                <span class="text-muted small">Riepilogo ferie / permessi / malattie per l'ufficio paghe</span>
               </div>
-              <div class="employee-planning-stat">
-                <span>Turni</span>
-                <strong>{{ employeesWithConfiguredShiftsCount() }}</strong>
+              @if (pagheNoteList().length === 0) {
+                <p class="text-muted small" style="margin:0.75rem 0 0 0;">Nessuna assenza registrata per il periodo selezionato.</p>
+              } @else {
+                <table class="paghe-notes-table">
+                  <thead>
+                    <tr>
+                      <th>Dipendente</th>
+                      <th>Assenza per</th>
+                      <th>Dal</th>
+                      <th>Al</th>
+                      <th>Ore</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (n of pagheNoteList(); track n.employeeName + n.assenzaPer + n.dal; let ni = $index) {
+                      <tr>
+                        <td>{{ n.employeeName }}</td>
+                        <td>
+                          <span class="tag-ass tag-ass-{{ n.assenzaPer === 'Ferie' ? 'f' : (n.assenzaPer === 'Permesso' ? 'p' : 'm') }}">
+                            {{ n.assenzaPer }}
+                          </span>
+                        </td>
+                        <td class="paghe-note-date">{{ n.dal }}</td>
+                        <td class="paghe-note-date">{{ n.al }}</td>
+                        <td><strong>{{ n.oreN }}</strong></td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+
+              <div class="paghe-foot-legenda">
+                <span class="legend-pill legend-standard">Lavorato → mostra ore giornaliere (es. 9)</span>
+                <span class="legend-pill legend-ferie">F = Ferie</span>
+                <span class="legend-pill legend-permesso">P = Permesso (eventualmente con ore)</span>
+                <span class="legend-pill legend-malattia">M = Malattia</span>
+                <span class="legend-pill legend-riposo">R = Riposo (non lavorativo)</span>
+                <span class="legend-pill legend-empty">· = Nessun dato / Vuoto</span>
+              </div>
+            </footer>
+          </div>
+
+          <div class="planner-summary-row">
+            <div class="planner-summary-block">
+              <strong>Legenda colori stato giornata:</strong>
+              <div class="planner-legend">
+                @for (tone of plannerLeaveTones; track tone.tone) {
+                  <span class="legend-pill" [class]="'legend-' + tone.tone">
+                    {{ tone.label }}
+                  </span>
+                }
+                <span class="legend-pill legend-empty">Vuoto</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div class="employees-list">
-          @for (employee of allCashOperators(); track employee.id) {
-            <div class="op-card employee-list-row">
-              <div class="employee-list-main">
-                <div class="employee-list-title-row">
+        <div class="planner-grid-wrap">
+          <div class="planner-grid" style="grid-template-columns: 13rem repeat(7, minmax(0, 1fr));">
+            <!-- Header colonna dipendente -->
+            <div class="planner-cell planner-head" aria-hidden="true">
+              <strong>Dipendente</strong>
+            </div>
+            <!-- Header giorni della settimana -->
+            @for (day of employeeShiftDays; track day.key) {
+              <div class="planner-cell planner-head planner-head-day">
+                <strong>{{ day.label }}</strong>
+              </div>
+            }
+            <!-- Righe dipendenti -->
+            @for (employee of allCashOperators(); track employee.id) {
+              <div class="planner-cell planner-side">
+                <div class="planner-employee">
                   <strong>{{ employee.name }}</strong>
+                  <span class="text-muted small">{{ employee.jobTitle || employeeRoleLabel(employee.role) }}</span>
                   <span class="badge" [class.badge-success]="employee.active" [class.badge-warning]="!employee.active">
                     {{ employeeStatusLabel(employee.active) }}
                   </span>
                 </div>
-                <div class="employee-list-meta">
-                  <span>{{ employeeRoleLabel(employee.role) }}</span>
-                  <span>{{ employeeEmploymentLabel(employee.employmentType) }}</span>
-                  <span>{{ employee.jobTitle || employeeRoleLabel(employee.role) }}</span>
-                  <span>{{ employeeContractLabel(employee.contractHoursWeekly) }}</span>
-                </div>
               </div>
-              <div class="record-actions">
-                <button type="button" class="btn-sm" (click)="openEmployeeModal(employee.id)">Modifica</button>
-                <button type="button" class="btn-sm" (click)="toggleCashOperatorActive(employee.id)">
-                  @if (employee.active) { Disattiva } @else { Attiva }
+              @for (day of employeeShiftDays; track day.key) {
+                @let cell = plannerParseCell(employee, plannerActiveWeekIndex(), day.key);
+                <button type="button"
+                        class="planner-cell planner-day"
+                        [class]="plannerCellToneClass(cell)"
+                        [attr.aria-pressed]="plannerSelectedCell()?.employeeId === employee.id && plannerSelectedCell()?.dayKey === day.key && plannerSelectedCell()?.weekIndex === plannerActiveWeekIndex()"
+                        (click)="plannerSelectedCell.set({ employeeId: employee.id, weekIndex: plannerActiveWeekIndex(), dayKey: day.key })">
+                  <span class="planner-day-tone-label">{{ plannerWeekToneLabel(cell) }}</span>
+                  <span class="planner-day-main">{{ plannerFormatCell(cell) }}</span>
+                  @if (plannerHoursBadge(cell)) {
+                    <span class="planner-day-hours">{{ plannerHoursBadge(cell) }}</span>
+                  }
                 </button>
-                <button type="button" class="btn-sm btn-danger-sm" (click)="removeCashOperator(employee.id)">Elimina</button>
+              }
+            }
+          </div>
+        </div>
+
+        @if (plannerSelectedCell(); as selected) {
+          @let employee = allCashOperators().find(op => op.id === $any(selected).employeeId);
+          @let dayMeta = employeeShiftDays.find(d => d.key === $any(selected).dayKey);
+          @if (employee && dayMeta) {
+            <div class="op-card planner-editor">
+              <header class="planner-editor-head">
+                <div>
+                  <h3 class="op-card-title">Modifica turno · {{ employee.name }} · {{ dayMeta.label }} · Settimana {{ $any(selected).weekIndex + 1 }}</h3>
+                  <span class="text-muted small">Orari in step 30 minuti da 00:00 a 24:00 · {{ planner30MinSlots.length }} slot</span>
+                </div>
+                <div class="planner-editor-actions">
+                  <button type="button" class="btn-sm btn-danger-sm"
+                          (click)="plannerClearCell($any(selected).employeeId, $any(selected).weekIndex, $any(selected).dayKey)">
+                    🗑️ Pulisci
+                  </button>
+                  <button type="button" class="btn-sm btn-ghost" (click)="plannerSelectedCell.set(null)">Chiudi</button>
+                </div>
+              </header>
+
+              <div class="planner-editor-body">
+                <div class="planner-editor-col">
+                  <h4 class="field-legend">Stato giornata</h4>
+                  <div class="planner-tone-buttons">
+                    @for (tone of plannerLeaveTones; track tone.tone) {
+                      <button type="button"
+                              class="planner-tone-btn"
+                              [class]="'tone-bg-' + tone.tone"
+                              [class.active]="plannerParseCell(employee, $any(selected).weekIndex, $any(selected).dayKey).tone === tone.tone"
+                              (click)="plannerSetCellTone($any(selected).employeeId, $any(selected).weekIndex, $any(selected).dayKey, tone.tone)">
+                        {{ tone.label }}
+                      </button>
+                    }
+                  </div>
+                </div>
+                @let current = plannerParseCell(employee, $any(selected).weekIndex, $any(selected).dayKey);
+                @if (current.tone === 'standard') {
+                  <div class="planner-editor-col">
+                    <h4 class="field-legend">Preset rapidi</h4>
+                    <div class="planner-preset-buttons">
+                      @for (preset of plannerShiftPresets; track preset.key) {
+                        <button type="button" class="planner-preset-btn"
+                                (click)="plannerApplyPresetToSelected(preset.key)">
+                          <strong>{{ preset.label }}</strong>
+                          <span>{{ preset.start }}–{{ preset.end.slice(0, 10).trim() }} · pausa {{ preset.breakFrom }}–{{ preset.breakTo }}</span>
+                        </button>
+                      }
+                    </div>
+                    <h4 class="field-legend mt1">Orario personalizzato (step mezz'ora · 00:00 → 24:00)</h4>
+                    <div class="planner-custom-fields">
+                      <label class="custom-field inline">
+                        <span>Inizio</span>
+                        <select [value]="(current.startMinutes != null) ? planner30MinSlots[plannerSlotIndex(current.startMinutes)] : plannerEditorTmp().start"
+                          (change)="plannerEditorSetStart($any($event.target).value)">
+                          @for (slot of planner30MinSlots; track slot) {
+                            <option [value]="slot">{{ slot }}</option>
+                          }
+                        </select>
+                      </label>
+                      <label class="custom-field inline">
+                        <span>Fine</span>
+                        <select [value]="(current.endMinutes != null) ? planner30MinSlots[plannerSlotIndex(current.endMinutes)] : plannerEditorTmp().end"
+                          (change)="plannerEditorSetEnd($any($event.target).value)">
+                          @for (slot of planner30MinSlots; track slot) {
+                            <option [value]="slot">{{ slot }}</option>
+                          }
+                        </select>
+                      </label>
+                      <label class="custom-field inline switch-inline">
+                        <span>Pausa pranzo</span>
+                        <label class="planner-switch">
+                          <input type="checkbox"
+                            [checked]="(current.breakStart != null && current.breakEnd != null) || plannerEditorTmp().hasBreak"
+                            (change)="plannerEditorSetBreakToggle($any($event.target).checked)">
+                          <span class="planner-switch-track"></span>
+                        </label>
+                      </label>
+                      @if ((current.breakStart != null && current.breakEnd != null) || plannerEditorTmp().hasBreak) {
+                        <label class="custom-field inline">
+                          <span>Pausa da</span>
+                          <select [value]="(current.breakStart != null) ? planner30MinSlots[plannerSlotIndex(current.breakStart)] : plannerEditorTmp().breakFrom"
+                            (change)="plannerEditorSetBreakFrom($any($event.target).value)">
+                            @for (slot of planner30MinSlots; track slot) {
+                              <option [value]="slot">{{ slot }}</option>
+                            }
+                          </select>
+                        </label>
+                        <label class="custom-field inline">
+                          <span>Pausa a</span>
+                          <select [value]="(current.breakEnd != null) ? planner30MinSlots[plannerSlotIndex(current.breakEnd)] : plannerEditorTmp().breakTo"
+                            (change)="plannerEditorSetBreakTo($any($event.target).value)">
+                            @for (slot of planner30MinSlots; track slot) {
+                              <option [value]="slot">{{ slot }}</option>
+                            }
+                          </select>
+                        </label>
+                      }
+                    </div>
+                  </div>
+                }
+                @else if (current.tone === 'permesso') {
+                  <div class="planner-editor-col">
+                    <h4 class="field-legend">Permesso orario parziale (lascia default per giornata intera)</h4>
+                    <div class="planner-custom-fields">
+                      <label class="custom-field inline">
+                        <span>Inizio permesso</span>
+                        <select
+                          [value]="(current.permitStartMinutes != null) ? planner30MinSlots[plannerSlotIndex(current.permitStartMinutes)] : plannerPermitEditorTmp().start"
+                          (change)="plannerPermitEditorSetStart($any($event.target).value)">
+                          @for (slot of planner30MinSlots; track slot) {
+                            <option [value]="slot">{{ slot }}</option>
+                          }
+                        </select>
+                      </label>
+                      <label class="custom-field inline">
+                        <span>Fine permesso</span>
+                        <select
+                          [value]="(current.permitEndMinutes != null) ? planner30MinSlots[plannerSlotIndex(current.permitEndMinutes)] : plannerPermitEditorTmp().end"
+                          (change)="plannerPermitEditorSetEnd($any($event.target).value)">
+                          @for (slot of planner30MinSlots; track slot) {
+                            <option [value]="slot">{{ slot }}</option>
+                          }
+                        </select>
+                      </label>
+                      <div class="permit-hours-summary">
+                        @let minuti = plannerPermitMinutesCalc(current.permitStartMinutes, current.permitEndMinutes, plannerPermitEditorTmp().start, plannerPermitEditorTmp().end);
+                        @if (minuti > 0 && minuti < 480) {
+                          <span class="chip chip-info chip-big">⏱️ Permesso orario: <strong>{{ (minuti/60) % 1 === 0 ? (minuti/60) : ((minuti/60).toFixed(1).replace('.',',')) }}</strong>h</span>
+                        } @else {
+                          <span class="chip chip-neutral chip-big">📋 Permesso giornata intera</span>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                }
               </div>
             </div>
           }
-        </div>
+        }
       </div>
     }
 
     <!-- ═══════════════ IMPOSTAZIONI ═══════════════ -->
     @case ('impostazioni') {
-      <div class="settings-grid">
-        <div class="op-card">
-          <h2 class="op-card-title">Dati azienda</h2>
-          <div class="op-form">
-            <label><span>Ragione sociale</span><input type="text" placeholder="Audiomax S.r.l." value="Audiomax S.r.l."></label>
-            <label><span>P.IVA</span><input type="text" placeholder="IT00000000000"></label>
-            <label><span>Sede</span><input type="text" placeholder="Indirizzo sede"></label>
-            <label><span>Telefono</span><input type="text" placeholder="Telefono azienda"></label>
-            <label><span>Email</span><input type="email" placeholder="info@audiomax.it"></label>
-            <label><span>Sito web</span><input type="text" placeholder="www.audiomax.it"></label>
-            <div class="form-actions"><button class="btn-primary">Salva dati</button></div>
+      <div class="op-card op-card-operativa">
+        <div class="op-card-title-row">
+          <div class="section-toolbar-copy">
+            <a routerLink="/dashboard" class="btn-ghost btn-tiny" aria-label="Torna alla dashboard">←</a>
+            <div class="section-toolbar-text">
+              <h2 class="op-card-title">Impostazioni</h2>
+              <small class="section-toolbar-eyebrow">{{ content().primaryAction }}</small>
+            </div>
           </div>
         </div>
+      </div>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Operatori / Dipendenti</h2>
-          <div class="record-list compact">
-            @for (operator of allCashOperators(); track operator.id) {
-              <div class="record-row">
-                <div class="record-info">
-                  <strong>{{ operator.name }}</strong>
-                  <span>{{ operator.role }} · @if (operator.active) { attivo } @else { disattivato }</span>
-                </div>
-                <div class="record-actions">
-                  <span class="badge" [class.badge-success]="operator.active" [class.badge-warning]="!operator.active">
-                    @if (operator.active) { Attivo } @else { Off }
-                  </span>
-                  <button type="button" class="btn-sm" (click)="toggleCashOperatorActive(operator.id)">
-                    @if (operator.active) { Disattiva } @else { Attiva }
-                  </button>
-                  <button type="button" class="btn-sm btn-danger-sm" (click)="removeCashOperator(operator.id)">Elimina</button>
-                </div>
+      <!-- Barra tabs orizzontale sticky -->
+      <nav class="settings-tabs-nav">
+        @for (t of SETTINGS_TABS; track t.key) {
+          <button type="button"
+                  class="settings-tab-btn"
+                  [class.active]="activeSettingsTab() === t.key"
+                  (click)="setActiveSettingsTab(t.key)">
+            <span>{{ t.icon }}</span>{{ t.label }}
+          </button>
+        }
+      </nav>
+
+      <!-- Contenuto tab selezionato -->
+      <div class="settings-tab-content">
+        @switch (activeSettingsTab()) {
+
+          @case ('azienda') {
+            <div class="op-card">
+              <h2 class="op-card-title">🏢 Dati Azienda</h2>
+              <div class="op-form">
+                <label><span>Ragione sociale</span><input type="text" placeholder="Audiomax S.r.l." value="Audiomax S.r.l."></label>
+                <label><span>P.IVA</span><input type="text" placeholder="IT00000000000"></label>
+                <label><span>Sede</span><input type="text" placeholder="Indirizzo sede"></label>
+                <label><span>Telefono</span><input type="text" placeholder="Telefono azienda"></label>
+                <label><span>Email</span><input type="email" placeholder="info@audiomax.it"></label>
+                <label><span>Sito web</span><input type="text" placeholder="www.audiomax.it"></label>
+                <div class="form-actions"><button class="btn-primary">Salva dati</button></div>
               </div>
-            }
-          </div>
-          <form class="op-form op-form-spaced" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
-            <label><span>Nuovo operatore</span><input type="text" formControlName="name" placeholder="Nome operatore"></label>
-            <label><span>Ruolo</span>
-              <select formControlName="role">
-                <option value="vendita">Vendita</option>
-                <option value="tecnico">Tecnico</option>
-                <option value="amministrazione">Amministrazione</option>
-                <option value="magazzino">Magazzino</option>
-              </select>
-            </label>
-            <label><span>Stato</span>
-              <select formControlName="active">
-                <option [ngValue]="true">Attivo</option>
-                <option [ngValue]="false">Disattivato</option>
-              </select>
-            </label>
-            <div class="form-actions"><button type="submit" class="btn-primary">Aggiungi</button></div>
-          </form>
-          @if (inactiveCashOperators().length) {
-            <div class="detail-note">
-              <span>Operatori disattivati</span>
-              <p>{{ inactiveCashOperatorNames() }}</p>
             </div>
           }
-        </div>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Categorie servizi</h2>
-          <div class="record-list compact">
-            @for (category of cashCategories(); track category) {
-              <div class="record-row">
-                <div class="record-info"><strong>{{ category }}</strong></div>
+          @case ('dipendenti') {
+            <div class="op-card">
+              <h2 class="op-card-title">
+                👥 Operatori / Dipendenti
+                <span class="op-card-title-right">
+                  <label class="toggle-chip">
+                    <input type="checkbox" [checked]="showHiddenOperators()"
+                           (change)="toggleShowHiddenOperators($any($event.target).checked)">
+                    Mostra nascosti
+                  </label>
+                  <button type="button" class="btn-sm btn-primary-sm" (click)="openCreateEmployeeModal()">+ Nuovo</button>
+                </span>
+              </h2>
+              <div class="operators-fast-list">
+                @for (operator of operatorsListVisible(); track operator.id) {
+                  <div class="op-fast-row" [class.op-fast-hidden]="!operator.active">
+                    <div class="op-fast-info">
+                      <div class="op-fast-name">
+                        {{ operator.name }}
+                        <span class="badge"
+                              [class.badge-success]="operator.active"
+                              [class.badge-warning]="!operator.active">
+                          @if (operator.active) { Attivo } @else { Nascosto }
+                        </span>
+                        @if (operator.role) {
+                          <span class="badge badge-secondary">{{ employeeRoleLabel(operator.role) }}</span>
+                        }
+                        @if (operator.contractHoursWeekly) {
+                          <span class="badge badge-ghost">{{ operator.contractHoursWeekly }}h/sett</span>
+                        }
+                      </div>
+                    </div>
+                    <div class="op-fast-actions">
+                      <button type="button" class="chip-btn chip-blue"
+                              (click)="openEmployeeModal(operator.id, 'turni-standard')">
+                        🕒 Turni standard
+                      </button>
+                      <button type="button" class="chip-btn chip-green"
+                              (click)="openEmployeeModal(operator.id, 'turni-settimanali')">
+                        📅 Turni sett.
+                      </button>
+                      <button type="button" class="chip-btn chip-gray"
+                              (click)="openEmployeeModal(operator.id, 'anagrafica')">
+                        ✏️ Anagrafica
+                      </button>
+                      @if (operator.active) {
+                        <button type="button" class="chip-btn chip-warning"
+                                (click)="toggleCashOperatorActive(operator.id)">
+                          👁️ Nascondi
+                        </button>
+                      } @else {
+                        <button type="button" class="chip-btn chip-success"
+                                (click)="toggleCashOperatorActive(operator.id)">
+                          👁️‍🗨️ Mostra
+                        </button>
+                      }
+                    </div>
+                  </div>
+                } @empty {
+                  <div class="op-fast-empty">Nessun operatore — aggiungi il primo con + Nuovo.</div>
+                }
               </div>
-            }
-          </div>
-          <div class="op-form op-form-spaced">
-            <label><span>Nuova categoria</span><input #svcCat type="text" placeholder="Nome categoria"></label>
-            <div class="form-actions"><button class="btn-primary" (click)="addServiceCategory(svcCat.value); svcCat.value = ''">Aggiungi</button></div>
-          </div>
-        </div>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Listino cassa</h2>
-          <div class="record-list compact">
-            @for (product of allCashProducts(); track product.id) {
-              <div class="record-row">
-                <div class="record-info">
-                  <strong>{{ product.name }}</strong>
-                  <span>{{ product.category }} · {{ product.pricingMode }} · € {{ resolveCashProductPrice(product).toLocaleString('it-IT') }}</span>
+              <form class="op-form op-form-spaced" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
+                <label><span>Nuovo operatore</span><input type="text" formControlName="name" placeholder="Nome operatore"></label>
+                <label><span>Ruolo</span>
+                  <select formControlName="role">
+                    <option value="vendita">Vendita</option>
+                    <option value="tecnico">Tecnico</option>
+                    <option value="amministrazione">Amministrazione</option>
+                    <option value="magazzino">Magazzino</option>
+                  </select>
+                </label>
+                <label><span>Contratto settimanale</span>
+                  <select formControlName="contractHoursWeekly">
+                    @for (h of [24,30,32,36,38,40,44,48]; track h) {
+                      <option [value]="h">{{ h }} ore</option>
+                    }
+                  </select>
+                </label>
+                <div class="form-actions"><button type="submit" class="btn-primary">Aggiungi</button></div>
+              </form>
+
+              @if (inactiveCashOperators().length && !showHiddenOperators()) {
+                <div class="detail-note">
+                  <span>💡 Dipendenti nascosti ({{ inactiveCashOperators().length }})</span>
+                  <p>
+                    {{ inactiveCashOperatorNames() }}
+                    &nbsp;·&nbsp; attiva "Mostra nascosti" in alto per ripristinarli.
+                  </p>
                 </div>
-                <div class="record-actions">
-                  @if (product.linkedInventoryItemId) {
-                    <span class="badge badge-info">Magazzino</span>
+              }
+            </div>
+          }
+
+          @case ('orari-negozio') {
+            <div class="op-card store-schedule-card">
+              <h2 class="op-card-title">🏪 Orari Negozio · Chiusure e Aperture</h2>
+              <p class="text-muted" style="margin-bottom: 1.1rem; font-size: 0.88rem;">
+                Configura i giorni di chiusura settimanale, le aperture straordinarie (es. una Domenica) e le chiusure collettive (es. ferie di agosto).
+                Queste regole vengono applicate <strong>automaticamente</strong> al planner turni, al report paghe PDF e al controllo tecnici in Agenda.
+              </p>
+
+              <!-- Chiusura settimanale -->
+              <section class="store-sec">
+                <h3 class="store-sec-title"><span>📅</span> Giorni di chiusura settimanale</h3>
+                <p class="text-muted small" style="margin: -0.2rem 0 0.8rem 0;">
+                  Premi per selezionare i giorni in cui il negozio è normalmente chiuso.
+                  <strong>Le aperture straordinarie hanno la priorità.</strong>
+                </p>
+                <div class="store-week-chips">
+                  @for (g of STORE_WEEKDAY_KEYS; track g.key) {
+                    <button type="button"
+                            class="store-day-chip"
+                            [class.store-day-closed]="storeClosingDaysWeekly()[g.key]"
+                            (click)="toggleStoreClosingDay(g.key)"
+                            [title]="g.label + ' · ' + (storeClosingDaysWeekly()[g.key] ? 'NEGOZIO CHIUSO · clicca per aprire' : 'Negozi aperto · clicca per chiudere')">
+                      <span class="store-day-chip-short">{{ g.short }}</span>
+                      <span class="store-day-chip-label">{{ g.label }}</span>
+                      <span class="store-day-chip-state" [attr.data-state]="storeClosingDaysWeekly()[g.key] ? 'closed' : 'open'">
+                        {{ storeClosingDaysWeekly()[g.key] ? '🔒 Chiuso' : '🟢 Aperto' }}
+                      </span>
+                    </button>
                   }
-                  <button type="button" class="btn-sm btn-danger-sm" (click)="removeCashProduct(product.id)">Elimina</button>
                 </div>
-              </div>
-            }
-          </div>
-          <form class="op-form" [formGroup]="cashProductForm" (ngSubmit)="addCashProduct()">
-            <label><span>Voce</span><input type="text" formControlName="name" placeholder="Servizio o prodotto"></label>
-            <label><span>Categoria</span><input type="text" formControlName="category" placeholder="Categoria"></label>
-            <label><span>Prezzo €</span><input type="number" formControlName="price" placeholder="0"></label>
-            <label><span>Calcolo</span><select formControlName="pricingMode"><option value="fisso">Fisso</option><option value="quantita">Quantità</option><option value="ora">Ora</option><option value="mezzora">Mezz’ora</option><option value="quarto">Quarto d’ora</option></select></label>
-            <label><span>Scorciatoia</span>
-              <select formControlName="shortcut"><option [ngValue]="true">Si</option><option [ngValue]="false">No</option></select>
-            </label>
-            <label><span>Collega magazzino</span>
-              <select formControlName="linkedInventoryItemId">
-                <option value="">Nessuno</option>
-                @for (item of allInventoryItems(); track item.id) { <option [value]="item.id">{{ item.name }} ({{ item.stock }})</option> }
-              </select>
-            </label>
-            <div class="form-actions"><button type="submit" class="btn-primary">Salva voce</button></div>
-          </form>
-        </div>
+              </section>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Preferenze</h2>
-          <div class="op-form">
-            <label><span>Valuta</span><select><option>EUR (€)</option></select></label>
-            <label><span>Formato data</span><select><option>GG/MM/AAAA</option><option>AAAA-MM-GG</option></select></label>
-            <label><span>Lingua</span><select><option>Italiano</option></select></label>
-          </div>
-        </div>
+              <!-- Aperture straordinarie -->
+              <section class="store-sec">
+                <h3 class="store-sec-title"><span>🌟</span> Giorni di apertura straordinaria
+                  <span class="store-sec-count badge-blue">{{ storeExtraOpeningDates().length }}</span>
+                </h3>
+                <p class="text-muted small" style="margin: -0.2rem 0 0.9rem 0;">
+                  Un giorno di apertura straordinaria <strong>annulla</strong> ogni chiusura (settimanale o collettiva).
+                </p>
 
-        <div class="op-card">
-          <h2 class="op-card-title">Registratore fiscale</h2>
-          <p class="text-muted">Configurazione numerazione scontrini, fatture e chiusure per allineamento al registratore di cassa presente in negozio.</p>
-          <div class="op-form op-form-spaced">
-            <label>
-              <span>Tipo registratore</span>
-              <input type="text" [value]="cashFiscalSettings().registerType" (change)="updateFiscalSetting('registerType', $event)" placeholder="Es. Registratore telematico">
-            </label>
-            <label>
-              <span>Matricola / Seriale</span>
-              <input type="text" [value]="cashFiscalSettings().registerSerial" (change)="updateFiscalSetting('registerSerial', $event)" placeholder="Es. RT-001">
-            </label>
-            <label>
-              <span>Prossimo n. scontrino</span>
-              <input type="number" min="1" [value]="cashFiscalSettings().nextReceiptNumber" (change)="updateFiscalSetting('nextReceiptNumber', $event)">
-            </label>
-            <label>
-              <span>Prossimo n. fattura</span>
-              <input type="number" min="1" [value]="cashFiscalSettings().nextInvoiceNumber" (change)="updateFiscalSetting('nextInvoiceNumber', $event)">
-            </label>
-            <label>
-              <span>Prossimo n. chiusura</span>
-              <input type="number" min="1" [value]="cashFiscalSettings().nextClosureNumber" (change)="updateFiscalSetting('nextClosureNumber', $event)">
-            </label>
-          </div>
-        </div>
+                @if (storeExtraOpeningDates().length) {
+                  <div class="store-table-wrap">
+                    <table class="store-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 30%;">Data</th>
+                          <th>Nota (opzionale)</th>
+                          <th style="width: 72px;"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (a of storeExtraOpeningDates(); track a.id) {
+                          <tr>
+                            <td class="store-td-em">
+                              <strong>{{ a.date }}</strong>
+                              <span class="text-muted small">· {{ weekdayNameFromDate(a.date) }}</span>
+                            </td>
+                            <td>{{ a.note || '—' }}</td>
+                            <td>
+                              <button type="button" class="btn-ghost-xs btn-danger-xs" (click)="removeStoreExtraOpening(a.id)" title="Elimina">✕</button>
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <div class="store-empty">Nessuna apertura straordinaria configurata.</div>
+                }
 
-        <div class="op-card">
-          <h2 class="op-card-title">Archivio privacy</h2>
-          <div class="record-list compact">
-            @for (entry of privacyArchiveIndex(); track entry.id) {
-              <div class="record-row">
-                <div class="record-info">
-                  <strong>{{ entry.title }}</strong>
-                  <span>{{ entry.clientName }} · {{ entry.type }} · {{ entry.channel }}</span>
+                <div class="store-inline-form">
+                  <label class="store-form-field">
+                    <span>Data apertura</span>
+                    <input type="date" [value]="storeNewExtraOpening().date"
+                           (change)="storeNewExtraOpening.set({ ...storeNewExtraOpening(), date: $any($event.target).value })">
+                  </label>
+                  <label class="store-form-field" style="flex: 1 1 auto;">
+                    <span>Nota (opzionale)</span>
+                    <input type="text" placeholder="es. Inaugurazione / Domenica corsie"
+                           [value]="storeNewExtraOpening().note"
+                           (input)="storeNewExtraOpening.set({ ...storeNewExtraOpening(), note: $any($event.target).value })">
+                  </label>
+                  <button type="button" class="btn-primary-sm store-form-btn" (click)="addStoreExtraOpening()">
+                    ➕ Apertura straordinaria
+                  </button>
                 </div>
-                <div class="record-actions">
-                  <span class="badge badge-info">{{ entry.status }}</span>
-                  @if (entry.url) {
-                    <a class="btn-sm" [routerLink]="entry.url">Apri</a>
+              </section>
+
+              <!-- Chiusure collettive -->
+              <section class="store-sec">
+                <h3 class="store-sec-title"><span>🔒</span> Chiusure collettive del negozio
+                  <span class="store-sec-count badge-red">{{ storeBulkClosures().length }}</span>
+                </h3>
+                <p class="text-muted small" style="margin: -0.2rem 0 0.9rem 0;">
+                  Periodi in cui il negozio è completamente chiuso.
+                  Nel report paghe questi giorni vengono marcati <strong>F · Ferie</strong> per tutti i dipendenti.
+                </p>
+
+                @if (storeBulkClosures().length) {
+                  <div class="store-table-wrap">
+                    <table class="store-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 22%;">Da data</th>
+                          <th style="width: 22%;">A data</th>
+                          <th>Motivo</th>
+                          <th style="width: 70px;">Giorni</th>
+                          <th style="width: 72px;"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (c of storeBulkClosures(); track c.id) {
+                          <tr>
+                            <td class="store-td-em"><strong>{{ c.startDate }}</strong></td>
+                            <td class="store-td-em"><strong>{{ c.endDate }}</strong></td>
+                            <td>{{ c.reason }}</td>
+                            <td class="store-td-center">
+                              <span class="store-daycount-chip">{{ daysBetweenDates(c.startDate, c.endDate) }} gg</span>
+                            </td>
+                            <td>
+                              <button type="button" class="btn-ghost-xs btn-danger-xs" (click)="removeStoreBulkClosure(c.id)" title="Elimina">✕</button>
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                } @else {
+                  <div class="store-empty">Nessuna chiusura collettiva — usa il form sotto per aggiungere ferie negozio, ecc.</div>
+                }
+
+                <div class="store-inline-form store-inline-form-double">
+                  <label class="store-form-field">
+                    <span>Da data</span>
+                    <input type="date" [value]="storeNewBulkClosure().startDate"
+                           (change)="storeNewBulkClosure.set({ ...storeNewBulkClosure(), startDate: $any($event.target).value })">
+                  </label>
+                  <label class="store-form-field">
+                    <span>A data</span>
+                    <input type="date" [value]="storeNewBulkClosure().endDate"
+                           (change)="storeNewBulkClosure.set({ ...storeNewBulkClosure(), endDate: $any($event.target).value })">
+                  </label>
+                  <label class="store-form-field" style="flex: 1 1 auto;">
+                    <span>Motivo</span>
+                    <input type="text" placeholder="es. Ferie agosto 2026"
+                           [value]="storeNewBulkClosure().reason"
+                           (input)="storeNewBulkClosure.set({ ...storeNewBulkClosure(), reason: $any($event.target).value })">
+                  </label>
+                  <button type="button" class="btn-primary-sm store-form-btn store-form-btn-red" (click)="addStoreBulkClosure()">
+                    🔒 Chiudi negozio
+                  </button>
+                </div>
+              </section>
+            </div>
+          }
+
+          @case ('listino') {
+            <div class="settings-grid-2col">
+              <div class="op-card">
+                <h2 class="op-card-title">🏷️ Categorie servizi</h2>
+                <div class="record-list compact">
+                  @for (category of cashCategories(); track category) {
+                    <div class="record-row">
+                      <div class="record-info"><strong>{{ category }}</strong></div>
+                    </div>
                   }
-                  <span class="text-muted">{{ entry.createdAt.slice(0, 10) }}</span>
+                </div>
+                <div class="op-form op-form-spaced">
+                  <label><span>Nuova categoria</span><input #svcCat type="text" placeholder="Nome categoria"></label>
+                  <div class="form-actions"><button class="btn-primary" (click)="addServiceCategory(svcCat.value); svcCat.value = ''">Aggiungi</button></div>
                 </div>
               </div>
-            }
-          </div>
-          <div class="detail-note">
-            <span>Archivio gestionale</span>
-            <p>Storico interno di informative, link remoti, conferme e revoche privacy per ogni cliente.</p>
-          </div>
-        </div>
+
+              <div class="op-card">
+                <h2 class="op-card-title">💰 Listino cassa</h2>
+                <div class="record-list compact">
+                  @for (product of allCashProducts(); track product.id) {
+                    <div class="record-row">
+                      <div class="record-info">
+                        <strong>{{ product.name }}</strong>
+                        <span>{{ product.category }} · {{ product.pricingMode }} · € {{ resolveCashProductPrice(product).toLocaleString('it-IT') }}</span>
+                      </div>
+                      <div class="record-actions">
+                        @if (product.linkedInventoryItemId) {
+                          <span class="badge badge-info">Magazzino</span>
+                        }
+                        <button type="button" class="btn-sm btn-danger-sm" (click)="removeCashProduct(product.id)">Elimina</button>
+                      </div>
+                    </div>
+                  }
+                </div>
+                <form class="op-form" [formGroup]="cashProductForm" (ngSubmit)="addCashProduct()">
+                  <label><span>Voce</span><input type="text" formControlName="name" placeholder="Servizio o prodotto"></label>
+                  <label><span>Categoria</span><input type="text" formControlName="category" placeholder="Categoria"></label>
+                  <label><span>Prezzo €</span><input type="number" formControlName="price" placeholder="0"></label>
+                  <label><span>Calcolo</span><select formControlName="pricingMode"><option value="fisso">Fisso</option><option value="quantita">Quantità</option><option value="ora">Ora</option><option value="mezzora">Mezz’ora</option><option value="quarto">Quarto d’ora</option></select></label>
+                  <label><span>Scorciatoia</span>
+                    <select formControlName="shortcut"><option [ngValue]="true">Si</option><option [ngValue]="false">No</option></select>
+                  </label>
+                  <label><span>Collega magazzino</span>
+                    <select formControlName="linkedInventoryItemId">
+                      <option value="">Nessuno</option>
+                      @for (item of allInventoryItems(); track item.id) { <option [value]="item.id">{{ item.name }} ({{ item.stock }})</option> }
+                    </select>
+                  </label>
+                  <div class="form-actions"><button type="submit" class="btn-primary">Salva voce</button></div>
+                </form>
+              </div>
+            </div>
+          }
+
+          @case ('fiscale') {
+            <div class="op-card">
+              <h2 class="op-card-title">🧾 Registratore fiscale</h2>
+              <p class="text-muted">Configurazione numerazione scontrini, fatture e chiusure per allineamento al registratore di cassa presente in negozio.</p>
+              <div class="op-form op-form-spaced">
+                <label>
+                  <span>Tipo registratore</span>
+                  <input type="text" [value]="cashFiscalSettings().registerType" (change)="updateFiscalSetting('registerType', $event)" placeholder="Es. Registratore telematico">
+                </label>
+                <label>
+                  <span>Matricola / Seriale</span>
+                  <input type="text" [value]="cashFiscalSettings().registerSerial" (change)="updateFiscalSetting('registerSerial', $event)" placeholder="Es. RT-001">
+                </label>
+                <label>
+                  <span>Prossimo n. scontrino</span>
+                  <input type="number" min="1" [value]="cashFiscalSettings().nextReceiptNumber" (change)="updateFiscalSetting('nextReceiptNumber', $event)">
+                </label>
+                <label>
+                  <span>Prossimo n. fattura</span>
+                  <input type="number" min="1" [value]="cashFiscalSettings().nextInvoiceNumber" (change)="updateFiscalSetting('nextInvoiceNumber', $event)">
+                </label>
+                <label>
+                  <span>Prossimo n. chiusura</span>
+                  <input type="number" min="1" [value]="cashFiscalSettings().nextClosureNumber" (change)="updateFiscalSetting('nextClosureNumber', $event)">
+                </label>
+              </div>
+            </div>
+          }
+
+          @case ('preferenze') {
+            <div class="op-card">
+              <h2 class="op-card-title">⚙️ Preferenze generali</h2>
+              <div class="op-form">
+                <label><span>Valuta</span><select><option>EUR (€)</option></select></label>
+                <label><span>Formato data</span><select><option>GG/MM/AAAA</option><option>AAAA-MM-GG</option></select></label>
+                <label><span>Lingua</span><select><option>Italiano</option></select></label>
+              </div>
+            </div>
+          }
+
+          @case ('privacy') {
+            <div class="op-card">
+              <h2 class="op-card-title">🔒 Archivio privacy</h2>
+              <div class="record-list compact">
+                @for (entry of privacyArchiveIndex(); track entry.id) {
+                  <div class="record-row">
+                    <div class="record-info">
+                      <strong>{{ entry.title }}</strong>
+                      <span>{{ entry.clientName }} · {{ entry.type }} · {{ entry.channel }}</span>
+                    </div>
+                    <div class="record-actions">
+                      <span class="badge badge-info">{{ entry.status }}</span>
+                      @if (entry.url) {
+                        <a class="btn-sm" [routerLink]="entry.url">Apri</a>
+                      }
+                      <span class="text-muted">{{ entry.createdAt.slice(0, 10) }}</span>
+                    </div>
+                  </div>
+                }
+              </div>
+              <div class="detail-note">
+                <span>Archivio gestionale</span>
+                <p>Storico interno di informative, link remoti, conferme e revoche privacy per ogni cliente.</p>
+              </div>
+            </div>
+          }
+        }
       </div>
     }
 
@@ -5066,104 +5924,420 @@
 
   @if (employeeModalOpen()) {
     <div class="ui-modal-overlay" (click)="closeEmployeeModal()">
-      <div class="ui-modal employee-modal-compact" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+      <div class="ui-modal employee-modal-wide" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
         <div class="ui-modal-head">
-          <div>
-            <span class="detail-subtitle">Dipendenti</span>
-            <h2 class="op-card-title">@if (isCreatingEmployee()) { Nuovo Dipendente } @else { Modifica Dipendente }</h2>
+          <div class="employee-modal-head-group">
+            @if (!isCreatingEmployee() && selectedEmployee(); as emp) {
+              <div class="employee-modal-avatar" [attr.data-role]="emp.role">
+                {{ emp.name ? emp.name.trim().charAt(0).toUpperCase() : '👤' }}
+              </div>
+            }
+            <div>
+              <span class="detail-subtitle">Dipendenti</span>
+              <h2 class="op-card-title">@if (isCreatingEmployee()) { Nuovo Dipendente } @else { Modifica Dipendente }</h2>
+              @if (!isCreatingEmployee() && selectedEmployee(); as emp) {
+                <div class="employee-modal-head-meta">
+                  <span class="meta-role">{{ emp.jobTitle || emp.role }}</span>
+                  @if (emp.active) { <span class="meta-badge meta-active">● Attivo</span> }
+                  @else { <span class="meta-badge meta-inactive">● Disattivato</span> }
+                </div>
+              }
+            </div>
           </div>
           <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Chiudi</button>
         </div>
 
-        @if (isCreatingEmployee()) {
-          <form class="ui-modal-body op-form op-form-spaced employee-modal-form" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
-            <div class="employee-modal-grid">
-              <label [class.has-error]="hasFieldError(cashOperatorForm, 'name')">
-                <span>Nome *</span>
-                <input type="text" formControlName="name" placeholder="Nome e cognome">
-              </label>
-              <label>
-                <span>Ruolo</span>
-                <select formControlName="role">
-                  <option value="vendita">Vendita</option>
-                  <option value="tecnico">Tecnico</option>
-                  <option value="amministrazione">Amministrazione</option>
-                  <option value="magazzino">Magazzino</option>
-                </select>
-              </label>
-              <label>
-                <span>Tipologia</span>
-                <select formControlName="employmentType">
-                  <option value="dipendente">Dipendente</option>
-                  <option value="titolare">Titolare</option>
-                </select>
-              </label>
-              <label>
-                <span>Mansione</span>
-                <input type="text" formControlName="jobTitle" placeholder="Mansione operativa">
-              </label>
-              <label>
-                <span>Ore settimanali</span>
-                <input type="number" min="0" max="60" formControlName="contractHoursWeekly">
-              </label>
-              <label>
-                <span>Stato</span>
-                <select formControlName="active">
-                  <option [ngValue]="true">Attivo</option>
-                  <option [ngValue]="false">Disattivato</option>
-                </select>
-              </label>
+        <!-- Tabs della modale -->
+        <div class="employee-modal-tabs" role="tablist">
+          <button type="button" role="tab"
+                  class="employee-tab-btn"
+                  [class.active]="employeeModalTab() === 'anagrafica'"
+                  (click)="employeeModalTab.set('anagrafica')">
+            📋 Anagrafica
+          </button>
+          <button type="button" role="tab"
+                  class="employee-tab-btn"
+                  [class.active]="employeeModalTab() === 'turni-standard'"
+                  [disabled]="isCreatingEmployee()"
+                  (click)="employeeModalTab.set('turni-standard')">
+            ⏰ Turni Standard
+          </button>
+          <button type="button" role="tab"
+                  class="employee-tab-btn"
+                  [class.active]="employeeModalTab() === 'turni-settimanali'"
+                  [disabled]="isCreatingEmployee()"
+                  (click)="employeeModalTab.set('turni-settimanali')">
+            📅 Turni Settimanali
+          </button>
+        </div>
+
+        <!-- ════════════════════════════════════════════ -->
+        <!-- TAB 1: ANAGRAFICA                            -->
+        <!-- ════════════════════════════════════════════ -->
+        @if (employeeModalTab() === 'anagrafica') {
+          @if (isCreatingEmployee()) {
+            <form class="ui-modal-body op-form op-form-spaced employee-modal-form" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
+              <div class="employee-modal-grid">
+                <label [class.has-error]="hasFieldError(cashOperatorForm, 'name')">
+                  <span>Nome *</span>
+                  <input type="text" formControlName="name" placeholder="Nome e cognome">
+                </label>
+                <label>
+                  <span>Ruolo</span>
+                  <select formControlName="role">
+                    <option value="vendita">Vendita</option>
+                    <option value="tecnico">Tecnico</option>
+                    <option value="amministrazione">Amministrazione</option>
+                    <option value="magazzino">Magazzino</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Tipologia</span>
+                  <select formControlName="employmentType">
+                    <option value="dipendente">Dipendente</option>
+                    <option value="titolare">Titolare</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Mansione</span>
+                  <input type="text" formControlName="jobTitle" placeholder="Mansione operativa">
+                </label>
+                <label>
+                  <span>Ore settimanali</span>
+                  <input type="number" min="0" max="60" formControlName="contractHoursWeekly">
+                </label>
+                <label>
+                  <span>Stato</span>
+                  <select formControlName="active">
+                    <option [ngValue]="true">Attivo</option>
+                    <option [ngValue]="false">Disattivato</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">Crea dipendente</button>
+                <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
+              </div>
+            </form>
+          } @else if (selectedEmployee(); as employee) {
+            <div class="ui-modal-body op-form op-form-spaced employee-modal-form">
+              <div class="employee-modal-grid">
+                <label>
+                  <span>Nome</span>
+                  <input type="text" [value]="employee.name" (input)="updateSelectedEmployeeName($event)">
+                </label>
+                <label>
+                  <span>Ruolo</span>
+                  <select [value]="employee.role" (change)="updateSelectedEmployeeRole($event)">
+                    <option value="vendita">Vendita</option>
+                    <option value="tecnico">Tecnico</option>
+                    <option value="amministrazione">Amministrazione</option>
+                    <option value="magazzino">Magazzino</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Tipologia</span>
+                  <select [value]="employee.employmentType" (change)="updateSelectedEmployeeEmploymentType($event)">
+                    <option value="dipendente">Dipendente</option>
+                    <option value="titolare">Titolare</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Mansione</span>
+                  <input type="text" [value]="employee.jobTitle" (input)="updateSelectedEmployeeJobTitle($event)">
+                </label>
+                <label>
+                  <span>Ore settimanali</span>
+                  <input type="number" min="0" max="60" [value]="employee.contractHoursWeekly" (input)="updateSelectedEmployeeContractHours($event)">
+                </label>
+                <label>
+                  <span>Stato</span>
+                  <select [value]="employee.active ? 'true' : 'false'" (change)="updateSelectedEmployeeActive($event)">
+                    <option value="true">Attivo</option>
+                    <option value="false">Disattivato</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-primary" (click)="saveEmployeeModal()">Salva modifiche</button>
+                <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
+              </div>
             </div>
+          }
+        }
+
+        <!-- ════════════════════════════════════════════ -->
+        <!-- TAB 2: TURNI STANDARD SETTIMANALI (Profilo)  -->
+        <!-- ════════════════════════════════════════════ -->
+        @if (employeeModalTab() === 'turni-standard' && !isCreatingEmployee() && selectedEmployee(); as employee) {
+          <div class="ui-modal-body op-form op-form-spaced employee-modal-form">
+            <div class="default-shift-presets">
+              <span class="preset-label">Applica rapidamente a Lunedì-Venerdì:</span>
+              <button type="button" class="preset-btn preset-mattina" (click)="applyDefaultShiftPreset('mattina')">☀️ Mattina</button>
+              <button type="button" class="preset-btn preset-pomeriggio" (click)="applyDefaultShiftPreset('pomeriggio')">🌤️ Pomeriggio</button>
+              <button type="button" class="preset-btn preset-continuato" (click)="applyDefaultShiftPreset('continuato')">🏢 Continuato</button>
+              <button type="button" class="preset-btn preset-serale" (click)="applyDefaultShiftPreset('serale')">🌙 Serale</button>
+            </div>
+
+            <div class="default-shift-week">
+              @for (dayMeta of employeeShiftDays; track dayMeta.key) {
+                @let dayTone = getDefaultShiftDayTone(dayMeta.key);
+                @let currentDraft = employeeDefaultShiftDrafts()[dayMeta.key];
+                <div class="default-shift-row" [class]="'tone-' + dayTone">
+                  <div class="default-shift-day-col">
+                    <strong>{{ dayMeta.label }}</strong>
+                    <div class="default-shift-tone-row">
+                      <button type="button" class="tone-btn tone-btn-standard"
+                              [class.active]="dayTone === 'standard'"
+                              (click)="setDefaultShiftDayTone(dayMeta.key, 'standard')">
+                        Turno
+                      </button>
+                      <button type="button" class="tone-btn tone-btn-riposo"
+                              [class.active]="dayTone === 'riposo'"
+                              (click)="setDefaultShiftDayTone(dayMeta.key, 'riposo')">
+                        Riposo
+                      </button>
+                      <button type="button" class="tone-btn tone-btn-chiusura"
+                              [class.active]="dayTone === 'chiusura'"
+                              (click)="setDefaultShiftDayTone(dayMeta.key, 'chiusura')">
+                        Chiusura
+                      </button>
+                    </div>
+                  </div>
+
+                  @if (dayTone === 'standard') {
+                    <div class="default-shift-orari-col">
+                      <div class="stepper-field">
+                        <label>Ora inizio</label>
+                        <div class="stepper-row">
+                          <select (change)="updateDefaultShiftField(dayMeta.key, 'startHour', $any($event.target).value)">
+                            @for (h of timeHours; track h) { <option [value]="h" [selected]="h === currentDraft.startHour">{{ h }}</option> }
+                          </select>
+                          <span>:</span>
+                          <select (change)="updateDefaultShiftField(dayMeta.key, 'startMinute', $any($event.target).value)">
+                            @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === currentDraft.startMinute">{{ m }}</option> }
+                          </select>
+                        </div>
+                      </div>
+                      <div class="stepper-field">
+                        <label>Ora fine</label>
+                        <div class="stepper-row">
+                          <select (change)="updateDefaultShiftField(dayMeta.key, 'endHour', $any($event.target).value)">
+                            @for (h of timeHours; track h) { <option [value]="h" [selected]="h === currentDraft.endHour">{{ h }}</option> }
+                          </select>
+                          <span>:</span>
+                          <select (change)="updateDefaultShiftField(dayMeta.key, 'endMinute', $any($event.target).value)">
+                            @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === currentDraft.endMinute">{{ m }}</option> }
+                          </select>
+                        </div>
+                      </div>
+                      <div class="stepper-field">
+                        <label>Pausa pranzo</label>
+                        <button type="button"
+                                class="planner-switch"
+                                [class.on]="currentDraft.hasBreak"
+                                (click)="updateDefaultShiftField(dayMeta.key, 'hasBreak', !currentDraft.hasBreak)"
+                                [attr.aria-pressed]="currentDraft.hasBreak">
+                          <span class="planner-switch-knob"></span>
+                          <span class="planner-switch-label">{{ currentDraft.hasBreak ? 'Attiva' : 'Disattiva' }}</span>
+                        </button>
+                      </div>
+                      @if (currentDraft.hasBreak) {
+                        <div class="stepper-field">
+                          <label>Pausa da</label>
+                          <div class="stepper-row">
+                            <select (change)="updateDefaultShiftField(dayMeta.key, 'breakFromHour', $any($event.target).value)">
+                              @for (h of timeHours; track h) { <option [value]="h" [selected]="h === currentDraft.breakFromHour">{{ h }}</option> }
+                            </select>
+                            <span>:</span>
+                            <select (change)="updateDefaultShiftField(dayMeta.key, 'breakFromMinute', $any($event.target).value)">
+                              @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === currentDraft.breakFromMinute">{{ m }}</option> }
+                            </select>
+                          </div>
+                        </div>
+                        <div class="stepper-field">
+                          <label>Pausa a</label>
+                          <div class="stepper-row">
+                            <select (change)="updateDefaultShiftField(dayMeta.key, 'breakToHour', $any($event.target).value)">
+                              @for (h of timeHours; track h) { <option [value]="h" [selected]="h === currentDraft.breakToHour">{{ h }}</option> }
+                            </select>
+                            <span>:</span>
+                            <select (change)="updateDefaultShiftField(dayMeta.key, 'breakToMinute', $any($event.target).value)">
+                              @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === currentDraft.breakToMinute">{{ m }}</option> }
+                            </select>
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  } @else {
+                    <div class="default-shift-tag-col">
+                      @if (dayTone === 'riposo') { <span class="tag-shift tag-riposo">Riposo programmato</span> }
+                      @if (dayTone === 'chiusura') { <span class="tag-shift tag-chiusura">Negozio chiuso</span> }
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+
             <div class="form-actions">
-              <button type="submit" class="btn-primary">Crea dipendente</button>
+              <button type="button" class="btn-primary" (click)="saveEmployeeModal()">Salva profilo &amp; turni</button>
               <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
             </div>
-          </form>
-        } @else if (selectedEmployee(); as employee) {
+          </div>
+        }
+
+        <!-- ════════════════════════════════════════════ -->
+        <!-- TAB 3: TURNI SETTIMANALI (Planner multi-sett.) -->
+        <!-- ════════════════════════════════════════════ -->
+        @if (employeeModalTab() === 'turni-settimanali' && !isCreatingEmployee() && selectedEmployee(); as employee) {
           <div class="ui-modal-body op-form op-form-spaced employee-modal-form">
-            <div class="employee-modal-grid">
-              <label>
-                <span>Nome</span>
-                <input type="text" [value]="employee.name" (input)="updateSelectedEmployeeName($event)">
-              </label>
-              <label>
-                <span>Ruolo</span>
-                <select [value]="employee.role" (change)="updateSelectedEmployeeRole($event)">
-                  <option value="vendita">Vendita</option>
-                  <option value="tecnico">Tecnico</option>
-                  <option value="amministrazione">Amministrazione</option>
-                  <option value="magazzino">Magazzino</option>
-                </select>
-              </label>
-              <label>
-                <span>Tipologia</span>
-                <select [value]="employee.employmentType" (change)="updateSelectedEmployeeEmploymentType($event)">
-                  <option value="dipendente">Dipendente</option>
-                  <option value="titolare">Titolare</option>
-                </select>
-              </label>
-              <label>
-                <span>Mansione</span>
-                <input type="text" [value]="employee.jobTitle" (input)="updateSelectedEmployeeJobTitle($event)">
-              </label>
-              <label>
-                <span>Ore settimanali</span>
-                <input type="number" min="0" max="60" [value]="employee.contractHoursWeekly" (input)="updateSelectedEmployeeContractHours($event)">
-              </label>
-              <label>
-                <span>Stato</span>
-                <select [value]="employee.active ? 'true' : 'false'" (change)="updateSelectedEmployeeActive($event)">
-                  <option value="true">Attivo</option>
-                  <option value="false">Disattivato</option>
-                </select>
+            <div class="shift-patterns-toolbar">
+              <span class="detail-subtitle">Schemi settimanali (es. settimana A / settimana B alternata)</span>
+              <div class="shift-patterns-pills">
+                @for (pattern of employee.shiftPatterns ?? []; track $index; let pIndex = $index) {
+                  <button type="button"
+                          class="planner-week-pill"
+                          [class.active]="selectedShiftPatternIndex() === pIndex"
+                          (click)="selectShiftPattern(pIndex)">
+                    Settimana {{ pIndex + 1 }}
+                    @if ((employee.shiftPatterns?.length ?? 0) > 1) {
+                      <span class="pill-remove"
+                            (click)="$event.stopPropagation(); removeShiftPattern(pIndex)">×</span>
+                    }
+                  </button>
+                }
+                <button type="button" class="planner-week-add" (click)="addShiftPattern()">+ Aggiungi schema</button>
+              </div>
+              <label class="shift-cycle-start">
+                <span>Data inizio ciclo</span>
+                <input type="date" [value]="employee.shiftCycleStartDate" (change)="updateShiftPatternStartDate($event)">
               </label>
             </div>
+
+            <div class="shift-pattern-grid">
+              @for (dayMeta of employeeShiftDays; track dayMeta.key) {
+                @let dayDraft = employeeShiftDrafts()[dayMeta.key];
+                <div class="shift-pattern-row">
+                  <strong class="shift-pattern-day">{{ dayMeta.label }}</strong>
+                  <div class="stepper-field">
+                    <label>Inizio</label>
+                    <div class="stepper-row">
+                      <select (change)="updateEmployeeShiftField(dayMeta.key, 'startHour', $event)">
+                        @for (h of timeHours; track h) { <option [value]="h" [selected]="h === dayDraft.startHour">{{ h }}</option> }
+                      </select>
+                      <span>:</span>
+                      <select (change)="updateEmployeeShiftField(dayMeta.key, 'startMinute', $event)">
+                        @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === dayDraft.startMinute">{{ m }}</option> }
+                      </select>
+                    </div>
+                  </div>
+                  <div class="stepper-field">
+                    <label>Fine</label>
+                    <div class="stepper-row">
+                      <select (change)="updateEmployeeShiftField(dayMeta.key, 'endHour', $event)">
+                        @for (h of timeHours; track h) { <option [value]="h" [selected]="h === dayDraft.endHour">{{ h }}</option> }
+                      </select>
+                      <span>:</span>
+                      <select (change)="updateEmployeeShiftField(dayMeta.key, 'endMinute', $event)">
+                        @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === dayDraft.endMinute">{{ m }}</option> }
+                      </select>
+                    </div>
+                  </div>
+                  <div class="stepper-field">
+                    <label>Pausa pranzo</label>
+                    <button type="button"
+                            class="planner-switch"
+                            [class.on]="dayDraft.hasBreak"
+                            [attr.aria-pressed]="dayDraft.hasBreak"
+                            (click)="toggleEmployeeShiftBreakSwitch(dayMeta.key)">
+                      <span class="planner-switch-knob"></span>
+                      <span class="planner-switch-label">{{ dayDraft.hasBreak ? 'Attiva' : 'Disattiva' }}</span>
+                    </button>
+                  </div>
+                  @if (dayDraft.hasBreak) {
+                    <div class="stepper-field">
+                      <label>Da</label>
+                      <div class="stepper-row">
+                        <select (change)="updateEmployeeShiftField(dayMeta.key, 'breakFromHour', $event)">
+                          @for (h of timeHours; track h) { <option [value]="h" [selected]="h === dayDraft.breakFromHour">{{ h }}</option> }
+                        </select>
+                        <span>:</span>
+                        <select (change)="updateEmployeeShiftField(dayMeta.key, 'breakFromMinute', $event)">
+                          @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === dayDraft.breakFromMinute">{{ m }}</option> }
+                        </select>
+                      </div>
+                    </div>
+                    <div class="stepper-field">
+                      <label>A</label>
+                      <div class="stepper-row">
+                        <select (change)="updateEmployeeShiftField(dayMeta.key, 'breakToHour', $event)">
+                          @for (h of timeHours; track h) { <option [value]="h" [selected]="h === dayDraft.breakToHour">{{ h }}</option> }
+                        </select>
+                        <span>:</span>
+                        <select (change)="updateEmployeeShiftField(dayMeta.key, 'breakToMinute', $event)">
+                          @for (m of timeMinutes; track m) { <option [value]="m" [selected]="m === dayDraft.breakToMinute">{{ m }}</option> }
+                        </select>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+
             <div class="form-actions">
               <button type="button" class="btn-primary" (click)="saveEmployeeModal()">Salva modifiche</button>
               <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
             </div>
           </div>
         }
+      </div>
+    </div>
+  }
+
+  <!-- ═════════════════════════════════════════════════════ -->
+  <!-- MODALE PROMEMORIA 1° DEL MESE (INVIO PAGHE)           -->
+  <!-- ═════════════════════════════════════════════════════ -->
+  @if (pagheReminderOpen()) {
+    <div class="ui-modal-overlay" (click)="acknowledgePagheReminder()">
+      <div class="ui-modal paghe-reminder-modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+        <div class="ui-modal-head">
+          <div class="paghe-reminder-title">
+            <span class="paghe-reminder-icon">💼</span>
+            <div>
+              <span class="detail-subtitle">Promemoria mensile</span>
+              <h2 class="op-card-title">Inviare paghe · Ufficio Paghe</h2>
+            </div>
+          </div>
+          <button type="button" class="btn-ghost" (click)="acknowledgePagheReminder()">Chiudi</button>
+        </div>
+        <div class="ui-modal-body op-form op-form-spaced">
+          <div class="paghe-reminder-checklist">
+            <div class="paghe-check-row">
+              <strong>1.</strong>
+              <span>Controlla gli orari di tutti i dipendenti per il mese appena concluso.</span>
+            </div>
+            <div class="paghe-check-row">
+              <strong>2.</strong>
+              <span>Verifica ferie, permessi e malattie inseriti nel planner Orari.</span>
+            </div>
+            <div class="paghe-check-row">
+              <strong>3.</strong>
+              <span>Esporta il PDF mensile dal planner (pulsante 📄 Esporta PDF · Ufficio Paghe).</span>
+            </div>
+            <div class="paghe-check-row">
+              <strong>4.</strong>
+              <span>Invia il PDF e le note all'ufficio paghe o al commercialista.</span>
+            </div>
+          </div>
+          <div class="form-actions">
+            <a routerLink="/orari-dipendenti" class="btn-primary" (click)="acknowledgePagheReminder()">
+              Vai a Orari e Dipendenti
+            </a>
+            <button type="button" class="btn-ghost" (click)="acknowledgePagheReminder()">
+              Ricordamelo dopo · Ho già provveduto
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   }
