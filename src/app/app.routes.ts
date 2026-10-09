@@ -1,9 +1,6 @@
 import { Routes } from '@angular/router';
 
 import { crmSections } from './crm-sections';
-import { DashboardPageComponent } from './dashboard-page';
-import { PrivacyConsentPageComponent } from './privacy-consent-page';
-import { SectionPageComponent } from './section-page';
 
 export const routes: Routes = [
   {
@@ -13,17 +10,20 @@ export const routes: Routes = [
   },
   {
     path: 'dashboard',
-    component: DashboardPageComponent,
+    loadComponent: () =>
+      import('./dashboard-page').then((module) => module.DashboardPageComponent),
     title: 'Audiomax CRM | Dashboard',
   },
   {
     path: 'privacy-consent/:clientId',
-    component: PrivacyConsentPageComponent,
+    loadComponent: () =>
+      import('./privacy-consent-page').then((module) => module.PrivacyConsentPageComponent),
     title: 'Audiomax CRM | Consensi Privacy',
   },
   ...crmSections.map((section) => ({
     path: section.route,
-    component: SectionPageComponent,
+    loadComponent: () =>
+      import('./section-page').then((module) => module.SectionPageComponent),
     title: `Audiomax CRM | ${section.label}`,
     data: {
       sectionId: section.id,

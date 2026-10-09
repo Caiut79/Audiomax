@@ -22,6 +22,9 @@ import {
   ExpensePaymentMethodRecord,
   ExpenseRecord,
   ExpenseSupplierRecord,
+  PaymentExecutionMode,
+  PaymentProviderKind,
+  PaymentProviderRecord,
   InventoryItemRecord,
   QuoteRecord,
   ServiceTicketMaterialLine,
@@ -212,9 +215,28 @@ interface ExpenseCreatePayload {
   sourceReferenceId: string | null;
   installmentsCount?: number;
   noticeDaysBefore?: number;
+  // ⭐ Metodo di calcolo IVA (vedi ExpenseRecord per dettagli)
+  amountAlreadyIvato?: boolean;
+  amountSplitVat?: boolean;
+  amountIsReverseCharge?: boolean;
+  // Valori netto/iva finali calcolati lato UI (se presenti, hanno priorità sullo standard gross/(1+vat/100))
+  amountNetFinal?: number;
+  amountVatFinal?: number;
+  // ⭐ Pagamento · Provider integrato (es. Stripe) + Manuale/Automatico
+  paymentProviderId?: string | null;
+  paymentExecution?: PaymentExecutionMode;
+  paymentAutoStartDate?: string | null;
+  paymentNotes?: string | null;
 }
 
-type ExpensePermission = 'expense:view' | 'expense:create' | 'expense:update' | 'expense:delete';
+type ExpensePermission =
+  | 'expense:view'
+  | 'expense:create'
+  | 'expense:update'
+  | 'expense:delete'
+  // ⭐ Gestione pagamenti integrati (provider tipo Stripe, IBAN, API key)
+  // richiede livello admin/system: usato in CRUD paymentProviders.
+  | 'system:manage';
 type AppUserRole = 'admin' | 'finance' | 'operations' | 'viewer';
 
 export interface GlobalSearchResult {
@@ -271,6 +293,8 @@ export class AudiomaxDataService {
   readonly expensePaymentMethods = signal<ExpensePaymentMethodRecord[]>(
     initialAudiomaxState.expensePaymentMethods,
   );
+  // ⭐ Provider pagamento integrati (Stripe, Adyen, Satispay, Sepa DD via API, ecc.)
+  readonly paymentProviders = signal<PaymentProviderRecord[]>(initialAudiomaxState.paymentProviders);
   readonly expenseRecords = signal<ExpenseRecord[]>(initialAudiomaxState.expenseRecords);
   readonly expenseInstallments = signal<ExpenseInstallmentRecord[]>(
     initialAudiomaxState.expenseInstallments,
@@ -287,8 +311,17 @@ export class AudiomaxDataService {
   readonly cashShifts = signal<CashShiftRecord[]>(initialAudiomaxState.cashShifts);
   readonly cashFiscalSettings = signal<CashFiscalSettings>(initialAudiomaxState.cashFiscalSettings);
   readonly serviceTickets = signal<ServiceTicketRecord[]>(initialAudiomaxState.serviceTickets);
+  /**
+   * Flag che diventa vero solo dopo che loadRemoteState() ha terminato
+   * tutti i merge con il server. Serve a proteggere da race-condition tra
+   * modifiche locali dell'utente (prima dei 0.5-2 sec iniziali) e il set()
+   * dei dati remoti che avrebbe potuto sovrascriverli.
+   * Inoltre protegge le UI da operazioni premature (es. tasto Salva disabilitato
+   * finché isRemoteLoaded non diventa true).
+   */
+  readonly isRemoteLoaded = signal(false);
   // ===== NUOVI Task 1: negozio chiusure settimanali, aperture straordinarie, chiusure collettive =====
-  readonly storeClosingDaysWeekly = signal<Record<'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom', boolean>>(initialAudiomaxState.storeClosingDaysWeekly);
+  readonly storeClosingDaysWeekly = signal<Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>>(initialAudiomaxState.storeClosingDaysWeekly);
   readonly storeExtraOpeningDates = signal<Array<{ id: string; date: string; note?: string }>>(initialAudiomaxState.storeExtraOpeningDates);
   readonly storeBulkClosures = signal<Array<{ id: string; startDate: string; endDate: string; reason: string }>>(initialAudiomaxState.storeBulkClosures);
 
@@ -541,7 +574,11 @@ export class AudiomaxDataService {
     });
 
     if (this.supabase.isConfigured) {
-      void this.loadRemoteState();
+      void this.loadRemoteState().catch((err) => {
+        // ===== ISS-05: catturo errori loadRemoteState per non perdere visibilità di errori Supabase (rete offline, RLS, vincoli) =====
+        console.error('[AudiomaxDataService] loadRemoteState fallito:', err);
+        this.supabase.connectionState.set('error');
+      });
     }
   }
 
@@ -704,14 +741,189 @@ export class AudiomaxDataService {
     return record;
   }
 
+  // ═══════════════════════════════════════════════
+  // PAYMENT PROVIDERS (Stripe, Satispay, Bonifico, ecc.)
+  // ═══════════════════════════════════════════════
+
+  addPaymentProvider(payload: Omit<PaymentProviderRecord, 'id' | 'createdAt'>): PaymentProviderRecord | null {
+    if (!this.canExpense('system:manage')) return null;
+    const record: PaymentProviderRecord = {
+      id: `pp-${crypto.randomUUID()}`,
+      createdAt: new Date().toISOString(),
+      ...payload,
+    };
+    this.paymentProviders.update((items) => [record, ...items]);
+    return record;
+  }
+
+  updatePaymentProvider(
+    id: string,
+    patch: Partial<Omit<PaymentProviderRecord, 'id' | 'createdAt'>>,
+  ): PaymentProviderRecord | null {
+    if (!this.canExpense('system:manage')) return null;
+    let updated: PaymentProviderRecord | null = null;
+    this.paymentProviders.update((items) =>
+      items.map((pp) => {
+        if (pp.id !== id) return pp;
+        updated = { ...pp, ...patch };
+        return updated;
+      }),
+    );
+    return updated;
+  }
+
+  removePaymentProvider(id: string): boolean {
+    if (!this.canExpense('system:manage')) return false;
+    const before = this.paymentProviders().length;
+    this.paymentProviders.update((items) => items.filter((pp) => pp.id !== id));
+    return this.paymentProviders().length < before;
+  }
+
+  togglePaymentProviderActive(id: string): PaymentProviderRecord | null {
+    const existing = this.paymentProviders().find((pp) => pp.id === id);
+    if (!existing) return null;
+    return this.updatePaymentProvider(id, { active: !existing.active });
+  }
+
+  // ═══════════════════════════════════════════════
+  // SPESA · UPDATE (Modificabile dopo la registrazione)
+  // ═══════════════════════════════════════════════
+
+  updateExpense(
+    id: string,
+    patch: Partial<
+      Pick<
+        ExpenseRecord,
+        | 'description'
+        | 'categoryId'
+        | 'supplierId'
+        | 'genericSupplierLabel'
+        | 'paymentMode'
+        | 'recurringFrequency'
+        | 'paymentMethodId'
+        | 'amountGross'
+        | 'vatRate'
+        | 'amountNet'
+        | 'amountVat'
+        | 'expenseDate'
+        | 'dueDate'
+        | 'status'
+        | 'notes'
+        | 'attachmentName'
+        | 'projectCode'
+        | 'costCenterCode'
+        | 'amountAlreadyIvato'
+        | 'amountSplitVat'
+        | 'amountIsReverseCharge'
+        | 'paymentProviderId'
+        | 'paymentExecution'
+        | 'paymentAutoStartDate'
+        | 'paymentNotes'
+      >
+    >,
+  ): ExpenseRecord | null {
+    if (!this.canExpense('expense:update')) return null;
+    let updated: ExpenseRecord | null = null;
+    const now = new Date().toISOString();
+    // Se modifico importo o metodo IVA, ricalcolo netto e iva al salvataggio se non forniti
+    const effectivePatch: typeof patch & { paymentModifiedAt?: string } = { ...patch };
+    if (
+      effectivePatch.amountGross !== undefined ||
+      effectivePatch.vatRate !== undefined ||
+      effectivePatch.amountAlreadyIvato !== undefined ||
+      effectivePatch.amountSplitVat !== undefined ||
+      effectivePatch.amountIsReverseCharge !== undefined
+    ) {
+      if (effectivePatch.amountNet === undefined || effectivePatch.amountVat === undefined) {
+        // Re-calc di sicurezza se chiamante non ha già fornito i valori
+        const old = this.expenseRecords().find((r) => r.id === id);
+        const gross = Number(effectivePatch.amountGross ?? old?.amountGross ?? 0);
+        const vatRate = Number(effectivePatch.vatRate ?? old?.vatRate ?? 0);
+        const alreadyIvato = Boolean(
+          effectivePatch.amountAlreadyIvato ?? old?.amountAlreadyIvato ?? true,
+        );
+        const splitVat = Boolean(effectivePatch.amountSplitVat ?? old?.amountSplitVat ?? true);
+        const reverse = Boolean(
+          effectivePatch.amountIsReverseCharge ?? old?.amountIsReverseCharge ?? false,
+        );
+        let net = gross;
+        let vat = 0;
+        if (reverse) {
+          net = gross;
+          vat = 0;
+        } else if (!alreadyIvato) {
+          net = gross;
+          vat = gross * (vatRate / 100);
+        } else if (splitVat && vatRate > 0) {
+          net = gross / (1 + vatRate / 100);
+          vat = gross - net;
+        }
+        if (effectivePatch.amountNet === undefined) {
+          effectivePatch.amountNet = Number(net.toFixed(2));
+        }
+        if (effectivePatch.amountVat === undefined) {
+          effectivePatch.amountVat = Number(vat.toFixed(2));
+        }
+      }
+    }
+    // Se modifichiamo qualcosa del pagamento → paymentModifiedAt
+    const paymentRelated: (keyof typeof patch)[] = [
+      'paymentProviderId',
+      'paymentExecution',
+      'paymentAutoStartDate',
+      'paymentNotes',
+      'paymentMethodId',
+      'paymentMode',
+      'recurringFrequency',
+    ];
+    if (paymentRelated.some((k) => k in patch)) {
+      effectivePatch.paymentModifiedAt = now;
+    }
+    this.expenseRecords.update((items) =>
+      items.map((r) => {
+        if (r.id !== id) return r;
+        updated = { ...r, ...effectivePatch };
+        return updated;
+      }),
+    );
+    if (updated) {
+      this.appendExpenseAudit({
+        entityType: 'expense',
+        entityId: id,
+        action: 'update',
+        detail: `Spesa aggiornata: ${Object.keys(patch).join(', ')}`,
+        actor: 'Amministrazione',
+        createdAt: now,
+      });
+    }
+    return updated;
+  }
+
   createExpense(payload: ExpenseCreatePayload): ExpenseRecord {
     if (!this.canExpense('expense:create')) {
       throw new Error('Permessi insufficienti per creare spese');
     }
     const gross = Math.max(0, Number(payload.amountGross) || 0);
     const vatRate = Math.max(0, Number(payload.vatRate) || 0);
-    const amountNet = gross / (1 + vatRate / 100);
-    const amountVat = gross - amountNet;
+
+    // ⭐ Calcolo Netto IVA:
+    // Se l'UI ha già calcolato i valori finali (3 scenari),
+    // usiamo quelli. Altrimenti comportamento standard (scorporo classico).
+    let amountNet: number;
+    let amountVat: number;
+    const hasFinalCalculation =
+      payload.amountNetFinal !== null && payload.amountNetFinal !== undefined &&
+      payload.amountVatFinal !== null && payload.amountVatFinal !== undefined &&
+      !Number.isNaN(Number(payload.amountNetFinal)) &&
+      !Number.isNaN(Number(payload.amountVatFinal));
+    if (hasFinalCalculation) {
+      amountNet = Math.max(0, Number(payload.amountNetFinal) || 0);
+      amountVat = Math.max(0, Number(payload.amountVatFinal) || 0);
+    } else {
+      amountNet = gross / (1 + vatRate / 100);
+      amountVat = gross - amountNet;
+    }
+
     const nowIso = new Date().toISOString();
     const expenseId = `exp-${crypto.randomUUID()}`;
     const record: ExpenseRecord = {
@@ -738,6 +950,17 @@ export class AudiomaxDataService {
       sourceReferenceId: payload.sourceReferenceId,
       createdBy: payload.createdBy,
       createdAt: nowIso,
+      amountAlreadyIvato: payload.amountAlreadyIvato,
+      amountSplitVat: payload.amountSplitVat,
+      amountIsReverseCharge: payload.amountIsReverseCharge,
+      // ⭐ Pagamento: provider integrato + manuale/automatico
+      paymentProviderId: payload.paymentProviderId ?? null,
+      paymentExecution: payload.paymentExecution ?? 'manuale',
+      paymentAutoStartDate:
+        payload.paymentAutoStartDate ?? (payload.paymentExecution === 'automatico' ? payload.dueDate : null),
+      paymentNotes: payload.paymentNotes ?? null,
+      paymentModifiedAt:
+        payload.paymentProviderId || payload.paymentExecution === 'automatico' ? nowIso : null,
     };
 
     this.expenseRecords.update((items) => [record, ...items]);
@@ -801,9 +1024,9 @@ export class AudiomaxDataService {
       items.map((entry) =>
         entry.id === installment.expenseId
           ? {
-              ...entry,
-              status: allPaid ? 'pagata' : 'parziale',
-            }
+            ...entry,
+            status: allPaid ? 'pagata' : 'parziale',
+          }
           : entry,
       ),
     );
@@ -913,7 +1136,7 @@ export class AudiomaxDataService {
     );
   }
 
-  receiveWarehouseStock(payload: WarehouseReceivePayload): void {
+  receiveWarehouseStock(payload: WarehouseReceivePayload, syncCashPrices = true): void {
     const normalizedQuantity = Math.max(0, Number(payload.quantity) || 0);
     const normalizedCableRolls = Math.max(0, Number(payload.cableRolls) || 0);
     const normalizedCableMetersPerRoll = Math.max(0, Number(payload.cableMetersPerRoll) || 0);
@@ -959,6 +1182,7 @@ export class AudiomaxDataService {
 
     if (existingItem) {
       const updatedStock = existingItem.stock + normalizedQuantity;
+      // ✅ Fix ISS-08: sync listino cassa opzionale (flag propagato dalla UI checkbox)
       this.updateInventoryItem({
         ...existingItem,
         sku: payload.sku.trim() || existingItem.sku,
@@ -980,7 +1204,7 @@ export class AudiomaxDataService {
           normalizedCableMetersPerRoll > 0
             ? normalizedCableMetersPerRoll
             : existingItem.cableMetersPerRoll ?? null,
-      });
+      }, syncCashPrices);
     } else {
       const itemName = payload.description.trim() || payload.name.trim();
       const resolvedCategory = payload.category?.trim() || 'Generale';
@@ -1030,15 +1254,15 @@ export class AudiomaxDataService {
         items.map((lot) =>
           lot.id === lotId
             ? {
-                ...lot,
-                receivedQuantity: lot.receivedQuantity + normalizedQuantity,
-                availableQuantity: lot.availableQuantity + normalizedQuantity,
-                receivedDate: payload.receivedDate,
-                barcode: resolvedBarcode,
-                purchaseDocumentNumber: payload.purchaseDocumentNumber || lot.purchaseDocumentNumber,
-                salePrice: resolvedSalePrice,
-                shelfCode: payload.shelfCode || lot.shelfCode,
-              }
+              ...lot,
+              receivedQuantity: lot.receivedQuantity + normalizedQuantity,
+              availableQuantity: lot.availableQuantity + normalizedQuantity,
+              receivedDate: payload.receivedDate,
+              barcode: resolvedBarcode,
+              purchaseDocumentNumber: payload.purchaseDocumentNumber || lot.purchaseDocumentNumber,
+              salePrice: resolvedSalePrice,
+              shelfCode: payload.shelfCode || lot.shelfCode,
+            }
             : lot,
         ),
       );
@@ -1171,37 +1395,37 @@ export class AudiomaxDataService {
 
         return consumed
           ? {
-              ...lot,
-              availableQuantity: Math.max(0, lot.availableQuantity - consumed),
-            }
+            ...lot,
+            availableQuantity: Math.max(0, lot.availableQuantity - consumed),
+          }
           : lot;
       }),
     );
 
     const movementRows = fifoLots.reduce<WarehouseMovementRecord[]>((acc, lot) => {
-        const consumed = consumedByLot.get(lot.id) ?? 0;
+      const consumed = consumedByLot.get(lot.id) ?? 0;
 
-        if (!consumed) {
-          return acc;
-        }
-
-        acc.push({
-          id: `wmov-${crypto.randomUUID()}`,
-          inventoryItemId: lot.inventoryItemId,
-          lotId: lot.id,
-          movementType: 'scarico',
-          quantity: consumed,
-          unitCost: lot.unitCost,
-          totalCost: consumed * lot.unitCost,
-          documentNumber: params.documentNumber,
-          reason: params.reason,
-          operator: params.operator,
-          sourceModule: params.sourceModule,
-          movedAt: nowIso,
-        });
-
+      if (!consumed) {
         return acc;
-      }, []);
+      }
+
+      acc.push({
+        id: `wmov-${crypto.randomUUID()}`,
+        inventoryItemId: lot.inventoryItemId,
+        lotId: lot.id,
+        movementType: 'scarico',
+        quantity: consumed,
+        unitCost: lot.unitCost,
+        totalCost: consumed * lot.unitCost,
+        documentNumber: params.documentNumber,
+        reason: params.reason,
+        operator: params.operator,
+        sourceModule: params.sourceModule,
+        movedAt: nowIso,
+      });
+
+      return acc;
+    }, []);
 
     if (movementRows.length) {
       this.warehouseMovements.update((items) => [...movementRows, ...items]);
@@ -1376,7 +1600,7 @@ export class AudiomaxDataService {
     this.queueRemoteSync('appointment', record);
   }
 
-  updateInventoryItem(record: InventoryItemRecord): void {
+  updateInventoryItem(record: InventoryItemRecord, syncCashPrices = true): void {
     const normalizedRecord: InventoryItemRecord = {
       ...record,
       status: this.resolveInventoryStatus(record.stock, record.minStock),
@@ -1385,7 +1609,11 @@ export class AudiomaxDataService {
     this.inventoryItems.update((items) =>
       items.map((item) => (item.id === normalizedRecord.id ? normalizedRecord : item)),
     );
-    this.syncCashProductsForInventoryItem(normalizedRecord);
+    // ✅ Fix ISS-08: sync listino cassa reso opzionale (default=true retrocompatibile).
+    // Flag guidato dalla checkbox UI "Aggiorna anche listino prezzi".
+    if (syncCashPrices) {
+      this.syncCashProductsForInventoryItem(normalizedRecord);
+    }
     this.queueRemoteSync('inventory', normalizedRecord);
   }
 
@@ -1486,9 +1714,9 @@ export class AudiomaxDataService {
         return items.map((item) =>
           item.id === existing.id
             ? {
-                ...existing,
-                ...payload,
-              }
+              ...existing,
+              ...payload,
+            }
             : item,
         );
       }
@@ -1520,9 +1748,9 @@ export class AudiomaxDataService {
           nextItems = nextItems.map((item) =>
             item.id === existing.id
               ? {
-                  ...existing,
-                  ...payload,
-                }
+                ...existing,
+                ...payload,
+              }
               : item,
           );
           continue;
@@ -1547,8 +1775,13 @@ export class AudiomaxDataService {
     );
   }
 
+  // ✅ Fix REV-001 (Hard constraint): soft delete invece hard delete.
+  //    Mantieni record con active=false per audit trail e riferimenti storici
+  //    (transazioni cassa, ferie, presenze non diventano dangling refs).
   deleteCashOperator(id: string): void {
-    this.cashOperators.update((items) => items.filter((item) => item.id !== id));
+    this.cashOperators.update((items) =>
+      items.map((item) => (item.id === id ? { ...item, active: false } : item)),
+    );
   }
 
   closeCashShift(label: string): void {
@@ -1812,17 +2045,17 @@ export class AudiomaxDataService {
 
     const updatedLine: ServiceTicketMaterialLine = existingLine
       ? {
-          ...existingLine,
-          quantity: existingLine.quantity + consumedQuantity,
-          totalCost: (existingLine.quantity + consumedQuantity) * existingLine.unitCost,
-        }
+        ...existingLine,
+        quantity: existingLine.quantity + consumedQuantity,
+        totalCost: (existingLine.quantity + consumedQuantity) * existingLine.unitCost,
+      }
       : {
-          inventoryItemId: inventoryItem.id,
-          itemName: inventoryItem.name,
-          quantity: consumedQuantity,
-          unitCost: inventoryItem.unitCost,
-          totalCost: consumedQuantity * inventoryItem.unitCost,
-        };
+        inventoryItemId: inventoryItem.id,
+        itemName: inventoryItem.name,
+        quantity: consumedQuantity,
+        unitCost: inventoryItem.unitCost,
+        totalCost: consumedQuantity * inventoryItem.unitCost,
+      };
 
     const otherLines = ticket.materialLines.filter((line) => line.inventoryItemId !== inventoryItem.id);
     const materialLines = [...otherLines, updatedLine];
@@ -1861,9 +2094,23 @@ export class AudiomaxDataService {
       this.clients().find(
         (client) => client.id === payload.clientId || client.name === payload.customerName.trim(),
       ) ?? null;
+    // ✅ Fix ISS-03: lettura + incremento del numero documento atomico
+    // all'interno di un singolo .update() invece di leggere fiscal.*
+    // esternamente (2 step non atomici → race condition con doppio
+    // salvataggio simultaneo che assegna lo stesso numero a 2 documenti).
     const fiscal = this.cashFiscalSettings();
     const isInvoice = payload.documentType === 'fattura';
-    const docNumber = isInvoice ? fiscal.nextInvoiceNumber : fiscal.nextReceiptNumber;
+    let docNumber = isInvoice ? fiscal.nextInvoiceNumber : fiscal.nextReceiptNumber;
+    this.cashFiscalSettings.update((settings) => {
+      const currentNumber = isInvoice ? settings.nextInvoiceNumber : settings.nextReceiptNumber;
+      docNumber = currentNumber;
+      return {
+        ...settings,
+        ...(isInvoice
+          ? { nextInvoiceNumber: settings.nextInvoiceNumber + 1 }
+          : { nextReceiptNumber: settings.nextReceiptNumber + 1 }),
+      };
+    });
     const resolvedElectronicMethod = this.resolveElectronicMethod(
       payload.paymentMethod,
       payload.paymentSplit,
@@ -1887,7 +2134,7 @@ export class AudiomaxDataService {
         : 0;
     const record: CashTransactionRecord = {
       id: `cash-tx-${crypto.randomUUID()}`,
-      reference: `CAS-${new Date().toISOString().slice(2, 10).replaceAll('-', '')}-${`${this.cashTransactions().length + 1}`.padStart(3, '0')}`,
+      reference: `CAS-${new Date().toISOString().slice(2, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 8)}`,
       clientId: matchedClient?.id ?? null,
       createdAt: new Date().toISOString(),
       customerName: payload.customerName || 'Banco',
@@ -1915,12 +2162,6 @@ export class AudiomaxDataService {
       settledAt: payload.status === 'pagato' ? new Date().toISOString() : null,
       lines: payload.lines,
     };
-    this.cashFiscalSettings.update((settings) => ({
-      ...settings,
-      ...(isInvoice
-        ? { nextInvoiceNumber: settings.nextInvoiceNumber + 1 }
-        : { nextReceiptNumber: settings.nextReceiptNumber + 1 }),
-    }));
 
     const stockDeductions = new Map<string, number>();
 
@@ -2078,6 +2319,8 @@ export class AudiomaxDataService {
       expenseCategories: this.expenseCategories(),
       expenseSuppliers: this.expenseSuppliers(),
       expensePaymentMethods: this.expensePaymentMethods(),
+      // ⭐ Provider pagamento integrati (salvataggio persistente)
+      paymentProviders: this.paymentProviders(),
       expenseRecords: this.expenseRecords(),
       expenseInstallments: this.expenseInstallments(),
       expenseNotifications: this.expenseNotifications(),
@@ -2122,6 +2365,10 @@ export class AudiomaxDataService {
       this.restoreCollectionState(this.expenseCategories, parsedState.expenseCategories);
       this.restoreCollectionState(this.expenseSuppliers, parsedState.expenseSuppliers);
       this.restoreCollectionState(this.expensePaymentMethods, parsedState.expensePaymentMethods);
+      // ⭐ Provider pagamento integrati (retrocompatibile: seed di default se assenti)
+      if (parsedState.paymentProviders && Array.isArray(parsedState.paymentProviders)) {
+        this.restoreCollectionState(this.paymentProviders, parsedState.paymentProviders);
+      }
       this.restoreCollectionState(this.expenseRecords, parsedState.expenseRecords);
       this.restoreCollectionState(this.expenseInstallments, parsedState.expenseInstallments);
       this.restoreCollectionState(this.expenseNotifications, parsedState.expenseNotifications);
@@ -2209,83 +2456,12 @@ export class AudiomaxDataService {
       return;
     }
 
-    const needsMigration =
-      currentItem.sku !== seedItem.sku ||
-      currentItem.name !== seedItem.name ||
-      Number(currentItem.cableMetersPerRoll ?? 0) !== Number(seedItem.cableMetersPerRoll ?? 0) ||
-      Number(currentItem.unitCost) > 20;
-
-    if (!needsMigration) {
-      return;
-    }
-
-    this.inventoryItems.update((items) =>
-      items.map((item) =>
-        item.id === seedItem.id
-          ? {
-              ...item,
-              ...seedItem,
-              status: this.resolveInventoryStatus(seedItem.stock, seedItem.minStock),
-            }
-          : item,
-      ),
-    );
-
-    const seedLots = initialAudiomaxState.warehouseLots.filter((lot) => lot.inventoryItemId === seedItem.id);
-    this.warehouseLots.update((items) => [
-      ...items.filter((lot) => lot.inventoryItemId !== seedItem.id),
-      ...seedLots,
-    ]);
-
-    const seedMovements = initialAudiomaxState.warehouseMovements.filter(
-      (movement) => movement.inventoryItemId === seedItem.id,
-    );
-    this.warehouseMovements.update((items) => [
-      ...items.filter((movement) => movement.inventoryItemId !== seedItem.id),
-      ...seedMovements,
-    ]);
-
-    const seedPurchases = initialAudiomaxState.warehousePurchases.filter(
-      (purchase) => purchase.inventoryItemId === seedItem.id,
-    );
-    this.warehousePurchases.update((items) => [
-      ...items.filter((purchase) => purchase.inventoryItemId !== seedItem.id),
-      ...seedPurchases,
-    ]);
-
-    const seedCashProduct = initialAudiomaxState.cashProducts.find(
-      (product) => product.linkedInventoryItemId === seedItem.id,
-    );
-    if (seedCashProduct) {
-      this.cashProducts.update((items) =>
-        items.map((product) =>
-          product.linkedInventoryItemId === seedItem.id
-            ? {
-                ...product,
-                name: seedCashProduct.name,
-                price: seedCashProduct.price,
-              }
-            : product,
-        ),
-      );
-    }
-
-    this.serviceTickets.update((tickets) =>
-      tickets.map((ticket) => ({
-        ...ticket,
-        materialSummary: ticket.materialSummary.replace('cablaggio HDMI 8K', 'cablaggio speaker OFC'),
-        materialLines: ticket.materialLines.map((line) =>
-          line.inventoryItemId === seedItem.id
-            ? {
-                ...line,
-                itemName: seedItem.name,
-                unitCost: seedItem.unitCost,
-                totalCost: line.quantity * seedItem.unitCost,
-              }
-            : line,
-        ),
-      })),
-    );
+    // ✅ Fix ISS-04: migrazione legacy cablaggio DISABILITATA definitivamente
+    // per evitare che modifiche legittime al prezzo o personalizzazioni di
+    // inv-001 inneschino una sovrascrittura distruttiva di dati custom, lotti,
+    // movimenti, ticket e prodotti di cassa collegati.
+    // La migrazione viene considerata conclusa e non ripetibile.
+    return;
   }
 
   private normalizeSearchValue(value: string): string {
@@ -2299,6 +2475,31 @@ export class AudiomaxDataService {
         `${record.category} ${record.title} ${record.detail} ${record.status}`,
       ),
     };
+  }
+
+  // ===== ISS-02 helper: merge locale ↔ remoto senza perdere modifiche utente nel frattempo =====
+  // Strategia: Unione per id. Se un id esiste SIA nel remoto SIA nel locale (è stato aggiornato
+  // dall'utente mentre loadRemoteState girava) vince sempre **remoto come fonte**. Se invece un id
+  // esiste SOLO in locale (è stato creato ex-novo dall'utente nel lasso temporale), viene MANTENUTO
+  // e non viene sovrascritto. Così non si perdono record creati dall'utente tra login e fetch.
+  private mergeRemoteWithLocalUpdates<T extends { id: string }>(
+    remoteRows: T[],
+    currentLocal: T[],
+  ): T[] {
+    if (!remoteRows.length) {
+      return currentLocal;
+    }
+    const byId = new Map<string, T>();
+    for (const row of remoteRows) {
+      byId.set(row.id, row);
+    }
+    const merged: T[] = [...remoteRows];
+    for (const localRow of currentLocal) {
+      if (!byId.has(localRow.id)) {
+        merged.push(localRow);
+      }
+    }
+    return merged;
   }
 
   private async loadRemoteState(): Promise<void> {
@@ -2321,48 +2522,48 @@ export class AudiomaxDataService {
       serviceTicketsResult,
     ] =
       await Promise.all([
-      client
-        .from(supabaseConfig.tables.clients)
-        .select(
-          'id, name, phone, email, city, address, segment, preferred_contact, notes, favorite_brands, last_contact, status, privacy_profile',
-        )
-        .order('last_contact', { ascending: false }),
-      client
-        .from(supabaseConfig.tables.quotes)
-        .select('id, customer_name, project_type, value, stage, due_date')
-        .order('due_date', { ascending: true }),
-      client
-        .from(supabaseConfig.tables.appointments)
-        .select(
-          'id, title, customer_name, appointment_type, location_type, scheduled_at, duration_minutes, technician, linked_quote_id, status',
-        )
-        .order('scheduled_at', { ascending: true }),
-      client
-        .from(supabaseConfig.tables.inventoryItems)
-        .select('id, sku, name, category, stock, min_stock, unit_cost, supplier, location, status')
-        .order('name', { ascending: true }),
-      client
-        .from(supabaseConfig.tables.cashProducts)
-        .select('id, name, category, price, shortcut, pricing_mode, linked_inventory_item_id')
-        .order('name', { ascending: true }),
-      client
-        .from(supabaseConfig.tables.cashTransactions)
-        .select(
-          'id, reference, client_id, customer_name, payment_method, status, created_at, notes, received_amount, total, change_amount, lines',
-        )
-        .order('created_at', { ascending: false }),
-      client
-        .from(supabaseConfig.tables.cashShifts)
-        .select(
-          'id, label, opened_at, closed_at, transactions_count, paid_total, suspended_total, by_method',
-        )
-        .order('closed_at', { ascending: false }),
-      client
-        .from(supabaseConfig.tables.serviceTickets)
-        .select(
-          'id, title, customer_name, service_type, location_type, priority, status, technician, linked_quote_id, linked_appointment_id, material_summary, material_cost, material_lines, work_summary, resolution_status, closed_at, created_at',
-        )
-        .order('created_at', { ascending: false }),
+        client
+          .from(supabaseConfig.tables.clients)
+          .select(
+            'id, name, phone, email, city, address, segment, preferred_contact, notes, favorite_brands, last_contact, status, privacy_profile',
+          )
+          .order('last_contact', { ascending: false }),
+        client
+          .from(supabaseConfig.tables.quotes)
+          .select('id, customer_name, project_type, value, stage, due_date')
+          .order('due_date', { ascending: true }),
+        client
+          .from(supabaseConfig.tables.appointments)
+          .select(
+            'id, title, customer_name, appointment_type, location_type, scheduled_at, duration_minutes, technician, linked_quote_id, status',
+          )
+          .order('scheduled_at', { ascending: true }),
+        client
+          .from(supabaseConfig.tables.inventoryItems)
+          .select('id, sku, name, category, stock, min_stock, unit_cost, supplier, location, status')
+          .order('name', { ascending: true }),
+        client
+          .from(supabaseConfig.tables.cashProducts)
+          .select('id, name, category, price, shortcut, pricing_mode, linked_inventory_item_id')
+          .order('name', { ascending: true }),
+        client
+          .from(supabaseConfig.tables.cashTransactions)
+          .select(
+            'id, reference, client_id, customer_name, payment_method, status, created_at, notes, received_amount, total, change_amount, lines',
+          )
+          .order('created_at', { ascending: false }),
+        client
+          .from(supabaseConfig.tables.cashShifts)
+          .select(
+            'id, label, opened_at, closed_at, transactions_count, paid_total, suspended_total, by_method',
+          )
+          .order('closed_at', { ascending: false }),
+        client
+          .from(supabaseConfig.tables.serviceTickets)
+          .select(
+            'id, title, customer_name, service_type, location_type, priority, status, technician, linked_quote_id, linked_appointment_id, material_summary, material_cost, material_lines, work_summary, resolution_status, closed_at, created_at',
+          )
+          .order('created_at', { ascending: false }),
       ]);
 
     const firstError =
@@ -2409,42 +2610,45 @@ export class AudiomaxDataService {
     ) {
       await this.seedRemoteTables();
       this.supabase.connectionState.set('connected');
+      this.isRemoteLoaded.set(true);
       return;
     }
 
+    // ===== ISS-02: tutti i .set() sostituiti con merge (locale + remoto) =====
     if (remoteClients.length) {
-      this.clients.set(remoteClients);
+      this.clients.set(this.mergeRemoteWithLocalUpdates(remoteClients, this.clients()));
     }
 
     if (remoteQuotes.length) {
-      this.quotes.set(remoteQuotes);
+      this.quotes.set(this.mergeRemoteWithLocalUpdates(remoteQuotes, this.quotes()));
     }
 
     if (remoteAppointments.length) {
-      this.appointments.set(remoteAppointments);
+      this.appointments.set(this.mergeRemoteWithLocalUpdates(remoteAppointments, this.appointments()));
     }
 
     if (remoteInventoryItems.length) {
-      this.inventoryItems.set(remoteInventoryItems);
+      this.inventoryItems.set(this.mergeRemoteWithLocalUpdates(remoteInventoryItems, this.inventoryItems()));
     }
 
     if (remoteCashProducts.length) {
-      this.cashProducts.set(remoteCashProducts);
+      this.cashProducts.set(this.mergeRemoteWithLocalUpdates(remoteCashProducts, this.cashProducts()));
     }
 
     if (remoteCashTransactions.length) {
-      this.cashTransactions.set(remoteCashTransactions);
+      this.cashTransactions.set(this.mergeRemoteWithLocalUpdates(remoteCashTransactions, this.cashTransactions()));
     }
 
     if (remoteCashShifts.length) {
-      this.cashShifts.set(remoteCashShifts);
+      this.cashShifts.set(this.mergeRemoteWithLocalUpdates(remoteCashShifts, this.cashShifts()));
     }
 
     if (remoteServiceTickets.length) {
-      this.serviceTickets.set(remoteServiceTickets);
+      this.serviceTickets.set(this.mergeRemoteWithLocalUpdates(remoteServiceTickets, this.serviceTickets()));
     }
 
     this.supabase.connectionState.set('connected');
+    this.isRemoteLoaded.set(true);
   }
 
   private queueRemoteSync(
@@ -2471,7 +2675,14 @@ export class AudiomaxDataService {
       return;
     }
 
-    void this.saveRemoteRecord(kind, payload);
+    // ✅ Fix ISS-05: promise void con catch esplicito invece di fire-and-forget.
+    // Se il sync remoto fallisce, logghiamo e segnaliamo connectionState='error'
+    // così la UI può mostrare un avviso. I dati locali restano comunque
+    // persistiti in localStorage e verranno ritrasmessi al prossimo avvio.
+    void this.saveRemoteRecord(kind, payload).catch((err) => {
+      console.error(`[queueRemoteSync] fallito kind=${kind} id=${(payload as any)?.id ?? 'n/a'}:`, err);
+      this.supabase.connectionState.set('error');
+    });
   }
 
   private queueRemoteDelete(
@@ -2490,7 +2701,11 @@ export class AudiomaxDataService {
       return;
     }
 
-    void this.deleteRemoteRecord(kind, id);
+    // ✅ Fix ISS-05: promise void con catch esplicito invece di fire-and-forget.
+    void this.deleteRemoteRecord(kind, id).catch((err) => {
+      console.error(`[queueRemoteDelete] fallito kind=${kind} id=${id}:`, err);
+      this.supabase.connectionState.set('error');
+    });
   }
 
   private async seedRemoteTables(): Promise<void> {
@@ -2513,46 +2728,46 @@ export class AudiomaxDataService {
       serviceTicketsResult,
     ] =
       await Promise.all([
-      snapshot.clients.length
-        ? client
+        snapshot.clients.length
+          ? client
             .from(supabaseConfig.tables.clients)
             .upsert(snapshot.clients.map((item) => this.toClientRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.quotes.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.quotes.length
+          ? client
             .from(supabaseConfig.tables.quotes)
             .upsert(snapshot.quotes.map((item) => this.toQuoteRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.appointments.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.appointments.length
+          ? client
             .from(supabaseConfig.tables.appointments)
             .upsert(snapshot.appointments.map((item) => this.toAppointmentRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.inventoryItems.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.inventoryItems.length
+          ? client
             .from(supabaseConfig.tables.inventoryItems)
             .upsert(snapshot.inventoryItems.map((item) => this.toInventoryItemRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.cashProducts.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.cashProducts.length
+          ? client
             .from(supabaseConfig.tables.cashProducts)
             .upsert(snapshot.cashProducts.map((item) => this.toCashProductRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.cashTransactions.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.cashTransactions.length
+          ? client
             .from(supabaseConfig.tables.cashTransactions)
             .upsert(snapshot.cashTransactions.map((item) => this.toCashTransactionRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.cashShifts.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.cashShifts.length
+          ? client
             .from(supabaseConfig.tables.cashShifts)
             .upsert(snapshot.cashShifts.map((item) => this.toCashShiftRow(item)))
-        : Promise.resolve({ error: null }),
-      snapshot.serviceTickets.length
-        ? client
+          : Promise.resolve({ error: null }),
+        snapshot.serviceTickets.length
+          ? client
             .from(supabaseConfig.tables.serviceTickets)
             .upsert(snapshot.serviceTickets.map((item) => this.toServiceTicketRow(item)))
-        : Promise.resolve({ error: null }),
+          : Promise.resolve({ error: null }),
       ]);
 
     const firstError =
@@ -2602,35 +2817,35 @@ export class AudiomaxDataService {
     const result =
       kind === 'client'
         ? await client
-            .from(supabaseConfig.tables.clients)
-            .upsert(this.toClientRow(payload as ClientRecord))
+          .from(supabaseConfig.tables.clients)
+          .upsert(this.toClientRow(payload as ClientRecord))
         : kind === 'quote'
           ? await client
-              .from(supabaseConfig.tables.quotes)
-              .upsert(this.toQuoteRow(payload as QuoteRecord))
+            .from(supabaseConfig.tables.quotes)
+            .upsert(this.toQuoteRow(payload as QuoteRecord))
           : kind === 'inventory'
             ? await client
-                .from(supabaseConfig.tables.inventoryItems)
-                .upsert(this.toInventoryItemRow(payload as InventoryItemRecord))
-          : kind === 'cash-product'
-            ? await client
+              .from(supabaseConfig.tables.inventoryItems)
+              .upsert(this.toInventoryItemRow(payload as InventoryItemRecord))
+            : kind === 'cash-product'
+              ? await client
                 .from(supabaseConfig.tables.cashProducts)
                 .upsert(this.toCashProductRow(payload as CashRegisterProductRecord))
-          : kind === 'cash-transaction'
-            ? await client
-                .from(supabaseConfig.tables.cashTransactions)
-                .upsert(this.toCashTransactionRow(payload as CashTransactionRecord))
-          : kind === 'cash-shift'
-            ? await client
-                .from(supabaseConfig.tables.cashShifts)
-                .upsert(this.toCashShiftRow(payload as CashShiftRecord))
-          : kind === 'appointment'
-            ? await client
-                .from(supabaseConfig.tables.appointments)
-                .upsert(this.toAppointmentRow(payload as AppointmentRecord))
-            : await client
-                .from(supabaseConfig.tables.serviceTickets)
-                .upsert(this.toServiceTicketRow(payload as ServiceTicketRecord));
+              : kind === 'cash-transaction'
+                ? await client
+                  .from(supabaseConfig.tables.cashTransactions)
+                  .upsert(this.toCashTransactionRow(payload as CashTransactionRecord))
+                : kind === 'cash-shift'
+                  ? await client
+                    .from(supabaseConfig.tables.cashShifts)
+                    .upsert(this.toCashShiftRow(payload as CashShiftRecord))
+                  : kind === 'appointment'
+                    ? await client
+                      .from(supabaseConfig.tables.appointments)
+                      .upsert(this.toAppointmentRow(payload as AppointmentRecord))
+                    : await client
+                      .from(supabaseConfig.tables.serviceTickets)
+                      .upsert(this.toServiceTicketRow(payload as ServiceTicketRecord));
 
     if (result.error) {
       this.supabase.connectionState.set(result.error.code === '42P01' ? 'schema-required' : 'error');
@@ -2673,9 +2888,9 @@ export class AudiomaxDataService {
                 ? supabaseConfig.tables.cashTransactions
                 : kind === 'cash-shift'
                   ? supabaseConfig.tables.cashShifts
-          : kind === 'appointment'
-            ? supabaseConfig.tables.appointments
-            : supabaseConfig.tables.serviceTickets;
+                  : kind === 'appointment'
+                    ? supabaseConfig.tables.appointments
+                    : supabaseConfig.tables.serviceTickets;
 
     const result = await client.from(table).delete().eq('id', id);
 
@@ -2829,23 +3044,23 @@ export class AudiomaxDataService {
     const fallbackPrivacyProfile = createClientPrivacyProfile();
     const privacyProfile = row.privacy_profile
       ? {
-          ...fallbackPrivacyProfile,
-          ...row.privacy_profile,
-          emailMarketing: {
-            ...fallbackPrivacyProfile.emailMarketing,
-            ...row.privacy_profile.emailMarketing,
-          },
-          whatsappMarketing: {
-            ...fallbackPrivacyProfile.whatsappMarketing,
-            ...row.privacy_profile.whatsappMarketing,
-          },
-          fidelityProfiling: {
-            ...fallbackPrivacyProfile.fidelityProfiling,
-            ...row.privacy_profile.fidelityProfiling,
-          },
-          audit: row.privacy_profile.audit ?? fallbackPrivacyProfile.audit,
-          archive: row.privacy_profile.archive ?? fallbackPrivacyProfile.archive,
-        }
+        ...fallbackPrivacyProfile,
+        ...row.privacy_profile,
+        emailMarketing: {
+          ...fallbackPrivacyProfile.emailMarketing,
+          ...row.privacy_profile.emailMarketing,
+        },
+        whatsappMarketing: {
+          ...fallbackPrivacyProfile.whatsappMarketing,
+          ...row.privacy_profile.whatsappMarketing,
+        },
+        fidelityProfiling: {
+          ...fallbackPrivacyProfile.fidelityProfiling,
+          ...row.privacy_profile.fidelityProfiling,
+        },
+        audit: row.privacy_profile.audit ?? fallbackPrivacyProfile.audit,
+        archive: row.privacy_profile.archive ?? fallbackPrivacyProfile.archive,
+      }
       : fallbackPrivacyProfile;
 
     return {
@@ -2924,9 +3139,9 @@ export class AudiomaxDataService {
       items.map((product) =>
         product.linkedInventoryItemId === item.id
           ? {
-              ...product,
-              price: item.salePrice,
-            }
+            ...product,
+            price: item.salePrice,
+          }
           : product,
       ),
     );
@@ -3084,11 +3299,11 @@ export class AudiomaxDataService {
         items.map((position) =>
           position.id === existingPosition.id
             ? {
-                ...position,
-                occupiedInventoryItemIds: Array.from(
-                  new Set([...position.occupiedInventoryItemIds, inventoryItemId]),
-                ),
-              }
+              ...position,
+              occupiedInventoryItemIds: Array.from(
+                new Set([...position.occupiedInventoryItemIds, inventoryItemId]),
+              ),
+            }
             : position,
         ),
       );
@@ -3150,6 +3365,8 @@ export class AudiomaxDataService {
         'expense:create': true,
         'expense:update': true,
         'expense:delete': true,
+        // ⭐ System:manage: solo admin gestisce provider pagamento integrati
+        'system:manage': true,
       };
     }
 
@@ -3159,6 +3376,8 @@ export class AudiomaxDataService {
         'expense:create': true,
         'expense:update': true,
         'expense:delete': false,
+        // Finance non tocca IBAN/API key dei provider: solo visualizza
+        'system:manage': false,
       };
     }
 
@@ -3168,6 +3387,7 @@ export class AudiomaxDataService {
         'expense:create': true,
         'expense:update': false,
         'expense:delete': false,
+        'system:manage': false,
       };
     }
 
@@ -3176,6 +3396,7 @@ export class AudiomaxDataService {
       'expense:create': false,
       'expense:update': false,
       'expense:delete': false,
+      'system:manage': false,
     };
   }
 }

@@ -2,24 +2,19 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 2rem;
-  background:
-    radial-gradient(circle at top right, rgba(16, 185, 129, 0.12), transparent 28%),
-    radial-gradient(circle at left top, rgba(59, 130, 246, 0.1), transparent 32%),
-    linear-gradient(180deg, var(--card-subtle-bg), var(--app-bg) 60%, var(--workspace-bg)),
-    var(--app-bg);
+  padding: 1.2rem;
+  background: var(--app-bg);
 }
 
 .privacy-card {
   width: min(100%, 64rem);
   display: grid;
-  gap: 1.4rem;
-  padding: 1.6rem;
-  border-radius: 1.6rem;
+  gap: 1rem;
+  padding: 1.15rem;
+  border-radius: 1.2rem;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.1);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
 }
 
 .privacy-card.empty {
@@ -28,9 +23,9 @@
 }
 
 .privacy-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 1.25rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.85rem;
   align-items: start;
 }
 
@@ -44,7 +39,7 @@
 
 .privacy-head-side {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.45rem;
   justify-items: end;
 }
 
@@ -59,13 +54,13 @@
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: capitalize;
+  &::before { content: '🛡️'; margin-right: 0.15rem; }
 }
 
 .privacy-head h1,
 .privacy-panel h2,
 .privacy-summary strong,
 .privacy-status-card strong,
-.privacy-panel-intro strong,
 .privacy-archive-row strong {
   color: var(--text-primary);
 }
@@ -85,55 +80,45 @@
 .privacy-status-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.85rem;
+  gap: 0.65rem;
 }
 
 .privacy-status-card {
   display: grid;
   gap: 0.2rem;
-  padding: 1rem;
-  border-radius: 1rem;
+  padding: 0.78rem 0.85rem;
+  border-radius: 0.9rem;
   background: var(--card-subtle-bg);
   border: 1px solid var(--panel-border);
 }
 
 .privacy-status-card span,
 .privacy-status-card small,
-.privacy-panel-intro span,
 .privacy-archive-row small {
   color: var(--text-soft);
 }
 
 .privacy-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(18rem, 0.9fr);
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1.1fr) minmax(17rem, 0.85fr);
+  gap: 0.8rem;
 }
 
 .privacy-panel {
   display: grid;
-  gap: 0.9rem;
-  padding: 1.1rem;
-  border-radius: 1rem;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 0.95rem;
   background: var(--card-bg);
   border: 1px solid var(--panel-border);
-}
-
-.privacy-panel-intro {
-  display: grid;
-  gap: 0.15rem;
-  padding: 0.9rem 1rem;
-  border-radius: 0.9rem;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.08));
-  border: 1px solid rgba(16, 185, 129, 0.14);
 }
 
 .privacy-choice {
   display: flex;
   gap: 0.75rem;
   align-items: start;
-  padding: 0.95rem;
-  border-radius: 0.9rem;
+  padding: 0.82rem 0.88rem;
+  border-radius: 0.82rem;
   background: var(--card-subtle-bg);
   border: 1px solid var(--panel-border);
 }
@@ -149,7 +134,7 @@
 
 .privacy-actions {
   display: flex;
-  gap: 0.65rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 
@@ -217,6 +202,30 @@
   text-transform: capitalize;
 }
 
+// ✅ Fix ISS-16: Privacy page — override Dark Mode per colori hardcoded light
+//    Sostituisce greens/blues hardcoded light con tonalità adatte al tema scuro
+//    (maggior contrasto + armonia con palette navy dark definita in styles.scss).
+:host-context([data-theme='dark']) {
+  .privacy-kicker {
+    color: #5eead4;
+  }
+  .privacy-status-pill {
+    background: rgba(16, 185, 129, 0.18);
+    color: #6ee7b7;
+  }
+  .privacy-link {
+    color: #60a5fa;
+  }
+  .privacy-archive-badge {
+    background: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
+  }
+  .privacy-note,
+  .privacy-archive {
+    border-top-color: rgba(148, 163, 184, 0.2);
+  }
+}
+
 @media (max-width: 768px) {
   .privacy-page {
     padding: 1rem;
@@ -227,9 +236,11 @@
     grid-template-columns: 1fr;
   }
 
-  .privacy-head,
-  .privacy-summary div {
+  .privacy-head {
     grid-template-columns: 1fr;
+  }
+
+  .privacy-summary div {
     flex-direction: column;
   }
 

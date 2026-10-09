@@ -1,6 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, effect, inject, signal } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import { ActivatedRoute, ParamMap, RouterLink } from '@angular/router';
+import { DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 
 import { AudiomaxDataService } from './audiomax-data.service';
@@ -10,10 +12,13 @@ import { AudiomaxDataService } from './audiomax-data.service';
   imports: [CommonModule, RouterLink],
   templateUrl: './privacy-consent-page.html',
   styleUrl: './privacy-consent-page.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PrivacyConsentPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly data = inject(AudiomaxDataService);
+  // ✅ Fix REV-005: DestroyRef per takeUntilDestroyed e cleanup memory leak
+  private readonly destroyRef = inject(DestroyRef);
 
   protected readonly clientId = signal(
     this.route.snapshot.paramMap.get('clientId') ?? '',
@@ -76,9 +81,16 @@ export class PrivacyConsentPageComponent {
       this.fidelityProfiling.set(client.privacyProfile.fidelityProfiling.granted);
     });
 
-    this.route.paramMap.pipe(map((params) => params.get('clientId') ?? '')).subscribe((clientId) => {
-      this.clientId.set(clientId);
-    });
+    // ✅ Fix REV-005: takeUntilDestroyed(...) unsubscribe automatico al destroy
+    //    invece subscribe persistente dopo leave pagina (memory leak).
+    this.route.paramMap
+      .pipe(
+        map((params: ParamMap) => params.get('clientId') ?? ''),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((clientId: string) => {
+        this.clientId.set(clientId);
+      });
   }
 
   protected setEmailMarketing(value: boolean): void {

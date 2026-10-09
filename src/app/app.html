@@ -28,6 +28,8 @@
       <a class="nav-item nav-home"
         routerLink="/dashboard"
         routerLinkActive="active"
+        #dashboardRla="routerLinkActive"
+        [attr.aria-current]="dashboardRla.isActive ? 'page' : null"
         [routerLinkActiveOptions]="{ exact: true }">
         <span class="nav-icon-wrap">
           <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -82,6 +84,8 @@
             <a class="nav-item"
               [routerLink]="['/', section.route]"
               routerLinkActive="active"
+              #navRla="routerLinkActive"
+              [attr.aria-current]="navRla.isActive ? 'page' : null"
               [attr.aria-label]="section.label">
               <span class="nav-icon-wrap">
                 @switch (section.id) {
@@ -271,6 +275,7 @@
           id="global-search-input"
           class="global-search-input"
           type="search"
+          aria-label="Cerca globale in tutta l'applicazione: clienti, preventivi, appuntamenti, ticket"
           placeholder="Cerca cliente, preventivo, appuntamento, ticket…"
           [value]="globalSearchQuery()"
           (input)="updateGlobalSearchQuery($event)"
@@ -286,6 +291,7 @@
             <a
               class="global-search-item"
               [class.active]="index === globalSearchSelectedIndex()"
+              [attr.aria-current]="index === globalSearchSelectedIndex() ? 'true' : null"
               [routerLink]="result.route"
               (click)="closeGlobalSearch()"
             >

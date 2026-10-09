@@ -3,6 +3,8 @@ import { SupabaseClient, createClient } from '@supabase/supabase-js';
 
 import { supabaseConfig } from './supabase.config';
 
+let sharedSupabaseClient: SupabaseClient | null | undefined;
+
 export type SupabaseConnectionState =
   | 'missing-url'
   | 'ready'
@@ -15,10 +17,7 @@ export type SupabaseConnectionState =
   providedIn: 'root',
 })
 export class SupabaseService {
-  private readonly clientInstance =
-    supabaseConfig.url.trim() && supabaseConfig.publishableKey.trim()
-      ? createClient(supabaseConfig.url, supabaseConfig.publishableKey)
-      : null;
+  private readonly clientInstance = this.createSharedClient();
 
   readonly connectionState = signal<SupabaseConnectionState>(
     this.clientInstance ? 'ready' : 'missing-url',
@@ -47,5 +46,19 @@ export class SupabaseService {
 
   get isConfigured(): boolean {
     return Boolean(this.clientInstance);
+  }
+
+  private createSharedClient(): SupabaseClient | null {
+    if (sharedSupabaseClient !== undefined) {
+      return sharedSupabaseClient;
+    }
+
+    if (!supabaseConfig.url.trim() || !supabaseConfig.publishableKey.trim()) {
+      sharedSupabaseClient = null;
+      return sharedSupabaseClient;
+    }
+
+    sharedSupabaseClient = createClient(supabaseConfig.url, supabaseConfig.publishableKey);
+    return sharedSupabaseClient;
   }
 }

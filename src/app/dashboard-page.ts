@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
@@ -12,11 +12,14 @@ import { SupabaseService } from './supabase.service';
   imports: [CommonModule, RouterLink, ReactiveFormsModule],
   templateUrl: './dashboard-page.html',
   styleUrl: './dashboard-page.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DashboardPageComponent {
   protected readonly data = inject(AudiomaxDataService);
   private readonly supabase = inject(SupabaseService);
   private readonly formBuilder = inject(FormBuilder);
+  // ✅ Fix REV-006: DestroyRef per cleanup toastTimer su component destroy
+  private readonly destroyRef = inject(DestroyRef);
   protected readonly searchTerm = signal('');
   protected readonly dashboardAppointmentModalOpen = signal(false);
   protected readonly dashboardSelectedDate = signal(new Date().toISOString().slice(0, 10));
@@ -37,9 +40,22 @@ export class DashboardPageComponent {
   protected readonly miniHrDashPermitStart = signal('09:00');
   protected readonly miniHrDashPermitEnd = signal('13:00');
   protected readonly miniHrDashNote = signal('');
+
   // toast locale
   protected readonly toastMessage = signal<string | null>(null);
   protected readonly toastTone = signal<'success' | 'error'>('success');
+  // ✅ Fix REV-006: handle del setTimeout toast salvato per cleanup
+  private toastTimer?: ReturnType<typeof setTimeout>;
+
+  constructor() {
+    // Cleanup sicuro su distruzione componente
+    this.destroyRef.onDestroy(() => {
+      if (this.toastTimer !== undefined) {
+        clearTimeout(this.toastTimer);
+        this.toastTimer = undefined;
+      }
+    });
+  }
 
   /** Calcolo minuti permesso orario (template non ammette Math). */
   protected miniHrDashPermitMinutesCalc(): number {
@@ -57,7 +73,12 @@ export class DashboardPageComponent {
   private _pushDashToast(message: string, tone: 'success' | 'error'): void {
     this.toastMessage.set(message);
     this.toastTone.set(tone);
-    setTimeout(() => {
+    // ✅ Fix REV-006: clearTimeout vecchio se accodiamo toast sovrapposti,
+    //    salva handle per clearTimeout nel destroyRef.
+    if (this.toastTimer) {
+      clearTimeout(this.toastTimer);
+    }
+    this.toastTimer = setTimeout(() => {
       if (this.toastMessage() === message) {
         this.toastMessage.set(null);
       }
@@ -296,6 +317,19 @@ export class DashboardPageComponent {
       tone: 'kpi-purple',
     },
   ]);
+
+  // Helper: restituisce la data in formato esteso italiano per etichette accessibilità calendario
+  protected _longItalianDate(isoDate: string): string {
+    const WEEKDAYS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+    const MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+    try {
+      const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number);
+      const dt = new Date(y, (m || 1) - 1, d || 1);
+      return `${WEEKDAYS[dt.getDay()]} ${d} ${MONTHS[(m || 1) - 1]} ${y}`;
+    } catch {
+      return isoDate;
+    }
+  }
 
   protected readonly quickActions = [
     {

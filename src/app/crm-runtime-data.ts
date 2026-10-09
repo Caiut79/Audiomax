@@ -23,14 +23,14 @@ export interface ClientConsentFlag {
 export interface ClientPrivacyAuditRecord {
   id: string;
   action:
-    | 'informativa-mostrata'
-    | 'consenso-email'
-    | 'consenso-whatsapp'
-    | 'consenso-fidelity'
-    | 'cliente-creato'
-    | 'link-generato'
-    | 'consenso-confermato'
-    | 'consenso-revocato';
+  | 'informativa-mostrata'
+  | 'consenso-email'
+  | 'consenso-whatsapp'
+  | 'consenso-fidelity'
+  | 'cliente-creato'
+  | 'link-generato'
+  | 'consenso-confermato'
+  | 'consenso-revocato';
   detail: string;
   operator: string;
   channel: 'cassa' | 'crm' | 'agenda' | 'link-remoto';
@@ -40,11 +40,11 @@ export interface ClientPrivacyAuditRecord {
 export interface ClientPrivacyArchiveRecord {
   id: string;
   type:
-    | 'informativa'
-    | 'consenso-remoto'
-    | 'conferma-consenso'
-    | 'revoca-consenso'
-    | 'scheda-cliente';
+  | 'informativa'
+  | 'consenso-remoto'
+  | 'conferma-consenso'
+  | 'revoca-consenso'
+  | 'scheda-cliente';
   title: string;
   status: 'bozza' | 'registrato' | 'inviato' | 'confermato' | 'revocato';
   channel: 'cassa' | 'crm' | 'agenda' | 'link-remoto';
@@ -235,7 +235,7 @@ export interface CashRegisterProductRecord {
   category: string;
   price: number;
   shortcut: boolean;
-  pricingMode: 'fisso' | 'quantita' | 'ora' | 'mezzora' | 'quarto';
+  pricingMode: 'fisso' | 'quantità' | 'ora' | 'mezzora' | 'quarto';
   linkedInventoryItemId: string | null;
 }
 
@@ -437,6 +437,27 @@ export interface ExpensePaymentMethodRecord {
   label: 'bonifico' | 'rid' | 'carta-credito' | 'paypal' | 'contanti';
   provider: string;
   active: boolean;
+  // ⭐ (Opzionale) Link a un provider di pagamento integrato es. Stripe configurato in Impostazioni
+  paymentProviderId?: string | null;
+}
+
+// ⭐ Provider di pagamento integrato (Stripe, Satispay, Adyen, Sepa Direct Debit via API, ecc.)
+//    Oppure "Esterno" = pagamento fuori dal gestionale (es. contanti, bonifico bancario manuale)
+export type PaymentProviderKind = 'esterno' | 'integrato';
+export type PaymentExecutionMode = 'manuale' | 'automatico';
+export interface PaymentProviderRecord {
+  id: string;
+  name: string;                    // Nome mostrato all'utente (es. "Stripe · Conto Business")
+  kind: PaymentProviderKind;       // Esterno o Integrato
+  code: string;                    // Identificativo tecnico: 'stripe', 'satispay', 'adyen', 'bonifico-manuale', 'contanti'
+  description?: string;            // Note libere (IBAN, beneficiario, avviso, ecc.)
+  // Per provider integrati: configurazione minima (non salviamo vere API key per sicurezza demo)
+  apiPublishableKey?: string;
+  connectedBankAccountIban?: string;
+  connectedBankAccountLabel?: string;
+  autoSupported: boolean;          // true = supporta pagamenti automatici ricorrenti
+  active: boolean;
+  createdAt: string;
 }
 
 export interface ExpenseInstallmentRecord {
@@ -484,6 +505,20 @@ export interface ExpenseRecord {
   sourceReferenceId: string | null;
   createdBy: string;
   createdAt: string;
+  // ⭐ Metodo di calcolo IVA al momento della registrazione della spesa
+  // amountAlreadyIvato: se true = l'utente ha inserito importo lordo già IVA COMPRESA (caso più frequente in Italia).
+  // amountSplitVat:    se true e amountAlreadyIvato=true, l'IVA viene SCORPORATA dall'importo (ivaRate = aliquota scorporo).
+  //                    Se false = l'importo lordo è considerato GIÀ IVATO per legge (es. medicina, tabacchi) → amountVat=0.
+  amountAlreadyIvato?: boolean;
+  amountSplitVat?: boolean;
+  amountIsReverseCharge?: boolean;
+  // ⭐ Metodo di pagamento collegato a provider integrato (es. Stripe) e modalità esecuzione
+  // Tutti opzionali per retrocompatibilità · SEMPRE modificabili dopo la registrazione della spesa
+  paymentProviderId?: string | null;
+  paymentExecution?: PaymentExecutionMode;          // 'manuale' (default) o 'automatico'
+  paymentAutoStartDate?: string | null;             // Data primo addebito se automatico
+  paymentNotes?: string | null;                      // Note pagamento (causale, RIF, ecc.)
+  paymentModifiedAt?: string | null;                 // Timestamp ultima modifica
 }
 
 export interface ExpenseAuditRecord {
@@ -512,6 +547,8 @@ export interface AudiomaxState {
   expenseCategories: ExpenseCategoryRecord[];
   expenseSuppliers: ExpenseSupplierRecord[];
   expensePaymentMethods: ExpensePaymentMethodRecord[];
+  // ⭐ Provider pagamento integrati (Stripe, Satispay, Adyen, Sepa Direct Debit, ecc.)
+  paymentProviders: PaymentProviderRecord[];
   expenseRecords: ExpenseRecord[];
   expenseInstallments: ExpenseInstallmentRecord[];
   expenseNotifications: ExpenseNotificationRecord[];
@@ -571,45 +608,45 @@ export function createClientPrivacyProfile(config?: {
     },
     audit: noticeAcknowledged
       ? [
-          {
-            id: `privacy-audit-${crypto.randomUUID()}`,
-            action: 'informativa-mostrata',
-            detail: 'Informativa privacy mostrata e registrata nel CRM.',
-            operator,
-            channel,
-            createdAt: timestamp,
-          },
-          {
-            id: `privacy-audit-${crypto.randomUUID()}`,
-            action: 'cliente-creato',
-            detail: 'Profilo cliente creato con stato privacy iniziale.',
-            operator,
-            channel,
-            createdAt: timestamp,
-          },
-        ]
+        {
+          id: `privacy-audit-${crypto.randomUUID()}`,
+          action: 'informativa-mostrata',
+          detail: 'Informativa privacy mostrata e registrata nel CRM.',
+          operator,
+          channel,
+          createdAt: timestamp,
+        },
+        {
+          id: `privacy-audit-${crypto.randomUUID()}`,
+          action: 'cliente-creato',
+          detail: 'Profilo cliente creato con stato privacy iniziale.',
+          operator,
+          channel,
+          createdAt: timestamp,
+        },
+      ]
       : [],
     archive: noticeAcknowledged
       ? [
-          {
-            id: `privacy-archive-${crypto.randomUUID()}`,
-            type: 'informativa',
-            title: `Informativa privacy ${'privacy-v1.0'}`,
-            status: 'registrato',
-            channel,
-            url: null,
-            createdAt: timestamp,
-          },
-          {
-            id: `privacy-archive-${crypto.randomUUID()}`,
-            type: 'scheda-cliente',
-            title: 'Scheda cliente con stato privacy iniziale',
-            status: 'registrato',
-            channel,
-            url: null,
-            createdAt: timestamp,
-          },
-        ]
+        {
+          id: `privacy-archive-${crypto.randomUUID()}`,
+          type: 'informativa',
+          title: `Informativa privacy ${'privacy-v1.0'}`,
+          status: 'registrato',
+          channel,
+          url: null,
+          createdAt: timestamp,
+        },
+        {
+          id: `privacy-archive-${crypto.randomUUID()}`,
+          type: 'scheda-cliente',
+          title: 'Scheda cliente con stato privacy iniziale',
+          status: 'registrato',
+          channel,
+          url: null,
+          createdAt: timestamp,
+        },
+      ]
       : [],
   };
 }
@@ -1075,10 +1112,71 @@ export const initialAudiomaxState: AudiomaxState = {
     },
   ],
   expensePaymentMethods: [
-    { id: 'pay-001', label: 'bonifico', provider: 'Banca Intesa', active: true },
-    { id: 'pay-002', label: 'rid', provider: 'SEPA RID', active: true },
-    { id: 'pay-003', label: 'carta-credito', provider: 'Nexi Business', active: true },
-    { id: 'pay-004', label: 'paypal', provider: 'PayPal Business', active: true },
+    { id: 'pay-001', label: 'bonifico', provider: 'Banca Intesa', active: true, paymentProviderId: 'pp-bonifico' },
+    { id: 'pay-002', label: 'rid', provider: 'SEPA RID', active: true, paymentProviderId: 'pp-sepa-rid' },
+    { id: 'pay-003', label: 'carta-credito', provider: 'Nexi Business', active: true, paymentProviderId: 'pp-stripe' },
+    { id: 'pay-004', label: 'paypal', provider: 'PayPal Business', active: true, paymentProviderId: null },
+    { id: 'pay-005', label: 'contanti', provider: 'Contanti (cassa)', active: true, paymentProviderId: 'pp-contanti' },
+  ],
+  // ⭐ Payment provider integrati (default seed) · combinazione esterno/integrato
+  paymentProviders: [
+    {
+      id: 'pp-contanti',
+      name: 'Contanti (pagamento esterno cassa)',
+      kind: 'esterno',
+      code: 'contanti',
+      description: 'Pagamento in contanti fuori dal gestionale · nessun automatismo.',
+      autoSupported: false,
+      active: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'pp-bonifico',
+      name: 'Bonifico bancario manuale',
+      kind: 'esterno',
+      code: 'bonifico-manuale',
+      description: 'Bonifico separato presso la banca · IBAN configurabile.',
+      connectedBankAccountIban: 'IT02X1234567890123456789012',
+      connectedBankAccountLabel: 'Banca Intesa S.p.A. · Conto Ordinario',
+      autoSupported: false,
+      active: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'pp-sepa-rid',
+      name: 'SEPA Direct Debit · RID',
+      kind: 'integrato',
+      code: 'sepa-dd',
+      description: 'Addebito diretto SEPA su conto cliente · supporta ricorrente automatico.',
+      connectedBankAccountIban: 'IT02X1234567890123456789012',
+      connectedBankAccountLabel: 'Banca Intesa S.p.A. · Conto Ordinario',
+      autoSupported: true,
+      active: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'pp-stripe',
+      name: 'Stripe · Conto Business (Carta / Addebito)',
+      kind: 'integrato',
+      code: 'stripe',
+      description: 'Pagamenti via Stripe · API Publishable Key + IBAN di accredito configurabile.',
+      apiPublishableKey: 'pk_test_placeholder',
+      connectedBankAccountIban: 'IT02X1234567890123456789012',
+      connectedBankAccountLabel: 'Banca Intesa S.p.A. · Conto Stripe Accrediti',
+      autoSupported: true,
+      active: true,
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'pp-satispay',
+      name: 'Satispay Business',
+      kind: 'integrato',
+      code: 'satispay',
+      description: 'Pagamenti tramite Satispay Business · supporto automatico ricorrente.',
+      autoSupported: true,
+      active: true,
+      createdAt: new Date().toISOString(),
+    },
   ],
   expenseRecords: [
     {
@@ -1242,7 +1340,7 @@ export const initialAudiomaxState: AudiomaxState = {
       category: 'Accessori',
       price: 7.9,
       shortcut: true,
-      pricingMode: 'quantita',
+      pricingMode: 'quantità',
       linkedInventoryItemId: 'inv-001',
     },
     {
@@ -1251,7 +1349,7 @@ export const initialAudiomaxState: AudiomaxState = {
       category: 'Accessori',
       price: 45,
       shortcut: false,
-      pricingMode: 'quantita',
+      pricingMode: 'quantità',
       linkedInventoryItemId: 'inv-002',
     },
     {
@@ -1321,7 +1419,7 @@ export const initialAudiomaxState: AudiomaxState = {
           unitPrice: 79,
           originalUnitPrice: 79,
           total: 79,
-          pricingMode: 'quantita',
+          pricingMode: 'quantità',
           operatorName: 'Banco',
           excludeFromReceipt: false,
         },
@@ -1333,7 +1431,7 @@ export const initialAudiomaxState: AudiomaxState = {
           unitPrice: 45,
           originalUnitPrice: 45,
           total: 45,
-          pricingMode: 'quantita',
+          pricingMode: 'quantità',
           operatorName: 'Banco',
           excludeFromReceipt: false,
         },
@@ -1415,7 +1513,7 @@ export const initialAudiomaxState: AudiomaxState = {
           unitPrice: 79,
           originalUnitPrice: 79,
           total: 79,
-          pricingMode: 'quantita',
+          pricingMode: 'quantità',
           operatorName: 'Giulia',
           excludeFromReceipt: false,
         },
@@ -1427,7 +1525,7 @@ export const initialAudiomaxState: AudiomaxState = {
           unitPrice: 45,
           originalUnitPrice: 45,
           total: 45,
-          pricingMode: 'quantita',
+          pricingMode: 'quantità',
           operatorName: 'Giulia',
           excludeFromReceipt: false,
         },
@@ -1567,7 +1665,7 @@ export const initialAudiomaxState: AudiomaxState = {
     },
   ],
   // ===== NUOVI Task 1: valori DEFAULT per chiusure negozio =====
-  storeClosingDaysWeekly: { lun:false, mar:false, mer:false, gio:false, ven:false, sab:false, dom:true }, // Domenica = chiusa di default
+  storeClosingDaysWeekly: { lun: false, mar: false, mer: false, gio: false, ven: false, sab: false, dom: true }, // Domenica = chiusa di default
   storeExtraOpeningDates: [],
   storeBulkClosures: [],
 };

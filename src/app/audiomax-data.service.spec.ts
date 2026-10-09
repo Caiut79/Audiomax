@@ -173,7 +173,7 @@ describe('AudiomaxDataService Warehouse', () => {
       category: 'Accessori',
       price: 24,
       shortcut: true,
-      pricingMode: 'quantita',
+      pricingMode: 'quantità',
       linkedInventoryItemId: item!.id,
     });
 

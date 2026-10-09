@@ -1,5 +1,15 @@
 {
   "extends": ["html-validate:recommended"],
+  "overrides": [
+    {
+      "files": ["src/app/**/*.html"],
+      "rules": {
+        "element-permitted-content": "off",
+        "element-required-attributes": "off",
+        "prefer-native-element": "off"
+      }
+    }
+  ],
   "rules": {
     "attr-case": "off",
     "no-implicit-button-type": "off",

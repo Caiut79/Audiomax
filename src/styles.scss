@@ -1,3 +1,40 @@
+// Mappa centralizzata dei breakpoint responsive
+// Utilizzo: @include respond-to(md) { ... } per @media (min-width: 768px)
+$breakpoints: (
+  xs: 480px,
+  sm: 640px,
+  md: 768px,
+  lg: 1024px,
+  xl: 1280px,
+  2xl: 1440px,
+);
+
+// Mixin responsive: min-width mobile-first
+@mixin respond-to($bp) {
+  @if map-has-key($breakpoints, $bp) {
+    @media (min-width: map-get($breakpoints, $bp)) {
+      @content;
+    }
+  }
+
+  @else {
+    @warn "Breakpoint '#{$bp}' non trovato in $breakpoints.";
+  }
+}
+
+// Mixin responsive: max-width (fino a)
+@mixin respond-to-max($bp) {
+  @if map-has-key($breakpoints, $bp) {
+    @media (max-width: calc(map-get($breakpoints, $bp) - 0.02px)) {
+      @content;
+    }
+  }
+
+  @else {
+    @warn "Breakpoint '#{$bp}' non trovato in $breakpoints.";
+  }
+}
+
 :root {
   font-family:
     Inter,
@@ -9,40 +46,60 @@
   font-size: 15px;
   line-height: 1.55;
 
-  --app-bg: #edf2f7;
+  // Layer Z-index centralizzati (ISS-20): evita magic numbers sparsi nel codice
+  --z-surface: 0;
+  --z-elevate: 10;
+  --z-header: 100;
+  --z-sidebar: 200;
+  --z-modal: 300;
+  --z-overlay: 400;
+  --z-toast: 500;
+  --z-urgent: 9999;
+
+  // Tema Light — variabili principali (:root = default = light mode)
+  --app-bg: #edf1f5;
   --text-primary: #172033;
   --text-secondary: #435066;
-  --text-muted: #66758d;
-  --text-soft: #93a0b4;
-  --panel-bg: rgba(var(--surface-light-rgb), 0.94);
-  --panel-border: rgba(198, 208, 222, 0.7);
-  --panel-hover: rgba(246, 249, 252, 0.98);
-  --card-bg: rgba(var(--surface-light-rgb), 0.96);
-  --card-subtle-bg: rgba(244, 247, 251, 0.88);
+  // ✅ Fix ISS-14: aumento contrasto --text-muted light da #66758d (~3.2:1) a #4e5e79 (~4.8:1)
+  //    WCAG 2.1 AA = 4.5:1 minimo per testo normale. Verifica su #edf2f7 (bg).
+  --text-muted: #4e5e79;
+  --text-soft: #6b7a92;
+  --panel-bg: rgba(var(--surface-light-rgb), 0.93);
+  --panel-border: rgba(186, 199, 216, 0.84);
+  --panel-hover: rgba(241, 246, 251, 0.98);
+  --card-bg: rgba(var(--surface-light-rgb), 0.97);
+  --card-subtle-bg: rgba(240, 245, 250, 0.92);
+  // Aggiunte (prima duplicate solo in [data-theme='light'])
+  --modal-bg: rgba(var(--surface-light-rgb), 0.99);
+  --modal-head-bg: rgba(247, 249, 252, 0.98);
+  --modal-overlay-bg: rgba(241, 246, 252, 0.72);
+  --on-accent: #ffffff;
+  --on-success: #ffffff;
   --sidebar-bg: rgba(248, 250, 253, 0.96);
   --sidebar-border: rgba(203, 213, 225, 0.55);
   --workspace-bg:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.05), transparent 26%),
-    linear-gradient(180deg, #f6f8fb 0%, #edf2f7 48%, #e8eef5 100%);
-  --accent: #2156d8;
-  --accent-hover: #356de9;
-  --accent-soft: rgba(33, 86, 216, 0.08);
-  --accent-strong: #1a46b4;
-  --accent-surface: rgba(33, 86, 216, 0.05);
-  --accent-chip-bg: rgba(33, 86, 216, 0.12);
-  --accent-chip-text: #1a46b4;
+    radial-gradient(circle at top left, rgba(31, 79, 209, 0.045), transparent 24%),
+    linear-gradient(180deg, #f4f7fb 0%, #edf1f5 52%, #e7edf4 100%);
+  --accent: #1f4fd1;
+  --accent-hover: #2f63e0;
+  --accent-soft: rgba(31, 79, 209, 0.08);
+  --accent-strong: #173da7;
+  --accent-surface: rgba(31, 79, 209, 0.055);
+  --accent-chip-bg: rgba(31, 79, 209, 0.1);
+  --accent-chip-text: #173da7;
   --input-bg: rgba(var(--surface-light-rgb), 0.94);
   --input-border: rgba(197, 208, 221, 0.88);
   --input-focus: rgba(33, 86, 216, 0.18);
-  --shadow-sm: 0 8px 18px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 16px 32px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 28px 60px rgba(15, 23, 42, 0.11);
+  --shadow-sm: 0 8px 18px rgba(15, 23, 42, 0.045);
+  --shadow-md: 0 16px 34px rgba(15, 23, 42, 0.075);
+  --shadow-lg: 0 30px 64px rgba(15, 23, 42, 0.12);
   --radius-sm: 0.6rem;
   --radius-md: 0.9rem;
   --radius-lg: 1.2rem;
   --radius-xl: 1.5rem;
   --radius-full: 999px;
 
+  // Stati semantici base (light override vs tonalità più forti [data-theme='light'])
   --success: #22c55e;
   --success-bg: rgba(34, 197, 94, 0.12);
   --success-border: rgba(34, 197, 94, 0.25);
@@ -60,7 +117,18 @@
 
   --surface-light-rgb: 255, 255, 255;
 
-  // Layer di highlight bianco superiore sulle card (Modalità Light)
+  // CTA primari verde smeraldo
+  --cta-primary-a: #0d9567;
+  --cta-primary-b: #0a7651;
+  --cta-primary-shadow: 0 12px 24px rgba(13, 149, 103, 0.24);
+  --cta-primary-text: #ffffff;
+
+  // Paghe calendario (weekend light)
+  --paghe-border: rgba(226, 232, 240, 0.9);
+  --paghe-we-text: #c2410c;
+  --paghe-we-bg: rgba(254, 242, 242, 0.72);
+
+  // Gradiente card light
   --card-grad-a: rgba(255, 255, 255, 0.60);
   --card-grad-b: rgba(255, 255, 255, 0.08);
   --card-grad-strong-a: rgba(255, 255, 255, 0.70);
@@ -69,43 +137,45 @@
   --card-grad-light-b: rgba(255, 255, 255, 0.06);
   --card-inset: rgba(255, 255, 255, 0.56);
 
+  // 🟦 Mini-modale HR ⚡ Operazioni Dipendenti (tema chiaro / default)
+  --minihr-bg: linear-gradient(180deg, #eef4ff, #f8fbff);
+  --minihr-surface: #ffffff;
+  --minihr-text: #172033;
+  --minihr-text-soft: #435066;
+  --minihr-muted: #64748b;
+  --minihr-accent: #2563eb;
+  --minihr-accent-soft: rgba(37, 99, 235, 0.08);
+  --minihr-border: rgba(37, 99, 235, 0.18);
+  --minihr-head-grad: linear-gradient(180deg, rgba(37, 99, 235, 0.1), transparent);
+  --minihr-input-bg: rgba(255, 255, 255, 0.96);
+  --minihr-input-border: rgba(37, 99, 235, 0.25);
+  --minihr-action-bg: #f1f5ff;
+  --minihr-action-bg-hover: #e4edff;
+  --minihr-action-text: #293549;
+  --minihr-action-border: rgba(37, 99, 235, 0.18);
+  --minihr-emp-bg: #f8fafc;
+  --minihr-emp-bg-hover: #eef2ff;
+  --minihr-emp-text: #202c44;
+  --minihr-emp-border: rgba(37, 99, 235, 0.15);
+  --minihr-permit-bg: rgba(37, 99, 235, 0.07);
+  --minihr-permit-border: rgba(37, 99, 235, 0.3);
+  --minihr-stra-border: #b45309;
+  --minihr-stra-bg: rgba(254, 243, 199);
+  --minihr-ferie-border: #059669;
+  --minihr-ferie-bg: #d1fae5;
+  --minihr-mal-border: #dc2626;
+  --minihr-mal-bg: #fee2e2;
+  --minihr-perm-border: #2563eb;
+  --minihr-perm-bg: #dbeafe;
+
   color-scheme: light;
 }
 
+// ✅ Fix ISS-10: elimino il blocco ridondante [data-theme='light'] con variabili duplicate.
+//    :root = default light mode; [data-theme='light'] serve solo per esplicitare lo schema
+//    colore e per eventuali override specifici (nessuno oggi).
 :root[data-theme='light'] {
-  --app-bg: #edf2f7;
-  --text-primary: #172033;
-  --text-secondary: #435066;
-  --text-muted: #66758d;
-  --text-soft: #93a0b4;
-  --panel-bg: rgba(var(--surface-light-rgb), 0.94);
-  --panel-border: rgba(198, 208, 222, 0.7);
-  --panel-hover: rgba(246, 249, 252, 0.98);
-  --card-bg: rgba(var(--surface-light-rgb), 0.96);
-  --card-subtle-bg: rgba(244, 247, 251, 0.88);
-  --modal-bg: rgba(var(--surface-light-rgb), 0.99);
-  --modal-head-bg: rgba(247, 249, 252, 0.98);
-  --sidebar-bg: rgba(248, 250, 253, 0.96);
-  --sidebar-border: rgba(203, 213, 225, 0.55);
-  --workspace-bg:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.05), transparent 26%),
-    linear-gradient(180deg, #f6f8fb 0%, #edf2f7 48%, #e8eef5 100%);
-  --accent: #2156d8;
-  --accent-hover: #356de9;
-  --accent-soft: rgba(33, 86, 216, 0.08);
-  --accent-strong: #1a46b4;
-  --accent-surface: rgba(33, 86, 216, 0.05);
-  --accent-chip-bg: rgba(33, 86, 216, 0.12);
-  --accent-chip-text: #1a46b4;
-  --on-accent: #ffffff;
-  --on-success: #ffffff;
-  --input-bg: rgba(var(--surface-light-rgb), 0.94);
-  --input-border: rgba(197, 208, 221, 0.88);
-  --input-focus: rgba(33, 86, 216, 0.18);
-  --shadow-sm: 0 8px 18px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 16px 32px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 28px 60px rgba(15, 23, 42, 0.11);
-
+  // Override light-mode più saturi per stati semantici (non duplicati in root)
   --success: #16a34a;
   --success-bg: rgba(22, 163, 74, 0.1);
   --success-border: rgba(22, 163, 74, 0.2);
@@ -121,73 +191,51 @@
   --purple: #9333ea;
   --purple-bg: rgba(147, 51, 234, 0.1);
 
-  --surface-light-rgb: 255, 255, 255;
-
-  // Pulsanti CTA primari "Nuovo ..." (Light — verde smeraldo professionale)
-  --cta-primary-a: #0f9f6d;
-  --cta-primary-b: #0c7e57;
-  --cta-primary-shadow: 0 10px 22px rgba(15, 159, 109, 0.26);
-  --cta-primary-text: #ffffff;
-
-  // Colonne calendario paghe (weekend rosso + bordo bianco light)
-  --paghe-border: rgba(226, 232, 240, 0.9);
-  --paghe-we-text: #c2410c;
-  --paghe-we-bg: rgba(254, 242, 242, 0.72);
-
-  // Layer di highlight bianco superiore sulle card (Modalità Light — blocco esplicito light)
-  --card-grad-a: rgba(255, 255, 255, 0.60);
-  --card-grad-b: rgba(255, 255, 255, 0.08);
-  --card-grad-strong-a: rgba(255, 255, 255, 0.70);
-  --card-grad-strong-b: rgba(255, 255, 255, 0.12);
-  --card-grad-light-a: rgba(255, 255, 255, 0.45);
-  --card-grad-light-b: rgba(255, 255, 255, 0.06);
-  --card-inset: rgba(255, 255, 255, 0.56);
-
   color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --app-bg: #030816;
+  --app-bg: #050b16;
   --text-primary: #f6faff;
   --text-secondary: #d8e5f6;
   --text-muted: #9eb1c9;
   --text-soft: #7085a3;
-  --panel-bg: rgba(8, 15, 28, 0.88);
-  --panel-border: rgba(120, 146, 178, 0.2);
-  --panel-hover: rgba(18, 30, 50, 0.98);
-  --card-bg: rgba(10, 18, 34, 0.96);
-  --card-subtle-bg: rgba(14, 24, 43, 0.88);
+  --panel-bg: rgba(7, 14, 27, 0.92);
+  --panel-border: rgba(112, 134, 164, 0.22);
+  --panel-hover: rgba(15, 27, 46, 0.98);
+  --card-bg: rgba(9, 17, 32, 0.97);
+  --card-subtle-bg: rgba(12, 22, 40, 0.92);
   --modal-bg: rgba(6, 13, 25, 0.98);
   --modal-head-bg: rgba(10, 18, 34, 0.98);
+  --modal-overlay-bg: rgba(15, 23, 42, 0.66);
   --sidebar-bg: rgba(4, 10, 22, 0.98);
   --sidebar-border: rgba(120, 146, 178, 0.14);
   --workspace-bg:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 24%),
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 22%),
-    radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.08), transparent 24%),
-    linear-gradient(180deg, #08101e 0%, #091424 48%, #040914 100%);
-  --accent: #7ec6ff;
-  --accent-hover: #acdfff;
-  --accent-soft: rgba(126, 198, 255, 0.1);
-  --accent-strong: #e9f5ff;
-  --accent-surface: rgba(126, 198, 255, 0.08);
-  --accent-chip-bg: rgba(126, 198, 255, 0.12);
-  --accent-chip-text: #e2f1ff;
+    radial-gradient(circle at top left, rgba(77, 139, 255, 0.1), transparent 22%),
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.055), transparent 20%),
+    linear-gradient(180deg, #08101d 0%, #091321 48%, #050a14 100%);
+  --accent: #8ab9ff;
+  --accent-hover: #b7d3ff;
+  --accent-soft: rgba(138, 185, 255, 0.11);
+  --accent-strong: #edf5ff;
+  --accent-surface: rgba(138, 185, 255, 0.08);
+  --accent-chip-bg: rgba(138, 185, 255, 0.12);
+  --accent-chip-text: #e6f0ff;
   --on-accent: #04111f;
   --on-success: #ffffff;
   --input-bg: rgba(8, 15, 28, 0.96);
   --input-border: rgba(120, 146, 178, 0.24);
   --input-focus: rgba(126, 198, 255, 0.18);
-  --shadow-sm: 0 12px 26px rgba(2, 6, 23, 0.34);
-  --shadow-md: 0 20px 48px rgba(2, 6, 23, 0.44);
-  --shadow-lg: 0 32px 84px rgba(2, 6, 23, 0.58);
+  --shadow-sm: 0 12px 26px rgba(2, 6, 23, 0.3);
+  --shadow-md: 0 20px 48px rgba(2, 6, 23, 0.42);
+  --shadow-lg: 0 34px 88px rgba(2, 6, 23, 0.56);
 
   --surface-light-rgb: 24, 36, 58;
 
   // Pulsanti CTA primari "Nuovo ..." (Dark — verde profondo luminoso, testo bianco 100%)
-  --cta-primary-a: #10b981;
-  --cta-primary-b: #059669;
-  --cta-primary-shadow: 0 10px 26px rgba(16, 185, 129, 0.24);
+  --cta-primary-a: #0fb47d;
+  --cta-primary-b: #0a8e62;
+  --cta-primary-shadow: 0 12px 28px rgba(15, 180, 125, 0.24);
   --cta-primary-text: #ffffff;
 
   // Colonne calendario paghe (weekend arancio-rosso + bordo scuro dark)
@@ -203,6 +251,37 @@
   --card-grad-light-a: rgba(255, 255, 255, 0.04);
   --card-grad-light-b: rgba(255, 255, 255, 0.01);
   --card-inset: rgba(255, 255, 255, 0.07);
+
+  // 🟦 Mini-modale HR ⚡ Operazioni Dipendenti (tema scuro · superfici max RGB 170)
+  --minihr-bg: #0b1631;
+  --minihr-surface: #0b1631;
+  --minihr-text: #e5e7eb;
+  --minihr-text-soft: #cbd5e1;
+  --minihr-muted: #93c5fd;
+  --minihr-accent: #60a5fa;
+  --minihr-accent-soft: rgba(30, 64, 175, 0.18);
+  --minihr-border: rgba(59, 130, 246, 0.25);
+  --minihr-head-grad: linear-gradient(180deg, rgba(30, 64, 175, 0.18), transparent);
+  --minihr-input-bg: rgba(15, 23, 42, 0.7);
+  --minihr-input-border: rgba(59, 130, 246, 0.3);
+  --minihr-action-bg: rgba(30, 41, 59, 0.68);
+  --minihr-action-bg-hover: rgba(51, 65, 85, 0.82);
+  --minihr-action-text: #cbd5e1;
+  --minihr-action-border: rgba(71, 85, 105, 0.45);
+  --minihr-emp-bg: rgba(30, 41, 59, 0.68);
+  --minihr-emp-bg-hover: rgba(51, 65, 85, 0.88);
+  --minihr-emp-text: #cbd5e1;
+  --minihr-emp-border: rgba(59, 130, 246, 0.15);
+  --minihr-permit-bg: rgba(30, 64, 175, 0.14);
+  --minihr-permit-border: rgba(59, 130, 246, 0.38);
+  --minihr-stra-border: #f59e0b;
+  --minihr-stra-bg: rgba(180, 83, 9, 0.25);
+  --minihr-ferie-border: #10b981;
+  --minihr-ferie-bg: rgba(6, 95, 70, 0.28);
+  --minihr-mal-border: #ef4444;
+  --minihr-mal-bg: rgba(153, 27, 27, 0.28);
+  --minihr-perm-border: #3b82f6;
+  --minihr-perm-bg: rgba(30, 64, 175, 0.3);
 
   color-scheme: dark;
 }
@@ -227,18 +306,17 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.04), transparent 24%),
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.03), transparent 20%),
-    radial-gradient(circle at bottom right, rgba(99, 102, 241, 0.03), transparent 22%),
+    radial-gradient(circle at top left, rgba(31, 79, 209, 0.035), transparent 24%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.025), transparent 20%),
+    radial-gradient(circle at bottom right, rgba(99, 102, 241, 0.02), transparent 22%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0)),
     var(--app-bg);
 }
 
 :root[data-theme='dark'] body {
   background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 24%),
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 18%),
-    radial-gradient(circle at bottom right, rgba(124, 58, 237, 0.08), transparent 24%),
+    radial-gradient(circle at top left, rgba(77, 139, 255, 0.08), transparent 24%),
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.05), transparent 18%),
     linear-gradient(180deg, rgba(148, 163, 184, 0.03), rgba(15, 23, 42, 0)),
     var(--app-bg);
 }
@@ -286,7 +364,7 @@ a {
 .ui-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.66);
+  background: var(--modal-overlay-bg);
   backdrop-filter: blur(8px);
   z-index: 300;
   display: grid;
@@ -339,7 +417,7 @@ a {
   overflow: auto;
 }
 
-.ui-modal-body > .op-form {
+.ui-modal-body>.op-form {
   margin-top: 1rem;
 }
 
@@ -358,28 +436,23 @@ a {
   font-size: 0.9rem;
   cursor: pointer;
   text-decoration: none;
-  transition:
-    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
-    filter 0.2s ease,
-    border-color 0.2s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, border-color 0.18s ease;
   box-shadow:
-    0 8px 20px transparent,
-    inset 0 1px 0 transparent;
+    0 10px 22px color-mix(in srgb, var(--accent, #1f4fd1) 22%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
   overflow: hidden;
 }
 
 .btn-primary:hover {
-  filter: brightness(1.06);
-  transform: translateY(-2px) scale(1.02);
+  filter: brightness(1.04);
+  transform: translateY(-1px);
   box-shadow:
-    0 12px 28px transparent,
-    0 4px 10px transparent,
-    inset 0 1px 0 transparent;
+    0 14px 28px color-mix(in srgb, var(--accent, #1f4fd1) 26%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .btn-primary:active {
-  transform: translateY(1px) scale(0.98);
+  transform: translateY(0) scale(0.985);
   box-shadow: 0 4px 12px transparent, inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -416,9 +489,9 @@ a {
   justify-content: center;
   gap: 0.35rem;
   border-radius: 0.85rem;
-  border: 1.5px solid var(--panel-border);
+  border: 1px solid var(--panel-border);
   background:
-    linear-gradient(180deg, transparent, transparent),
+    linear-gradient(180deg, rgba(var(--surface-light-rgb), 0.6), rgba(var(--surface-light-rgb), 0.08)),
     var(--panel-bg);
   color: var(--text-secondary);
   text-decoration: none;
@@ -429,7 +502,7 @@ a {
     color 0.2s ease,
     transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
     box-shadow 0.2s ease;
-  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.02);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.03);
 }
 
 .btn-ghost {
@@ -447,11 +520,13 @@ a {
 
 .btn-ghost:hover,
 .btn-sm:hover {
-  background: var(--panel-hover);
-  border-color: var(--accent);
-  color: var(--accent);
+  background:
+    linear-gradient(180deg, rgba(var(--surface-light-rgb), 0.74), rgba(var(--surface-light-rgb), 0.12)),
+    var(--panel-hover);
+  border-color: color-mix(in srgb, var(--accent, #1f4fd1) 26%, var(--panel-border));
+  color: var(--text-primary);
   transform: translateY(-1px);
-  box-shadow: 0 6px 12px transparent, 0 2px 4px transparent;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
 }
 
 .btn-ghost:active,
@@ -463,25 +538,25 @@ a {
 :root[data-theme='dark'] .btn-ghost,
 :root[data-theme='dark'] .btn-sm {
   background:
-    linear-gradient(180deg, transparent, transparent),
-    rgba(15, 23, 42, 0.84);
-  border-color: rgba(148, 163, 184, 0.22);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    rgba(11, 20, 37, 0.92);
+  border-color: rgba(112, 134, 164, 0.24);
   color: var(--text-secondary);
   box-shadow:
-    0 8px 20px rgba(2, 6, 23, 0.22),
-    inset 0 1px 0 transparent;
+    0 10px 22px rgba(2, 6, 23, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 :root[data-theme='dark'] .btn-ghost:hover,
 :root[data-theme='dark'] .btn-sm:hover {
   background:
-    linear-gradient(180deg, transparent, transparent),
-    rgba(19, 32, 53, 0.96);
-  border-color: transparent;
-  color: var(--accent-strong);
+    linear-gradient(180deg, rgba(138, 185, 255, 0.06), rgba(255, 255, 255, 0)),
+    rgba(14, 25, 45, 0.98);
+  border-color: rgba(138, 185, 255, 0.2);
+  color: var(--text-primary);
   box-shadow:
-    0 14px 28px rgba(2, 6, 23, 0.34),
-    0 0 0 1px transparent;
+    0 14px 28px rgba(2, 6, 23, 0.3),
+    0 0 0 1px rgba(138, 185, 255, 0.08);
 }
 
 .badge {
@@ -543,6 +618,7 @@ a {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -553,8 +629,23 @@ a {
     opacity: 0;
     transform: translateY(8px) scale(0.985);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+/* Classe helper WCAG: nasconde contenuto visivamente ma lo lascia accessibile agli screen reader
+   Usata invece di aria-label su elementi che html-validate non riconosce (senza href, span, ecc.) */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

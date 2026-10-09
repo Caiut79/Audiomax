@@ -428,7 +428,7 @@ export const crmModuleContent: Record<CrmSectionId, CrmModuleContent> = {
       },
       {
         title: 'Richiesta staffe aggiuntive per intervento',
-        subtitle: 'Team domicilio necessita integrazione materiale prima della partenza',
+        subtitle: 'Team domicilio necessità integrazione materiale prima della partenza',
         owner: 'Squadra B',
         status: 'Da evadere',
         due: '10:45',

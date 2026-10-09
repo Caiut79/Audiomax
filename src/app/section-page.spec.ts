@@ -18,6 +18,9 @@ describe('SectionPageComponent Form Pattern', () => {
           provide: ActivatedRoute,
           useValue: {
             data: of({ sectionId: 'clienti' }),
+            snapshot: {
+              data: { sectionId: 'clienti' },
+            },
           },
         },
       ],

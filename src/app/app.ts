@@ -1,4 +1,4 @@
-import { Component, HostListener, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, computed, inject, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
 import { AudiomaxDataService } from './audiomax-data.service';
@@ -12,6 +12,7 @@ import { ThemeService } from './theme.service';
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
   templateUrl: './app.html',
   styleUrl: './app.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
   private readonly data = inject(AudiomaxDataService);
@@ -201,7 +202,11 @@ export class App {
     if (event.key === 'Enter') {
       event.preventDefault();
       const selected = results[this.globalSearchSelectedIndex()] ?? results[0];
-      void this.router.navigateByUrl(selected.route);
+      // ✅ Fix REV-010: Promise<boolean> navigateByUrl con .catch per errori
+      //    invece void puro silenzia rejection route invalida / guard rifiuta.
+      void this.router
+        .navigateByUrl(selected.route)
+        .catch((err) => console.warn('[Global Search] Navigazione fallita:', err));
       this.closeGlobalSearch();
     }
   }

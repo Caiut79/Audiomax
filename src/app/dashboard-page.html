@@ -39,6 +39,7 @@
     <input
       class="search-input"
       type="search"
+      aria-label="Cerca globale in dashboard: clienti, preventivi, appuntamenti, ticket"
       placeholder="Cerca cliente, preventivo, appuntamento, ticket…"
       [value]="searchTerm()"
       (input)="updateSearchTerm($event)"
@@ -89,9 +90,9 @@
         </div>
         <div class="calendar-head-actions">
           <div class="btn-group calendar-toolbar-group">
-            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('giorno')" [class.active]="calendarViewMode() === 'giorno'">Giorno</button>
-            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('settimana')" [class.active]="calendarViewMode() === 'settimana'">Settimana</button>
-            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('mese')" [class.active]="calendarViewMode() === 'mese'">Mese</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('giorno')" [class.active]="calendarViewMode() === 'giorno'" [attr.aria-pressed]="calendarViewMode() === 'giorno'">Giorno</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('settimana')" [class.active]="calendarViewMode() === 'settimana'" [attr.aria-pressed]="calendarViewMode() === 'settimana'">Settimana</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('mese')" [class.active]="calendarViewMode() === 'mese'" [attr.aria-pressed]="calendarViewMode() === 'mese'">Mese</button>
           </div>
           <div class="btn-group calendar-toolbar-group">
             <button class="btn-ghost btn-sm" (click)="prevCalendarPeriod()">‹</button>
@@ -138,6 +139,7 @@
                 [class.is-outside]="!day.inCurrentMonth"
                 [class.is-sunday]="day.isSunday"
                 [class.is-holiday]="!!day.holidayLabel"
+                [attr.aria-label]="_longItalianDate(day.isoDate) + ' · ' + day.items.length + ' appuntamenti'"
                 (click)="handleDashboardCalendarDateClick(day.isoDate, day.items.length)"
               >
                 <span class="month-day-head">
@@ -179,7 +181,7 @@
       </div>
     </section>
 
-    <aside class="dash-side-column" aria-label="Azioni rapide e priorita">
+    <aside class="dash-side-column" aria-label="Azioni rapide e priorità">
       <section class="dash-panel" aria-label="Alert operativi">
         <div class="dash-panel-head">
           <div>
@@ -272,7 +274,7 @@
   </div>
 
   @if (dashboardAppointmentModalOpen()) {
-    <div class="ui-modal-overlay" (click)="closeDashboardAppointmentModal()">
+    <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDashboardAppointmentModal()">
       <div class="ui-modal dashboard-appointment-modal dashboard-split-modal" (click)="$event.stopPropagation()">
         <div class="ui-modal-head dashboard-modal-head">
           <div>
@@ -441,6 +443,8 @@
   <!-- ===================== TOAST LOCALE DASHBOARD ===================== -->
   @if (toastMessage()) {
     <div class="ui-toast ui-toast-float"
+         role="status"
+         aria-live="polite"
          [class.ui-toast-error]="toastTone() === 'error'"
          [class.ui-toast-success]="toastTone() === 'success'">
       <span>{{ toastMessage() }}</span>
@@ -449,7 +453,7 @@
 
   <!-- ===================== MINI-MODALE HR DASHBOARD ⚡ Operazioni Dipendenti ===================== -->
   @if (miniHrDashOpen()) {
-    <div class="ui-modal-overlay" (click)="miniHrDashOpen.set(false)">
+    <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="miniHrDashOpen.set(false)">
       <div class="ui-modal mini-hr-modal mini-hr-modal-dash" (click)="$event.stopPropagation()">
         <div class="ui-modal-head mini-hr-head">
           <div>
@@ -469,24 +473,28 @@
           <div class="mini-hr-actions">
             <button type="button" class="mini-hr-action-btn mini-hr-action-stra"
                     [class.active]="miniHrDashAction() === 'straordinario'"
+                    [attr.aria-pressed]="miniHrDashAction() === 'straordinario'"
                     (click)="miniHrDashAction.set('straordinario')">
               <strong>✨ Turno Extra</strong>
               <span>Straordinario 08:30–17:00</span>
             </button>
             <button type="button" class="mini-hr-action-btn mini-hr-action-ferie"
                     [class.active]="miniHrDashAction() === 'ferie'"
+                    [attr.aria-pressed]="miniHrDashAction() === 'ferie'"
                     (click)="miniHrDashAction.set('ferie')">
               <strong>🏖️ Ferie</strong>
               <span>Giornata di ferie</span>
             </button>
             <button type="button" class="mini-hr-action-btn mini-hr-action-malattia"
                     [class.active]="miniHrDashAction() === 'malattia'"
+                    [attr.aria-pressed]="miniHrDashAction() === 'malattia'"
                     (click)="miniHrDashAction.set('malattia')">
               <strong>🤒 Malattia</strong>
               <span>Assenza per malattia</span>
             </button>
             <button type="button" class="mini-hr-action-btn mini-hr-action-permesso"
                     [class.active]="miniHrDashAction() === 'permesso'"
+                    [attr.aria-pressed]="miniHrDashAction() === 'permesso'"
                     (click)="miniHrDashAction.set('permesso')">
               <strong>⏱️ Permesso</strong>
               <span>Giornata intera o parziale</span>

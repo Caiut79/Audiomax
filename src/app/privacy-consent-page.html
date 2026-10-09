@@ -5,10 +5,7 @@
         <div>
           <span class="privacy-kicker">Stato del consenso</span>
           <h1>{{ currentClient.name }}</h1>
-          <p>
-            Conferma o rifiuta i consensi opzionali. L’informativa risulta già registrata
-            nel gestionale con versione {{ currentClient.privacyProfile.noticeVersion }}.
-          </p>
+          <p>Gestisci solo i consensi opzionali collegati alla scheda cliente.</p>
         </div>
         <div class="privacy-head-side">
           <span class="privacy-status-pill">{{ currentClient.privacyProfile.remoteConsentStatus }}</span>
@@ -16,7 +13,7 @@
         </div>
       </div>
 
-      <div class="privacy-status-grid">
+      <div class="privacy-status-grid" role="status" aria-live="polite">
         @for (card of statusCards(); track card.label) {
           <div class="privacy-status-card">
             <span>{{ card.label }}</span>
@@ -29,10 +26,6 @@
       <div class="privacy-grid">
         <div class="privacy-panel">
           <h2>Scelte del cliente</h2>
-          <div class="privacy-panel-intro">
-            <strong>Tutti i sistemi sono operativi</strong>
-            <span>Conferma solo i canali che vuoi realmente attivare.</span>
-          </div>
           <label class="privacy-choice">
             <input
               type="checkbox"
@@ -79,7 +72,7 @@
           <h2>Riepilogo</h2>
           <div class="privacy-summary">
             <div><span>Base giuridica</span><strong>{{ currentClient.privacyProfile.lawfulBasis }}</strong></div>
-            <div><span>Informativa</span><strong>@if (currentClient.privacyProfile.noticeAcknowledged) { Registrata } @else { Da registrare }</strong></div>
+            <div><span>Informativa</span><strong>@if (currentClient.privacyProfile.noticeAcknowledged) { Registrata } @else { Mancante }</strong></div>
             <div><span>Stato remoto</span><strong>{{ currentClient.privacyProfile.remoteConsentStatus }}</strong></div>
             <div><span>Contatto preferito</span><strong>{{ currentClient.preferredContact }}</strong></div>
           </div>

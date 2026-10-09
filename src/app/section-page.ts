@@ -1,9 +1,20 @@
 import { CommonModule } from '@angular/common';
-import { Component, DestroyRef, WritableSignal, computed, effect, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  WritableSignal,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { map, merge, startWith } from 'rxjs';
+// ✅ Fix ISS-29: import del servizio storage centralizzato SSR-safe
+import { BrowserStorageService } from './browser-storage.service';
 
 import { AudiomaxDataService } from './audiomax-data.service';
 import { crmModuleContent } from './crm-module-content';
@@ -25,6 +36,9 @@ import {
   ExpenseRecord,
   ExpenseSupplierRecord,
   InventoryItemRecord,
+  PaymentProviderKind,
+  PaymentExecutionMode,
+  PaymentProviderRecord,
   QuoteLineRecord,
   QuoteRecord,
   ServiceTicketRecord,
@@ -66,7 +80,7 @@ type ReportSectionKey =
   | 'overview'
   | 'cross'
   | 'commerciale'
-  | 'operativita'
+  | 'operatività'
   | 'amministrazione'
   | 'alert';
 type ReportFilterKey = 'all' | ReportSectionKey;
@@ -98,30 +112,30 @@ type PlannerLeaveTone =
   | 'riposo';    // Riposo / Libero
 
 const PLANNER_LEAVE_TONES: { tone: PlannerLeaveTone; label: string; badge: string }[] = [
-  { tone: 'standard', label: 'Turno',     badge: 'bg-blue-100 text-blue-800' },
-  { tone: 'ferie',    label: 'Ferie',     badge: 'bg-emerald-100 text-emerald-800' },
-  { tone: 'permesso', label: 'Permesso',  badge: 'bg-amber-100 text-amber-800' },
-  { tone: 'malattia', label: 'Malattia',  badge: 'bg-rose-100 text-rose-800' },
-  { tone: 'riposo',   label: 'Riposo',    badge: 'bg-slate-200 text-slate-700' },
+  { tone: 'standard', label: 'Turno', badge: 'bg-blue-100 text-blue-800' },
+  { tone: 'ferie', label: 'Ferie', badge: 'bg-emerald-100 text-emerald-800' },
+  { tone: 'permesso', label: 'Permesso', badge: 'bg-amber-100 text-amber-800' },
+  { tone: 'malattia', label: 'Malattia', badge: 'bg-rose-100 text-rose-800' },
+  { tone: 'riposo', label: 'Riposo', badge: 'bg-slate-200 text-slate-700' },
 ];
 
 interface PlannerShiftCell {
   tone: PlannerLeaveTone;
   // Turno (solo quando tone === 'standard')
   startMinutes: number | null;
-  endMinutes:   number | null;
-  breakStart:   number | null;
-  breakEnd:     number | null;
+  endMinutes: number | null;
+  breakStart: number | null;
+  breakEnd: number | null;
   // Permesso orario parziale (solo tone === 'permesso')
   permitStartMinutes?: number | null;
-  permitEndMinutes?:   number | null;
-  permitHours?:        number | null;
+  permitEndMinutes?: number | null;
+  permitHours?: number | null;
 }
 
 interface PlannerSelectedCell {
   employeeId: string;
-  weekIndex:  number;   // 0..N-1
-  dayKey:     EmployeeShiftDayKey;
+  weekIndex: number;   // 0..N-1
+  dayKey: EmployeeShiftDayKey;
 }
 
 interface ReportBarRow {
@@ -288,15 +302,21 @@ interface PagheNoteRow {
   imports: [CommonModule, ReactiveFormsModule, RouterLink],
   templateUrl: './section-page.html',
   styleUrl: './section-page.scss',
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SectionPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly formBuilder = inject(FormBuilder);
-  private readonly data = inject(AudiomaxDataService);
+  // Reso protected invece di private perché i template accedono a paymentProviders()
+  // e a togglePaymentProviderActive / CRUD fornitori dalle impostazioni.
+  protected readonly data = inject(AudiomaxDataService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly formDrafts = inject(FormDraftService);
   private readonly privacyDispatch = inject(PrivacyDispatchService);
+  // ✅ Fix ISS-29: uso BrowserStorageService centralizzato (già fornito SSR-safe)
+  // invece di localStorage diretto in 4 punti del component.
+  private readonly storage = inject(BrowserStorageService);
 
   protected readonly section = toSignal(
     this.route.data.pipe(
@@ -345,7 +365,6 @@ export class SectionPageComponent {
 
   // Esponiamo i segnali dal servizio dati per l'autocompletamento nel preventivo
   protected services = computed(() => this.allCashProducts().filter(p => p.category !== 'Accessori'));
-  protected warehouseStock = inject(AudiomaxDataService).inventoryItems;
 
   protected readonly quotePaymentModalOpen = signal(false);
   protected readonly quotePaymentQuoteId = signal<string | null>(null);
@@ -356,7 +375,9 @@ export class SectionPageComponent {
   protected readonly appointmentModalOpen = signal(false);
   protected readonly ticketModalOpen = signal(false);
   protected readonly expenseModalOpen = signal(false);
-  protected readonly supplierModalOpen = signal(false);
+  // ⭐ Edit spesa · se non null stiamo modificando una spesa esistente
+  // (tutti i campi pagamento sono modificabili post save come richiesto)
+  protected readonly expenseEditingId = signal<string | null>(null);
   protected readonly warehouseModalOpen = signal(false);
   protected readonly warehouseReceiptMode = signal<'new' | 'restock'>('new');
   protected readonly warehouseReceiptTargetId = signal<string | null>(null);
@@ -375,6 +396,63 @@ export class SectionPageComponent {
   protected readonly serviceModalOpen = signal(false);
   protected readonly toastMessage = signal<string | null>(null);
   protected readonly toastTone = signal<'success' | 'error'>('success');
+  // ✅ Fix REV-007 / REV-008: handle timers salvati per cleanup via DestroyRef
+  private toastTimer?: ReturnType<typeof setTimeout>;
+  private readonly blobTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  // Helper: restituisce la data in formato esteso italiano per etichette accessibilità calendario
+  protected _longItalianDate(isoDate: string): string {
+    const WEEKDAYS = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+    const MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+    try {
+      const [y, m, d] = isoDate.slice(0, 10).split('-').map(Number);
+      const dt = new Date(y, (m || 1) - 1, d || 1);
+      return `${WEEKDAYS[dt.getDay()]} ${d} ${MONTHS[(m || 1) - 1]} ${y}`;
+    } catch {
+      return isoDate;
+    }
+  }
+
+  // Helper: padding a 2 cifre per orari (non posso usare String() direttamene nel template)
+  protected _pad2(n: number): string {
+    return n.toString().padStart(2, '0');
+  }
+
+  // Helper: restituisce classi CSS per l'intestazione giorno della tabella paghe
+  // Sostituisce binding con ternari inline {{ }} che il parser html-validate scambia per classi duplicate
+  protected pagheThDayClass(d: { dow: number }): string {
+    const classes = ['paghe-th-day'];
+    if (d.dow === -1) {
+      classes.push('paghe-th-day-off', 'paghe-th-off');
+    } else if (d.dow === 0 || d.dow === 6) {
+      classes.push('paghe-th-day-we', 'paghe-th-we');
+    } else {
+      classes.push('paghe-th-day-wd');
+    }
+    return classes.join(' ');
+  }
+
+  // Helper: restituisce classi CSS per la riga D/L/M/M/G/V/S sotto i giorni paghe
+  protected pagheThDowClass(d: { dow: number }): string {
+    const classes = ['paghe-th-dow'];
+    if (d.dow === -1) {
+      classes.push('paghe-th-dow-off', 'paghe-th-off');
+    } else if (d.dow === 0 || d.dow === 6) {
+      classes.push('paghe-th-dow-we', 'paghe-th-we');
+    } else {
+      classes.push('paghe-th-dow-wd');
+    }
+    return classes.join(' ');
+  }
+
+  // Helper: restituisce classi CSS per il tag assenza (Ferie/Permesso/Malattia)
+  // Evita binding ternario inline {{ }} che genera falsi positivi classi duplicate
+  protected tagAssenzaClass(assenzaPer: string): string {
+    if (assenzaPer === 'Ferie') return 'tag-ass tag-ass-f';
+    if (assenzaPer === 'Permesso') return 'tag-ass tag-ass-p';
+    return 'tag-ass tag-ass-m';
+  }
+
   protected readonly privacyBaseUrlOverride = this.privacyDispatch.baseUrlOverride;
   protected readonly selectedClientId = signal<string | null>(null);
   protected readonly selectedSupplierId = signal<string | null>(null);
@@ -424,8 +502,8 @@ export class SectionPageComponent {
       .filter((supplier) =>
         query
           ? `${supplier.businessName} ${supplier.vatNumber} ${supplier.email} ${supplier.phone} ${supplier.contactName} ${supplier.supplyType}`
-              .toLowerCase()
-              .includes(query)
+            .toLowerCase()
+            .includes(query)
           : true,
       )
       .slice(0, 30);
@@ -605,7 +683,7 @@ export class SectionPageComponent {
     overview: true,
     cross: false,
     commerciale: false,
-    operativita: false,
+    operatività: false,
     amministrazione: false,
     alert: false,
   });
@@ -674,6 +752,8 @@ export class SectionPageComponent {
   );
   // ═══ Promemoria paghe 1° del mese
   protected readonly pagheReminderOpen = signal(false);
+  // ✅ Fix ISS-28: handle del setTimeout per cleanup su DestroyRef
+  private pagheReminderTimer: ReturnType<typeof setTimeout> | null = null;
   protected readonly employeeLeaves = this.data.employeeLeaves;
   protected readonly employeeScheduleMonth = signal<string>(this.startOfMonthIso(this.toIsoDate(new Date())));
   protected readonly employeePeriodFrom = signal<string>(this.startOfMonthIso(this.toIsoDate(new Date())));
@@ -718,7 +798,7 @@ export class SectionPageComponent {
   private readonly _oggi = new Date();
   protected readonly pagheMese = signal<number>(this._oggi.getMonth());   // 0..11
   protected readonly pagheAnno = signal<number>(this._oggi.getFullYear());
-  protected readonly pagheMesi = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+  protected readonly pagheMesi = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
   // ══ Lista operatori Veloce (Impostazioni): toggle per mostrare anche quelli "nascosti" (active=false)
   protected readonly showHiddenOperators = signal<boolean>(false);
   protected readonly operatorsListVisible = computed(() => {
@@ -734,7 +814,7 @@ export class SectionPageComponent {
   // ═══════════════════════════════════════════════════════════════════
   // TASK 2 · Impostazioni Orari Negozio · Giorni chiusura / Aperture straordinarie / Chiusure collettive
   // ═══════════════════════════════════════════════════════════════════
-  protected readonly STORE_WEEKDAY_KEYS: Array<{ key: 'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom'; short: string; label: string; }> = [
+  protected readonly STORE_WEEKDAY_KEYS: Array<{ key: 'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom'; short: string; label: string; }> = [
     { key: 'lun', short: 'L', label: 'Lunedì' },
     { key: 'mar', short: 'M', label: 'Martedì' },
     { key: 'mer', short: 'M', label: 'Mercoledì' },
@@ -750,22 +830,22 @@ export class SectionPageComponent {
   protected readonly storeBulkClosures = computed(() => this.data.storeBulkClosures());
   // Draft per form inline Apertura Straordinaria (data odierna default)
   protected readonly storeNewExtraOpening = signal<{ date: string; note: string; }>({
-    date: new Date(Date.now() + 86400000).toISOString().slice(0,10),  // default = domani
+    date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),  // default = domani
     note: ''
   });
   // Draft per form inline Chiusura Collettiva (default: domani a +7gg, Ferie)
   protected readonly storeNewBulkClosure = signal<{ startDate: string; endDate: string; reason: string; }>((() => {
     const start = new Date(Date.now() + 86400000);
-    const end = new Date(start.getTime() + 6*86400000);
+    const end = new Date(start.getTime() + 6 * 86400000);
     return {
-      startDate: start.toISOString().slice(0,10),
-      endDate: end.toISOString().slice(0,10),
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
       reason: 'Ferie collettive del negozio'
     };
   })());
 
   /** Toggle giorno di chiusura settimanale (Lun..Dom). Chiamato dalla card Impostazioni. */
-  protected toggleStoreClosingDay(key: 'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom'): void {
+  protected toggleStoreClosingDay(key: 'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom'): void {
     const curr = this.data.storeClosingDaysWeekly();
     const nuovo = { ...curr, [key]: !curr[key] };
     this.data.storeClosingDaysWeekly.set(nuovo);
@@ -778,13 +858,13 @@ export class SectionPageComponent {
     const d = this.storeNewExtraOpening();
     if (!d.date) { this.pushToast('Inserisci una data per l\'apertura straordinaria', 'error'); return; }
     const nuovo = {
-      id: 'exop_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      id: 'exop_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       date: d.date,
       note: (d.note || '').trim() || undefined
     };
     this.data.storeExtraOpeningDates.update(arr => [...arr, nuovo]);
     this.storeNewExtraOpening.set({
-      date: new Date(new Date(d.date).getTime() + 86400000).toISOString().slice(0,10),
+      date: new Date(new Date(d.date).getTime() + 86400000).toISOString().slice(0, 10),
       note: ''
     });
     this.pushToast(`Apertura straordinaria ${d.date} salvata`, 'success');
@@ -800,7 +880,7 @@ export class SectionPageComponent {
     if (!d.startDate || !d.endDate) { this.pushToast('Compila data inizio e fine chiusura collettiva', 'error'); return; }
     if (d.endDate < d.startDate) { this.pushToast('Data fine deve essere >= inizio', 'error'); return; }
     const nuovo = {
-      id: 'bulk_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+      id: 'bulk_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       startDate: d.startDate,
       endDate: d.endDate,
       reason: d.reason.trim() || 'Chiusura negozio'
@@ -808,10 +888,10 @@ export class SectionPageComponent {
     this.data.storeBulkClosures.update(arr => [...arr, nuovo]);
     // reset form +1 giorno dopo fine
     const afterEnd = new Date(new Date(d.endDate).getTime() + 86400000);
-    const afterEndEnd = new Date(afterEnd.getTime() + 6*86400000);
+    const afterEndEnd = new Date(afterEnd.getTime() + 6 * 86400000);
     this.storeNewBulkClosure.set({
-      startDate: afterEnd.toISOString().slice(0,10),
-      endDate: afterEndEnd.toISOString().slice(0,10),
+      startDate: afterEnd.toISOString().slice(0, 10),
+      endDate: afterEndEnd.toISOString().slice(0, 10),
       reason: 'Ferie collettive del negozio'
     });
     this.pushToast(`Chiusura collettiva ${nuovo.startDate} → ${nuovo.endDate} salvata (${nuovo.reason})`, 'success');
@@ -825,7 +905,7 @@ export class SectionPageComponent {
   /** Ritorna il nome del giorno della settimana data una stringa YYYY-MM-DD. */
   protected weekdayNameFromDate(dateStr: string): string {
     if (!dateStr) return '';
-    return ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'][new Date(dateStr + 'T00:00:00').getDay()];
+    return ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'][new Date(dateStr + 'T00:00:00').getDay()];
   }
   /** Calcola il numero di giorni inclusi tra startStr (YYYY-MM-DD) e endStr. */
   protected daysBetweenDates(startStr: string, endStr: string): number {
@@ -840,7 +920,7 @@ export class SectionPageComponent {
   // ═══════════════════════════════════════════════════════════════════════
 
   /** Mappa i giorni della settimana 0=Domenica..6=Sabato → chiavi record storeClosingDaysWeekly */
-  private static readonly _DOW_TO_WEEKDAY_KEY: Record<number, 'lun'|'mar'|'mer'|'gio'|'ven'|'sab'|'dom'> = {
+  private static readonly _DOW_TO_WEEKDAY_KEY: Record<number, 'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom'> = {
     0: 'dom', 1: 'lun', 2: 'mar', 3: 'mer', 4: 'gio', 5: 'ven', 6: 'sab'
   };
 
@@ -857,8 +937,7 @@ export class SectionPageComponent {
     | { kind: 'open' }
     | { kind: 'extra-open'; note?: string }
     | { kind: 'closed-weekly'; dayLabel: string }
-    | { kind: 'bulk-closure'; reason: string; from: string; to: string }
-  {
+    | { kind: 'bulk-closure'; reason: string; from: string; to: string } {
     const date = typeof d === 'string' ? new Date(d + 'T12:00:00') : new Date(d.getTime() + 43200000);
     const iso = date.toISOString().slice(0, 10);
 
@@ -879,7 +958,7 @@ export class SectionPageComponent {
     const wk = SectionPageComponent._DOW_TO_WEEKDAY_KEY[dow];
     const closing = this.storeClosingDaysWeekly();
     if (closing[wk]) {
-      const labels: Record<string, string> = { lun:'Lunedì', mar:'Martedì', mer:'Mercoledì', gio:'Giovedì', ven:'Venerdì', sab:'Sabato', dom:'Domenica' };
+      const labels: Record<string, string> = { lun: 'Lunedì', mar: 'Martedì', mer: 'Mercoledì', gio: 'Giovedì', ven: 'Venerdì', sab: 'Sabato', dom: 'Domenica' };
       return { kind: 'closed-weekly', dayLabel: labels[wk] };
     }
 
@@ -922,7 +1001,7 @@ export class SectionPageComponent {
    */
   protected getAppointmentOperatorStatus(
     operatorName: string
-  ): { level: 0|1|2|3|4|9; badge: string; classes: string; disabled: boolean; title: string } {
+  ): { level: 0 | 1 | 2 | 3 | 4 | 9; badge: string; classes: string; disabled: boolean; title: string } {
     const emp = this.allCashOperators().find(o => o.name === operatorName);
     const dateObj = this._appointmentDateOrNull();
     if (!emp || !dateObj) {
@@ -963,7 +1042,7 @@ export class SectionPageComponent {
     const permesso = todayLeaves.find((l: any) => l.type === 'permesso');
     if (permesso) {
       // Calcola overlap tra permesso e appuntamento
-      let permStart = 0, permEnd = 24*60;
+      let permStart = 0, permEnd = 24 * 60;
       if (typeof permesso.startTimeMinutes === 'number' && typeof permesso.endTimeMinutes === 'number') {
         permStart = permesso.startTimeMinutes;
         permEnd = permesso.endTimeMinutes;
@@ -972,14 +1051,14 @@ export class SectionPageComponent {
         permEnd = permStart + Math.round(permesso.hours * 60);
       } else {
         // Permesso giornata intera senza orari → overlap pieno
-        permStart = 0; permEnd = 24*60;
+        permStart = 0; permEnd = 24 * 60;
       }
       const overlap = Math.max(0, Math.min(apptEndMin, permEnd) - Math.max(apptStartMin, permStart));
       if (overlap > 15) { // oltre 15 minuti → avviso
         const oreP = ((permEnd - permStart) / 60);
-        const orePTxt = (Math.round(oreP * 10) / 10).toFixed(1).replace('.',',');
-        const fmt = (m:number) => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
-        const tip = `⚠️ Permesso ${fmt(permStart)}–${fmt(permEnd)} (${orePTxt.replace(',0','')}h) · appuntamento sovrapposto`;
+        const orePTxt = (Math.round(oreP * 10) / 10).toFixed(1).replace('.', ',');
+        const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        const tip = `⚠️ Permesso ${fmt(permStart)}–${fmt(permEnd)} (${orePTxt.replace(',0', '')}h) · appuntamento sovrapposto`;
         return { level: 3, badge: tip, classes: 'tech-warn tech-level3', disabled: false, title: tip + '. Puoi comunque selezionare se necessario.' };
       }
     }
@@ -1017,7 +1096,7 @@ export class SectionPageComponent {
       return { show: true, text: `🔒 Chiusura collettiva: ${s.reason} (${s.from} → ${s.to}) · Puoi comunque salvare eventi/dimostrazioni.`, classes: 'tech-badge tech-badge-level1' };
     }
     if (s.kind === 'extra-open') {
-      return { show: true, text: `🌟 Apertura straordinaria · negozio aperto eccezionalmente.${s.note ? ' ('+s.note+')' : ''}`, classes: 'tech-badge tech-badge-level0' };
+      return { show: true, text: `🌟 Apertura straordinaria · negozio aperto eccezionalmente.${s.note ? ' (' + s.note + ')' : ''}`, classes: 'tech-badge tech-badge-level0' };
     }
     return null;
   }
@@ -1026,10 +1105,10 @@ export class SectionPageComponent {
   protected readonly plannerLeaveTones = PLANNER_LEAVE_TONES;
   // Preset rapidi di orario standard per click singolo su una cella turno.
   protected readonly plannerShiftPresets = [
-    { key: 'mattutino',  label: 'Mattina', start: '08:30', end: '17:00', breakFrom: '13:00', breakTo: '14:00' },
+    { key: 'mattutino', label: 'Mattina', start: '08:30', end: '17:00', breakFrom: '13:00', breakTo: '14:00' },
     { key: 'pomeridiano', label: 'Pomeriggio', start: '14:00', end: '22:00', breakFrom: '18:00', breakTo: '18:30' },
-    { key: 'split',       label: 'Continuato', start: '08:00', end: '13:00 15:00 19:00', breakFrom: '13:00', breakTo: '15:00' },
-    { key: 'serale',      label: 'Serale', start: '17:00', end: '24:00', breakFrom: '20:00', breakTo: '20:30' },
+    { key: 'split', label: 'Continuato', start: '08:00', end: '13:00 15:00 19:00', breakFrom: '13:00', breakTo: '15:00' },
+    { key: 'serale', label: 'Serale', start: '17:00', end: '24:00', breakFrom: '20:00', breakTo: '20:30' },
   ];
 
   // Stato temporaneo dell'editor custom (per select orari senza riferimenti template fragili)
@@ -1046,20 +1125,21 @@ export class SectionPageComponent {
   // TASK 4: IMPOSTAZIONI · TABS ORIZZONTALI 7 CATEGORIE
   // ========================================================================
   protected readonly SETTINGS_TABS = [
-    { key: 'azienda',       label: 'Dati Azienda',      icon: '🏢' },
-    { key: 'dipendenti',    label: 'Dipendenti',        icon: '👥' },
-    { key: 'orari-negozio', label: 'Orari Negozio',     icon: '🏪' },
-    { key: 'listino',       label: 'Listino & Servizi', icon: '💰' },
-    { key: 'fiscale',       label: 'Fiscale',           icon: '🧾' },
-    { key: 'preferenze',    label: 'Preferenze',        icon: '⚙️' },
-    { key: 'privacy',       label: 'Privacy',           icon: '🔒' },
+    { key: 'azienda', label: 'Dati Azienda', icon: '🏢' },
+    { key: 'dipendenti', label: 'Dipendenti', icon: '👥' },
+    { key: 'pagamenti', label: 'Pagamenti', icon: '💳' },
+    { key: 'orari-negozio', label: 'Orari Negozio', icon: '🏪' },
+    { key: 'listino', label: 'Listino & Servizi', icon: '💰' },
+    { key: 'fiscale', label: 'Fiscale', icon: '🧾' },
+    { key: 'preferenze', label: 'Preferenze', icon: '⚙️' },
+    { key: 'privacy', label: 'Privacy', icon: '🔒' },
   ] as const;
   protected readonly activeSettingsTab: WritableSignal<string> = signal(
-    (typeof localStorage !== 'undefined' ? localStorage.getItem('audiomax_settings_last_tab') : null) ?? 'azienda'
+    this.storage.getItem('audiomax_settings_last_tab') ?? 'azienda'
   );
   protected setActiveSettingsTab(key: string): void {
     this.activeSettingsTab.set(key);
-    try { localStorage.setItem('audiomax_settings_last_tab', key); } catch (_) {}
+    this.storage.setItem('audiomax_settings_last_tab', key);
   }
 
   // ========================================================================
@@ -1121,7 +1201,7 @@ export class SectionPageComponent {
       const ok = this._injectPlannerExtraShiftByName(empName, iso, '08:30', '17:00', '13:00', '14:00');
       this.pushToast(
         ok ? `Turno straordinario inserito per ${empName} · ${iso}.`
-           : `Turno straordinario salvato in ${empName} (planner non aggiornato: data fuori mese corrente).`,
+          : `Turno straordinario salvato in ${empName} (planner non aggiornato: data fuori mese corrente).`,
         'success'
       );
     } else {
@@ -1130,7 +1210,7 @@ export class SectionPageComponent {
         ? Math.max(0, (this.hhmmToMinutes(this.miniHrModalPermitEnd()) - this.hhmmToMinutes(this.miniHrModalPermitStart())) / 60)
         : 8;
       const permitStart = action === 'permesso' ? this.hhmmToMinutes(this.miniHrModalPermitStart()) : null;
-      const permitEnd   = action === 'permesso' ? this.hhmmToMinutes(this.miniHrModalPermitEnd())   : null;
+      const permitEnd = action === 'permesso' ? this.hhmmToMinutes(this.miniHrModalPermitEnd()) : null;
       const note = this.miniHrModalNote().trim();
       // Rimuovi entry leave duplicate per stessa data + tipo
       const filtered = leavesArr.filter((l: any) =>
@@ -1149,7 +1229,7 @@ export class SectionPageComponent {
       const payloadToSave: any = { ...(emp as any), leaves: filtered };
       this.data.updateCashOperator(payloadToSave);
       const actionLabel = action === 'ferie' ? 'Ferie' : action === 'malattia' ? 'Malattia' :
-                          (hours > 0 ? `Permesso ${hours}h` : 'Permesso');
+        (hours > 0 ? `Permesso ${hours}h` : 'Permesso');
       this.pushToast(`${actionLabel} salvato per ${empName} · ${iso}.`, 'success');
     }
     this.closeMiniHrModal();
@@ -1586,10 +1666,10 @@ export class SectionPageComponent {
 
   protected plannerCellToneClass(cell: PlannerShiftCell): string {
     switch (cell.tone) {
-      case 'ferie':    return 'tone-ferie';
+      case 'ferie': return 'tone-ferie';
       case 'permesso': return 'tone-permesso';
       case 'malattia': return 'tone-malattia';
-      case 'riposo':   return 'tone-riposo';
+      case 'riposo': return 'tone-riposo';
       default:
         if (cell.startMinutes != null && cell.endMinutes != null) return 'tone-standard';
         return 'tone-empty';
@@ -1687,6 +1767,18 @@ export class SectionPageComponent {
     endDate: ['', Validators.required],
     note: [''],
     returnShiftPatternIndex: this.formBuilder.control<number | null>(null),
+  }, {
+    // ✅ Fix ISS-07: validatore cross-field data fine >= data inizio
+    validators: [
+      (group) => {
+        const start = group.get('startDate')?.value as string | undefined;
+        const end = group.get('endDate')?.value as string | undefined;
+        if (start && end && new Date(end) < new Date(start)) {
+          return { leaveEndBeforeStart: true };
+        }
+        return null;
+      },
+    ],
   });
   protected readonly employeeAttendanceForm = this.formBuilder.nonNullable.group({
     status: this.formBuilder.nonNullable.control<EmployeeAttendanceRecord['status']>('lavorato'),
@@ -1959,10 +2051,10 @@ export class SectionPageComponent {
     this.cashPaymentMethod() !== 'misto'
       ? true
       : this.cashMixedCashAmount() >= 0 &&
-        this.cashMixedElectronicAmount() >= 0 &&
-        this.cashMixedElectronicMethod() !== null &&
-        this.cashMixedDifference() === 0 &&
-        this.cashEffectiveTotal() > 0,
+      this.cashMixedElectronicAmount() >= 0 &&
+      this.cashMixedElectronicMethod() !== null &&
+      this.cashMixedDifference() === 0 &&
+      this.cashEffectiveTotal() > 0,
   );
   protected readonly cashCanFinalizePaidSale = computed(() => {
     if (!this.cashCart().length && !this.cashIsSettlingPending()) {
@@ -2444,15 +2536,104 @@ export class SectionPageComponent {
       .sort((left, right) => left.dueDate.localeCompare(right.dueDate))
       .slice(0, 12);
   });
-  protected readonly expenseFormNetPreview = computed(() => {
+  // ⭐ Metodi calcolo Netto / IVA / Totale
+  // Nota: non usiamo Signal computed() perché this.expenseForm.controls.*.value
+  // non è un Signal Angular (è un FormGroup Reactive). Usiamo normali metodi:
+  // Angular Change Detection li valuta ad ogni ciclo quando il template
+  // legge expenseFormNetPreview() / expenseFormVatPreview().
+  protected expenseFormNetPreview(): number {
     const gross = Number(this.expenseForm.controls.amountGross.value || 0);
     const vatRate = Number(this.expenseForm.controls.vatRate.value || 0);
+    const alreadyIvato = Boolean(this.expenseForm.controls.amountAlreadyIvato?.value ?? true);
+    const splitVat = Boolean(this.expenseForm.controls.amountSplitVat?.value ?? true);
+    const reverse = Boolean(this.expenseForm.controls.amountIsReverseCharge?.value ?? false);
 
+    // Reverse charge (Italia: 0% IVA inversa) → netto = importo totale
+    if (reverse) return gross;
+
+    if (!alreadyIvato) {
+      // UTENTE INSERISCE NETTO (Importo prima dell'IVA) → netto = importo scritto
+      return gross;
+    }
+    // UTENTE INSERISCE IMPORTO GIÀ IVATO (default Italia):
+    if (!splitVat) {
+      // SCENARIO: Importo IVATO ESENTE (es. medicina, tabacchi, IVA 0 per legge)
+      return gross;
+    }
+    // SCENARIO DEFAULT: Importo già ivato → SCORPORO l'IVA scelta
+    if (vatRate <= 0) return gross;
     return gross / (1 + vatRate / 100);
+  }
+  protected expenseFormVatPreview(): number {
+    const gross = Number(this.expenseForm.controls.amountGross.value || 0);
+    const alreadyIvato = Boolean(this.expenseForm.controls.amountAlreadyIvato?.value ?? true);
+    const splitVat = Boolean(this.expenseForm.controls.amountSplitVat?.value ?? true);
+    const reverse = Boolean(this.expenseForm.controls.amountIsReverseCharge?.value ?? false);
+    const net = this.expenseFormNetPreview();
+
+    if (reverse) return 0;
+    if (!alreadyIvato) {
+      // UTENTE INSERISCE NETTO → IVA = netto × aliquota%
+      const vatRate = Number(this.expenseForm.controls.vatRate.value || 0);
+      return Math.max(0, +(net * (vatRate / 100)).toFixed(4));
+    }
+    if (!splitVat) return 0;
+    // Scorporo standard (default)
+    return +(gross - net).toFixed(4);
+  }
+  protected expenseFormGrossFinalPreview(): number {
+    const net = this.expenseFormNetPreview();
+    const vat = this.expenseFormVatPreview();
+    return +(net + vat).toFixed(2);
+  }
+
+  // ⭐ Aliquote IVA Italiane (ordinarie + casi speciali, in ordine di frequenza)
+  protected readonly expenseVatRateOptions: ReadonlyArray<{
+    value: number;
+    label: string;
+    hint?: string;
+  }> = Object.freeze([
+    { value: 22, label: 'IVA 22%', hint: 'Ordinaria (beni e servizi standard)' },
+    { value: 10, label: 'IVA 10%', hint: 'Alimentare, energia, farmaci, ristorazione' },
+    { value: 5, label: 'IVA 5%', hint: 'Alimenti, libri, sanitari, abitazione' },
+    { value: 4, label: 'IVA 4%', hint: 'Alimenti base, prima casa, servizi sociali' },
+    { value: 0, label: 'IVA 0% (esente)', hint: 'Spese esenti senza IVA (es. sanità, assicurazioni)' },
+    { value: 21, label: 'IVA 21%', hint: 'Aliquota storica (fatture antecedenti)' },
+    { value: 27, label: 'IVA 27%', hint: 'Aliquota extra (non standard, caso marginale)' },
+  ]);
+
+  protected readonly expenseIsReverseChargeOption = Object.freeze({
+    label: 'Reverse Charge (Italia · IVA inversa)',
+    hint: 'Forniture UE/extra UE, operazioni in reverse charge → IVA 0 in fattura',
   });
-  protected readonly expenseFormVatPreview = computed(
-    () => Number(this.expenseForm.controls.amountGross.value || 0) - this.expenseFormNetPreview(),
-  );
+
+  // ⭐ Helper toggle UI (template-safe: Angular non supporta if/else/block statement in (click))
+  protected setExpenseAlreadyIvato(mode: 'ivato' | 'netto'): void {
+    if (mode === 'ivato') {
+      this.expenseForm.controls.amountAlreadyIvato.setValue(true);
+    } else {
+      // Utente passa a NETTO: splitVat torna a true di default (non più in uso)
+      this.expenseForm.controls.amountAlreadyIvato.setValue(false);
+      this.expenseForm.controls.amountSplitVat.setValue(true);
+    }
+  }
+  protected setExpenseSplitVat(enabled: boolean): void {
+    this.expenseForm.controls.amountSplitVat.setValue(enabled);
+  }
+  protected toggleExpenseReverseCharge(): void {
+    const next = !this.expenseForm.controls.amountIsReverseCharge.value;
+    this.expenseForm.controls.amountIsReverseCharge.setValue(next);
+    // Se Reverse Charge = ON, forza aliquota a 0 per semantica
+    if (next) {
+      this.expenseForm.controls.vatRate.setValue(0);
+    } else {
+      // Torniamo a 22% standard se l'aliquota era rimasta 0
+      if (Number(this.expenseForm.controls.vatRate.value || 0) === 0) {
+        this.expenseForm.controls.vatRate.setValue(22);
+      }
+    }
+  }
+
   protected readonly warehouseInventorySummary = this.data.warehouseInventorySummary;
   protected readonly warehouseInventoryByLot = computed(() => {
     const selectedItemId = this.selectedInventoryId();
@@ -2618,8 +2799,8 @@ export class SectionPageComponent {
   protected readonly warehouseLowStockAlertText = computed(() =>
     this.warehouseLowStockAlerts().length
       ? this.warehouseLowStockAlerts()
-          .map((item) => item.name)
-          .join(', ')
+        .map((item) => item.name)
+        .join(', ')
       : 'Nessuna anomalia di scorta.',
   );
   protected readonly warehouseCurrentMonthMovementCount = computed(() => {
@@ -3116,8 +3297,8 @@ export class SectionPageComponent {
       .filter((transaction) =>
         query
           ? `${transaction.reference} ${transaction.customerName} ${transaction.notes} ${transaction.paymentMethod}`
-              .toLowerCase()
-              .includes(query)
+            .toLowerCase()
+            .includes(query)
           : true,
       );
   });
@@ -3160,8 +3341,8 @@ export class SectionPageComponent {
     return this.allCashShifts().filter((shift) =>
       query
         ? `${shift.label} ${shift.closureNumber} ${shift.closedAt}`
-            .toLowerCase()
-            .includes(query)
+          .toLowerCase()
+          .includes(query)
         : true,
     );
   });
@@ -4662,7 +4843,7 @@ export class SectionPageComponent {
       badge: 'Conversione',
     },
     {
-      key: 'operativita',
+      key: 'operatività',
       kicker: 'Produzione',
       label: 'Operatività',
       description: 'Agenda, ticket tecnici, movimenti e consumi di magazzino.',
@@ -4927,8 +5108,10 @@ export class SectionPageComponent {
   protected readonly clientForm = this.formBuilder.nonNullable.group({
     kind: this.formBuilder.nonNullable.control<'privato' | 'azienda'>('privato'),
     name: ['', Validators.required],
-    phone: [''],
-    email: [''],
+    // ✅ Fix ISS-06: validatore telefono italiano/formato internazionale
+    phone: ['', [Validators.pattern(/^[+0-9\s-.()]{7,20}$/)]],
+    // ✅ Fix ISS-06: validatore email standard Angular
+    email: ['', [Validators.email]],
     city: [''],
     address: [''],
     segment: [''],
@@ -4938,9 +5121,12 @@ export class SectionPageComponent {
     notes: [''],
     favoriteBrands: [''],
     status: this.formBuilder.nonNullable.control<ClientRecord['status']>('lead'),
-    taxId: [''],
-    sdiCode: [''],
-    pec: [''],
+    // ✅ Fix ISS-06: validatore partita IVA (IT opzionale + 11 cifre) o Codice Fiscale
+    taxId: ['', [Validators.pattern(/^(IT)?[0-9A-Z]{11,16}$/)]],
+    // ✅ Fix ISS-06: validatore codice SDI (7 caratteri alfanumerici maiuscoli)
+    sdiCode: ['', [Validators.pattern(/^[A-Z0-9]{7}$/)]],
+    // ✅ Fix ISS-06: validatore PEC (stessa sintassi email, dominio tipico accettato)
+    pec: ['', [Validators.email]],
     billingAddress: [''],
   });
 
@@ -4949,13 +5135,19 @@ export class SectionPageComponent {
     operatorName: ['', Validators.required],
     customerName: ['', Validators.required],
     isAnonymous: this.formBuilder.control<boolean>(false),
-    discountAmount: this.formBuilder.control<number>(0),
-    customerPhone: [''],
-    customerEmail: [''],
+    // ✅ Fix ISS-07: sconto non negativo (min 0)
+    discountAmount: this.formBuilder.control<number>(0, [Validators.min(0)]),
+    // ✅ Fix ISS-06: telefono
+    customerPhone: ['', [Validators.pattern(/^[+0-9\s-.()]{7,20}$/)]],
+    // ✅ Fix ISS-06: email
+    customerEmail: ['', [Validators.email]],
     customerAddress: [''],
-    customerTaxId: [''],
-    customerPec: [''],
-    customerSdiCode: [''],
+    // ✅ Fix ISS-06: IVA/CF
+    customerTaxId: ['', [Validators.pattern(/^(IT)?[0-9A-Z]{11,16}$/)]],
+    // ✅ Fix ISS-06: PEC
+    customerPec: ['', [Validators.email]],
+    // ✅ Fix ISS-06: SDI
+    customerSdiCode: ['', [Validators.pattern(/^[A-Z0-9]{7}$/)]],
     attachmentName: [''],
     fulfillmentType: this.formBuilder.nonNullable.control<NonNullable<QuoteRecord['fulfillmentType']>>(
       'showroom',
@@ -4976,6 +5168,18 @@ export class SectionPageComponent {
     serviceId: [''],
     units: [1, [Validators.min(1)]],
     notes: [''],
+  }, {
+    // ✅ Fix ISS-07: validatore cross-field scadenza >= data emissione
+    validators: [
+      (group) => {
+        const issue = group.get('issueDate')?.value as string | undefined;
+        const due = group.get('dueDate')?.value as string | undefined;
+        if (issue && due && new Date(due) < new Date(issue)) {
+          return { dueDateBeforeIssue: true };
+        }
+        return null;
+      },
+    ],
   });
 
   protected readonly quotePaymentForm = this.formBuilder.nonNullable.group({
@@ -4997,21 +5201,27 @@ export class SectionPageComponent {
     address: [''],
     scheduledAt: ['', Validators.required],
     durationMinutes: [60, [Validators.required, Validators.min(15)]],
-    technician: this.formBuilder.nonNullable.control<string[]>([], Validators.required),
+    // ✅ Fix ISS-01: technician è ora una stringa (come AppointmentRecord e come
+    // serviceTicketForm) invece di string[]. La multi-select UI passa per il
+    // signal selectedTechnicians (effetto sincronizza sul form control).
+    technician: this.formBuilder.nonNullable.control<string>('', Validators.required),
     linkedQuoteId: this.formBuilder.nonNullable.control<string>(''),
     status: this.formBuilder.nonNullable.control<AppointmentRecord['status']>('programmato'),
   });
+  // ✅ Fix ISS-01: Signal dedicato alla UI multi-select dei tecnici,
+  // sincronizzato bidirezionalmente con il form control stringa.
+  protected readonly selectedTechnicians: WritableSignal<string[]> = signal([]);
   protected readonly appointmentTypeCards: ReadonlyArray<{
     value: AppointmentRecord['appointmentType'];
     label: string;
     detail: string;
   }> = [
-    { value: 'negozio', label: 'Negozio', detail: 'Appuntamento in showroom o al banco.' },
-    { value: 'uscita', label: 'Uscita', detail: 'Intervento rapido fuori sede.' },
-    { value: 'installazione', label: 'Installazione', detail: 'Montaggio, consegna e configurazione.' },
-    { value: 'assistenza', label: 'Assistenza', detail: 'Supporto tecnico o verifica sul posto.' },
-    { value: 'sopralluogo', label: 'Sopralluogo', detail: 'Analisi preliminare e rilievo.' },
-  ];
+      { value: 'negozio', label: 'Negozio', detail: 'Appuntamento in showroom o al banco.' },
+      { value: 'uscita', label: 'Uscita', detail: 'Intervento rapido fuori sede.' },
+      { value: 'installazione', label: 'Installazione', detail: 'Montaggio, consegna e configurazione.' },
+      { value: 'assistenza', label: 'Assistenza', detail: 'Supporto tecnico o verifica sul posto.' },
+      { value: 'sopralluogo', label: 'Sopralluogo', detail: 'Analisi preliminare e rilievo.' },
+    ];
   protected readonly appointmentQuickSlots: ReadonlyArray<string> = [
     '08:00',
     '09:00',
@@ -5035,29 +5245,29 @@ export class SectionPageComponent {
     label: string;
     detail: string;
   }> = [
-    { value: 'installazione', label: 'Installazione', detail: 'Montaggio, consegna e configurazione.' },
-    { value: 'assistenza', label: 'Assistenza', detail: 'Riparazione, supporto e intervento tecnico.' },
-    { value: 'diagnosi', label: 'Diagnosi', detail: 'Analisi guasto, test e verifica preventiva.' },
-  ];
+      { value: 'installazione', label: 'Installazione', detail: 'Montaggio, consegna e configurazione.' },
+      { value: 'assistenza', label: 'Assistenza', detail: 'Riparazione, supporto e intervento tecnico.' },
+      { value: 'diagnosi', label: 'Diagnosi', detail: 'Analisi guasto, test e verifica preventiva.' },
+    ];
   protected readonly ticketPriorityCards: ReadonlyArray<{
     value: ServiceTicketRecord['priority'];
     label: string;
     detail: string;
   }> = [
-    { value: 'alta', label: 'Alta', detail: 'Intervento urgente o cliente fermo.' },
-    { value: 'media', label: 'Media', detail: 'Lavorazione standard con priorita normale.' },
-    { value: 'bassa', label: 'Bassa', detail: 'Attività programmabile senza urgenza.' },
-  ];
+      { value: 'alta', label: 'Alta', detail: 'Intervento urgente o cliente fermo.' },
+      { value: 'media', label: 'Media', detail: 'Lavorazione standard con priorità normale.' },
+      { value: 'bassa', label: 'Bassa', detail: 'Attività programmabile senza urgenza.' },
+    ];
   protected readonly ticketStatusCards: ReadonlyArray<{
     value: ServiceTicketRecord['status'];
     label: string;
     detail: string;
   }> = [
-    { value: 'aperto', label: 'Aperto', detail: 'Ticket registrato e da prendere in carico.' },
-    { value: 'pianificato', label: 'Pianificato', detail: 'Intervento organizzato ma non avviato.' },
-    { value: 'in-lavorazione', label: 'In lavorazione', detail: 'Attività tecnica già in corso.' },
-    { value: 'chiuso', label: 'Chiuso', detail: 'Lavorazione completata e pronta per archivio.' },
-  ];
+      { value: 'aperto', label: 'Aperto', detail: 'Ticket registrato e da prendere in carico.' },
+      { value: 'pianificato', label: 'Pianificato', detail: 'Intervento organizzato ma non avviato.' },
+      { value: 'in-lavorazione', label: 'In lavorazione', detail: 'Attività tecnica già in corso.' },
+      { value: 'chiuso', label: 'Chiuso', detail: 'Lavorazione completata e pronta per archivio.' },
+    ];
   protected readonly appointmentLinkedQuote = computed(() => {
     const quoteId = this.appointmentForm.controls.linkedQuoteId.value;
     if (!quoteId) {
@@ -5099,11 +5309,24 @@ export class SectionPageComponent {
     salePrice: [0, [Validators.required, Validators.min(0)]],
     supplier: ['', Validators.required],
     location: ['', Validators.required],
+    // ✅ Fix ISS-08: checkbox UI "Aggiorna anche listino prezzi" (default OFF).
+    // Se OFF, updateInventoryItem() non sovrascrive il prezzo dei prodotti
+    // di cassa collegati (syncCashPrices=false).
+    syncCashPrices: this.formBuilder.control<boolean>(false),
   });
   protected readonly expenseForm = this.formBuilder.nonNullable.group({
     description: ['', Validators.required],
     amountGross: [0, [Validators.required, Validators.min(0.01)]],
     vatRate: [22, [Validators.required, Validators.min(0)]],
+    // ⭐ 3 flag metodo di calcolo IVA (Italia)
+    // amountAlreadyIvato:    UTENTE HA INSERITO L'IMPORTO GIÀ IVATO? (default ITALIA = true)
+    //                         → false = utente inserisce NETTO (senza IVA) + IVA aggiunta
+    // amountSplitVat:        SE amountAlreadyIvato=true → SCORPORO AUTOMATICO IVA (default true)
+    //                         → false = importo già ivato è ESENTE (IVA 0 per legge)
+    // amountIsReverseCharge: Reverse Charge / IVA inversa → forza IVA 0 (alias semantico)
+    amountAlreadyIvato: [true, [Validators.required]],
+    amountSplitVat: [true, [Validators.required]],
+    amountIsReverseCharge: [false, [Validators.required]],
     expenseDate: [new Date().toISOString().slice(0, 10), Validators.required],
     dueDate: [new Date().toISOString().slice(0, 10), Validators.required],
     categoryId: ['', Validators.required],
@@ -5112,6 +5335,11 @@ export class SectionPageComponent {
     paymentMode: this.formBuilder.nonNullable.control<ExpenseRecord['paymentMode']>('singolo'),
     recurringFrequency: this.formBuilder.nonNullable.control<ExpenseRecord['recurringFrequency']>(null),
     paymentMethodId: ['', Validators.required],
+    // ⭐ Pagamento · Provider integrato (es. Stripe) + manuale/automatico
+    paymentProviderId: [''] as never,            // '' = nessuno, altrimenti id PaymentProvider
+    paymentExecution: this.formBuilder.nonNullable.control<PaymentExecutionMode>('manuale'),
+    paymentAutoStartDate: [new Date().toISOString().slice(0, 10)],
+    paymentNotes: [''],
     installmentsCount: [1, [Validators.min(1)]],
     noticeDaysBefore: [7, [Validators.required, Validators.min(1), Validators.max(30)]],
     notes: [''],
@@ -5119,14 +5347,44 @@ export class SectionPageComponent {
     projectCode: [''],
     costCenterCode: [''],
     createdBy: ['Amministrazione', Validators.required],
+  }, {
+    // ✅ Fix ISS-07: cross-field validators
+    validators: [
+      // Almeno 1 fornitore: supplierId XOR genericSupplierLabel (esattamente uno)
+      (group) => {
+        const supId = (group.get('supplierId')?.value ?? '') as string;
+        const supLabel = (group.get('genericSupplierLabel')?.value ?? '') as string;
+        const hasSupId = supId.trim().length > 0;
+        const hasSupLabel = supLabel.trim().length > 0;
+        if (!hasSupId && !hasSupLabel) {
+          return { expenseMissingSupplier: true };
+        }
+        if (hasSupId && hasSupLabel) {
+          return { expenseAmbiguousSupplier: true };
+        }
+        return null;
+      },
+      // Data scadenza rata >= data registrazione spesa
+      (group) => {
+        const expDate = group.get('expenseDate')?.value as string | undefined;
+        const dDate = group.get('dueDate')?.value as string | undefined;
+        if (expDate && dDate && new Date(dDate) < new Date(expDate)) {
+          return { expenseDueBeforeExpense: true };
+        }
+        return null;
+      },
+    ],
   });
   protected readonly expenseSupplierForm = this.formBuilder.nonNullable.group({
     businessName: ['', Validators.required],
-    vatNumber: ['', Validators.required],
+    // ✅ Fix ISS-06: validatore partita IVA (prefisso IT opzionale + 11 cifre)
+    vatNumber: ['', [Validators.required, Validators.pattern(/^(IT)?\d{11}$/)]],
     address: [''],
     contactName: [''],
-    email: [''],
-    phone: [''],
+    // ✅ Fix ISS-06: email standard Angular
+    email: ['', [Validators.email]],
+    // ✅ Fix ISS-06: telefono internazionale
+    phone: ['', [Validators.pattern(/^[+0-9\s-.()]{7,20}$/)]],
     supplyType: ['', Validators.required],
     active: [true],
   });
@@ -5157,6 +5415,8 @@ export class SectionPageComponent {
     transportCost: [0, [Validators.min(0)]],
     customsCost: [0, [Validators.min(0)]],
     packagingCost: [0, [Validators.min(0)]],
+    // ✅ Fix ISS-08: checkbox UI "Aggiorna anche listino prezzi" (default OFF)
+    syncCashPrices: this.formBuilder.control<boolean>(false),
   });
   protected readonly warehouseAdjustmentForm = this.formBuilder.nonNullable.group({
     inventoryItemId: ['', Validators.required],
@@ -5181,6 +5441,87 @@ export class SectionPageComponent {
     jobTitle: [''],
     contractHoursWeekly: [40, [Validators.min(0), Validators.max(60)]],
   });
+
+  // ⭐ Payment Provider (Impostazioni → Pagamenti): gestisce l'editor
+  protected readonly paymentProviderEditingId = signal<string | null>(null);
+  protected readonly paymentProviderForm = this.formBuilder.nonNullable.group({
+    name: ['', Validators.required],
+    kind: this.formBuilder.nonNullable.control<PaymentProviderKind>('integrato'),
+    code: ['stripe', Validators.required],
+    description: [''],
+    apiPublishableKey: [''],
+    connectedBankAccountIban: [''],
+    connectedBankAccountLabel: [''],
+    autoSupported: [true, Validators.required],
+    active: [true, Validators.required],
+  });
+  protected openPaymentProviderEditor(provider?: PaymentProviderRecord): void {
+    if (provider) {
+      this.paymentProviderEditingId.set(provider.id);
+      this.paymentProviderForm.reset({
+        name: provider.name,
+        kind: provider.kind,
+        code: provider.code,
+        description: provider.description ?? '',
+        apiPublishableKey: provider.apiPublishableKey ?? '',
+        connectedBankAccountIban: provider.connectedBankAccountIban ?? '',
+        connectedBankAccountLabel: provider.connectedBankAccountLabel ?? '',
+        autoSupported: provider.autoSupported,
+        active: provider.active,
+      });
+    } else {
+      this.paymentProviderEditingId.set(null);
+      this.paymentProviderForm.reset({
+        name: '',
+        kind: 'integrato',
+        code: 'stripe',
+        description: '',
+        apiPublishableKey: '',
+        connectedBankAccountIban: '',
+        connectedBankAccountLabel: '',
+        autoSupported: true,
+        active: true,
+      });
+    }
+  }
+  protected savePaymentProvider(): void {
+    if (this.paymentProviderForm.invalid) {
+      this.paymentProviderForm.markAllAsTouched();
+      return;
+    }
+    const raw = this.paymentProviderForm.getRawValue();
+    const editingId = this.paymentProviderEditingId();
+    const payload: Omit<PaymentProviderRecord, 'id' | 'createdAt'> = {
+      name: raw.name.trim(),
+      kind: raw.kind,
+      code: raw.code.trim() || 'custom',
+      description: raw.description.trim() || undefined,
+      apiPublishableKey: raw.apiPublishableKey.trim() || undefined,
+      connectedBankAccountIban: raw.connectedBankAccountIban.trim() || undefined,
+      connectedBankAccountLabel: raw.connectedBankAccountLabel.trim() || undefined,
+      autoSupported: Boolean(raw.autoSupported),
+      active: Boolean(raw.active),
+    };
+    if (editingId) {
+      this.data.updatePaymentProvider(editingId, payload);
+      this.pushToast('Metodo di pagamento aggiornato.', 'success');
+    } else {
+      this.data.addPaymentProvider(payload);
+      this.pushToast('Nuovo metodo di pagamento aggiunto.', 'success');
+    }
+    this.openPaymentProviderEditor(undefined);
+  }
+  protected deletePaymentProvider(id: string): void {
+    const provider = this.data.paymentProviders().find((pp) => pp.id === id);
+    if (!provider) return;
+    if (!confirm(`Eliminare definitivamente il metodo di pagamento "${provider.name}"?`)) return;
+    this.data.removePaymentProvider(id);
+    if (this.paymentProviderEditingId() === id) {
+      this.openPaymentProviderEditor(undefined);
+    }
+    this.pushToast('Metodo di pagamento rimosso.', 'success');
+  }
+
   protected readonly ticketForm = this.formBuilder.nonNullable.group({
     title: ['', Validators.required],
     customerName: ['', Validators.required],
@@ -5244,9 +5585,28 @@ export class SectionPageComponent {
     });
 
     // Promemoria paghe 1° del mese (dopo init asincrono)
-    setTimeout(() => {
+    // ✅ Fix ISS-28: salvo l'handle del timer per poterlo cancellare
+    // in caso di distruzione del component prima dei 400ms (memory leak).
+    this.pagheReminderTimer = setTimeout(() => {
       this.checkPagheReminderOnStartup();
+      // Timer concluso, reset dell'handle
+      this.pagheReminderTimer = null;
     }, 400);
+    // Cleanup sicuro su distruzione component (DestroyRef)
+    this.destroyRef.onDestroy(() => {
+      if (this.pagheReminderTimer !== null) {
+        clearTimeout(this.pagheReminderTimer);
+        this.pagheReminderTimer = null;
+      }
+      // ✅ Fix REV-007: cleanup toastTimer
+      if (this.toastTimer !== undefined) {
+        clearTimeout(this.toastTimer);
+        this.toastTimer = undefined;
+      }
+      // ✅ Fix REV-008: cleanup tutti i blob timers (revoke URL)
+      this.blobTimers.forEach((h) => clearTimeout(h));
+      this.blobTimers.clear();
+    });
   }
 
   protected updatePrivacyBaseUrlOverride(event: Event): void {
@@ -5259,7 +5619,7 @@ export class SectionPageComponent {
   }
 
   private applyCashHandoffFromNavigation(): void {
-    const sectionId = (this.route.snapshot.data as { sectionId?: string } | null)?.sectionId;
+    const sectionId = (this.route.snapshot?.data as { sectionId?: string } | null)?.sectionId;
     if (sectionId !== 'cassa') {
       return;
     }
@@ -5494,11 +5854,11 @@ export class SectionPageComponent {
     }
 
     const normalizedQuote = {
-        issueDate: payload.issueDate,
-        customerName: payload.customerName,
-        isAnonymous: payload.isAnonymous || false,
-        discountAmount: Number(payload.discountAmount) || 0,
-        customerPhone: payload.customerPhone,
+      issueDate: payload.issueDate,
+      customerName: payload.customerName,
+      isAnonymous: payload.isAnonymous || false,
+      discountAmount: Number(payload.discountAmount) || 0,
+      customerPhone: payload.customerPhone,
       customerEmail: payload.customerEmail,
       customerAddress: payload.customerAddress,
       customerTaxId: payload.customerTaxId,
@@ -5640,11 +6000,13 @@ export class SectionPageComponent {
     }
 
     if (this.editingInventoryId()) {
+      // ✅ Fix ISS-08: passa il flag della checkbox UI.
+      const syncPrices = !!this.inventoryForm.get('syncCashPrices')?.value;
       this.data.updateInventoryItem({
         id: this.editingInventoryId()!,
         status: this.selectedInventoryItem()?.status ?? 'disponibile',
         ...normalizedPayload,
-      });
+      }, syncPrices);
       this.selectedInventoryId.set(this.editingInventoryId());
     } else {
       this.data.addInventoryItem(normalizedPayload);
@@ -5713,6 +6075,8 @@ export class SectionPageComponent {
         this.createStoreSupplyExpense(payload, resolvedCategory);
         this.pushToast('Prodotto uso negozio registrato come spesa di acquisto.', 'success');
       } else {
+        // ✅ Fix ISS-08: passa il flag della checkbox UI.
+        const syncPrices = !!this.warehouseReceiptForm.get('syncCashPrices')?.value;
         this.data.receiveWarehouseStock({
           ...payload,
           inventoryItemId: payload.inventoryItemId || null,
@@ -5728,7 +6092,7 @@ export class SectionPageComponent {
           customsCost: Number(payload.customsCost) || 0,
           packagingCost: Number(payload.packagingCost) || 0,
           expiryDate: payload.expiryDate || null,
-        });
+        }, syncPrices);
         this.pushToast(
           payload.usageType === 'uso-negozio'
             ? 'Prodotto uso negozio registrato in inventario.'
@@ -5829,35 +6193,86 @@ export class SectionPageComponent {
     }
 
     const payload = this.expenseForm.getRawValue();
+    // ⭐ Calcolo finale Netto / IVA (stessi valori della preview live)
+    // Valori arrotondati a 2 decimali: usati come source of truth nel record.
+    const netFinal = Number(this.expenseFormNetPreview().toFixed(2));
+    const vatFinal = Number(this.expenseFormVatPreview().toFixed(2));
+    // Gross finale = Netto + IVA (corregge eventuali 0.01 derivanti da scorporo classico)
+    const grossFinal = Number((netFinal + vatFinal).toFixed(2));
+    const gross =
+      Math.abs(grossFinal - (Number(payload.amountGross) || 0)) > 0.02
+        ? Number(payload.amountGross || 0)
+        : grossFinal;
+
+    const recurringFrequency =
+      payload.paymentMode === 'ricorrente' ? payload.recurringFrequency : null;
+
+    const baseValues = {
+      description: payload.description,
+      categoryId: payload.categoryId,
+      supplierId: payload.supplierId || null,
+      genericSupplierLabel: payload.genericSupplierLabel || null,
+      paymentMode: payload.paymentMode,
+      recurringFrequency,
+      paymentMethodId: payload.paymentMethodId,
+      amountGross: gross,
+      vatRate: Number(payload.vatRate) || 0,
+      amountNet: netFinal,
+      amountVat: vatFinal,
+      expenseDate: payload.expenseDate,
+      dueDate: payload.dueDate,
+      notes: payload.notes,
+      attachmentName: payload.attachmentName || null,
+      projectCode: payload.projectCode || null,
+      costCenterCode: payload.costCenterCode || null,
+      // ⭐ 3 flag metodo IVA
+      amountAlreadyIvato: Boolean(payload.amountAlreadyIvato),
+      amountSplitVat: Boolean(payload.amountSplitVat),
+      amountIsReverseCharge: Boolean(payload.amountIsReverseCharge),
+      // ⭐ Provider pagamento + manuale/automatico (SEMPRE modificabile post save)
+      // Cast: paymentProviderId può essere '' (empty string) → null, oppure id valido.
+      // @ts-ignore - paymentProviderId FC tipizzato con as never per aggirare strict iniziale
+      paymentProviderId: (payload.paymentProviderId as string | null | '')
+        ? (payload.paymentProviderId as string) || null
+        : null,
+      paymentExecution: (payload.paymentExecution || 'manuale') as PaymentExecutionMode,
+      paymentAutoStartDate:
+        payload.paymentExecution === 'automatico' ? (payload.paymentAutoStartDate || payload.dueDate) : null,
+      paymentNotes: payload.paymentNotes || null,
+    };
+
+    const editingId = this.expenseEditingId();
     try {
-      this.data.createExpense({
-        description: payload.description,
-        categoryId: payload.categoryId,
-        supplierId: payload.supplierId || null,
-        genericSupplierLabel: payload.genericSupplierLabel || null,
-        paymentMode: payload.paymentMode,
-        recurringFrequency:
-          payload.paymentMode === 'ricorrente' ? payload.recurringFrequency : null,
-        paymentMethodId: payload.paymentMethodId,
-        amountGross: Number(payload.amountGross) || 0,
-        vatRate: Number(payload.vatRate) || 0,
-        expenseDate: payload.expenseDate,
-        dueDate: payload.dueDate,
-        notes: payload.notes,
-        attachmentName: payload.attachmentName || null,
-        projectCode: payload.projectCode || null,
-        costCenterCode: payload.costCenterCode || null,
-        createdBy: payload.createdBy,
-        sourceType: 'manuale',
-        sourceReferenceId: null,
-        installmentsCount: Number(payload.installmentsCount) || 1,
-        noticeDaysBefore: Number(payload.noticeDaysBefore) || 7,
-      });
-      this.pushToast('Spesa registrata con successo.', 'success');
+      if (editingId) {
+        // ==== UPDATE (modalità modifica post save) ====
+        this.data.updateExpense(editingId, {
+          ...baseValues,
+        });
+        this.pushToast('Spesa aggiornata. Le impostazioni di pagamento sono state salvate.', 'success');
+      } else {
+        // ==== CREATE (nuova spesa) ====
+        this.data.createExpense({
+          ...baseValues,
+          createdBy: payload.createdBy,
+          sourceType: 'manuale',
+          sourceReferenceId: null,
+          installmentsCount: Number(payload.installmentsCount) || 1,
+          noticeDaysBefore: Number(payload.noticeDaysBefore) || 7,
+          amountNetFinal: netFinal,
+          amountVatFinal: vatFinal,
+        });
+        this.pushToast('Spesa registrata con successo.', 'success');
+      }
       this.clearFormDraft('expense');
+      this.expenseEditingId.set(null);
       this.expenseModalOpen.set(false);
     } catch {
-      this.pushToast('Errore durante il salvataggio della spesa.', 'error');
+      this.pushToast(
+        editingId
+          ? 'Errore durante l\'aggiornamento della spesa.'
+          : 'Errore durante il salvataggio della spesa.',
+        'error',
+      );
       return;
     }
 
@@ -5871,7 +6286,7 @@ export class SectionPageComponent {
     }
 
     const payload = this.expenseSupplierForm.getRawValue();
-    this.data.addExpenseSupplier(payload);
+    const created = this.data.addExpenseSupplier(payload);
     this.expenseSupplierForm.patchValue({
       businessName: '',
       vatNumber: '',
@@ -5882,6 +6297,20 @@ export class SectionPageComponent {
       supplyType: '',
       active: true,
     });
+
+    // ⭐ Auto-selezione nuovo fornitore nella spesa CORRENTE
+    // (se utente ha creato il fornitore partendo dal popup "Nuova spesa").
+    // Alla chiusura del tab fornitore o della modale inline il combo fornitore
+    // avrà già il nuovo valore selezionato (nessuna "Utenza generica" dopo save).
+    if (created && this.expenseModalOpen()) {
+      this.runWithoutDraftSync('expense', () => {
+        this.expenseForm.patchValue({ supplierId: created.id });
+      });
+      this.pushToast(
+        `Fornitore "${created.businessName}" creato e selezionato automaticamente nella spesa.`,
+        'success',
+      );
+    }
   }
 
   protected markInstallmentAsPaid(installmentId: string): void {
@@ -6258,6 +6687,16 @@ export class SectionPageComponent {
         supplyType: '',
         active: true,
       });
+      // ⭐ AUTO-HANDOFF: se l'utente sta creando un fornitore DAL POPUP NUOVA SPESA,
+      // prendiamo snapshot del form spesa. Alla fine della creazione del fornitore
+      // (saveContact L5590 oggi già chiama applyExpenseSupplierHandoff) il nuovo
+      // fornitore verrà auto-selezionato nel combo supplierId della spesa.
+      if (this.expenseModalOpen()) {
+        this.expenseSupplierHandoff.set({
+          active: true,
+          draft: { ...this.expenseForm.getRawValue() },
+        });
+      }
       this.clientModalOpen.set(true);
       return;
     }
@@ -6299,7 +6738,11 @@ export class SectionPageComponent {
 
     const handoff = this.warehouseSupplierHandoff();
     if (handoff.active && handoff.draft) {
-      this.warehouseReceiptForm.reset(handoff.draft);
+      this.warehouseReceiptForm.reset({
+        ...handoff.draft,
+        // ✅ Fix ISS-08: default OFF per sicurezza (non sovrascrive listino cassa se non esplicitato)
+        syncCashPrices: (handoff.draft as { syncCashPrices?: boolean }).syncCashPrices ?? false,
+      });
       this.warehouseSupplierHandoff.set({ active: false, draft: null });
       this.warehouseModalOpen.set(true);
       return;
@@ -6328,12 +6771,12 @@ export class SectionPageComponent {
     if (!quote) return;
 
     this.editingQuoteId.set(quote.id);
-      this.quoteForm.patchValue({
-        issueDate: quote.issueDate,
-        customerName: quote.customerName,
-        isAnonymous: quote.isAnonymous || false,
-        discountAmount: quote.discountAmount || 0,
-        customerPhone: quote.customerPhone,
+    this.quoteForm.patchValue({
+      issueDate: quote.issueDate,
+      customerName: quote.customerName,
+      isAnonymous: quote.isAnonymous || false,
+      discountAmount: quote.discountAmount || 0,
+      customerPhone: quote.customerPhone,
       customerEmail: quote.customerEmail,
       customerAddress: quote.customerAddress,
       customerTaxId: quote.customerTaxId,
@@ -6392,11 +6835,11 @@ export class SectionPageComponent {
     const rows =
       lines.length
         ? lines
-            .map(
-              (line) =>
-                `<tr><td>${this.escapeHtml(line.description)}</td><td style="text-align:right">${line.quantity}</td></tr>`,
-            )
-            .join('')
+          .map(
+            (line) =>
+              `<tr><td>${this.escapeHtml(line.description)}</td><td style="text-align:right">${line.quantity}</td></tr>`,
+          )
+          .join('')
         : `<tr><td colspan="2">Nessun prodotto inserito (solo servizi).</td></tr>`;
 
     const html = `<!doctype html>
@@ -6497,17 +6940,23 @@ export class SectionPageComponent {
   }
 
   protected selectedAppointmentOperators(): string[] {
-    return (this.appointmentForm.value.technician ?? []).filter(Boolean);
+    // ✅ Fix ISS-01: legge dal signal dedicato selectedTechnicians
+    // invece che da appointmentForm.value.technician (ora stringa semplice).
+    return this.selectedTechnicians().filter(Boolean);
   }
 
   protected toggleAppointmentOperator(operator: string): void {
-    const current = this.selectedAppointmentOperators();
+    const current = this.selectedTechnicians();
     const index = current.indexOf(operator);
+    let next: string[];
     if (index === -1) {
-      this.appointmentForm.patchValue({ technician: [...current, operator] });
+      next = [...current, operator];
     } else {
-      this.appointmentForm.patchValue({ technician: current.filter((item) => item !== operator) });
+      next = current.filter((item) => item !== operator);
     }
+    this.selectedTechnicians.set(next);
+    // ✅ Sync bidirezionale: scrive nel FormControl<string> del form
+    this.appointmentForm.patchValue({ technician: next.join(', ') });
   }
 
   protected selectAppointmentType(type: AppointmentRecord['appointmentType']): void {
@@ -6661,15 +7110,6 @@ export class SectionPageComponent {
     this.ticketClientHandoff.set({ active: false, draft: null });
   }
 
-  protected openSupplierModal(): void {
-    this.expenseSupplierHandoff.set({ active: false, draft: null });
-    this.openContactModal('fornitore');
-  }
-
-  protected closeSupplierModal(): void {
-    this.supplierModalOpen.set(false);
-  }
-
   protected openSupplierFromExpense(): void {
     this.expenseSupplierHandoff.set({
       active: true,
@@ -6680,8 +7120,51 @@ export class SectionPageComponent {
   }
 
   protected openExpenseModal(): void {
+    // Reset modalità editing (apertura standard = nuova spesa)
+    this.expenseEditingId.set(null);
     this.resetExpenseForm();
     this.restoreFormDraft('expense', this.expenseForm);
+    this.expenseModalOpen.set(true);
+  }
+
+  // ⭐ Apre popup in MODALITÀ MODIFICA (edit post save della spesa)
+  // Tutti i campi pagamento sono modificabili in questo modo come richiesto
+  // (es. fermare pagamento automatico dopo N mesi, cambiare provider, switch a manuale).
+  protected openEditExpense(expenseId: string): void {
+    const existing = this.data.expenseRecords().find((r) => r.id === expenseId);
+    if (!existing) return;
+    this.expenseEditingId.set(expenseId);
+    this.runWithoutDraftSync('expense', () => {
+      this.expenseForm.reset({
+        description: existing.description ?? '',
+        amountGross: existing.amountGross ?? 0,
+        vatRate: existing.vatRate ?? 22,
+        amountAlreadyIvato: Boolean(existing.amountAlreadyIvato ?? true),
+        amountSplitVat: Boolean(existing.amountSplitVat ?? true),
+        amountIsReverseCharge: Boolean(existing.amountIsReverseCharge ?? false),
+        expenseDate: existing.expenseDate ?? new Date().toISOString().slice(0, 10),
+        dueDate: existing.dueDate ?? new Date().toISOString().slice(0, 10),
+        categoryId: existing.categoryId ?? '',
+        supplierId: existing.supplierId ?? '',
+        genericSupplierLabel: existing.genericSupplierLabel ?? '',
+        paymentMode: existing.paymentMode ?? 'singolo',
+        recurringFrequency: existing.recurringFrequency ?? null,
+        paymentMethodId: existing.paymentMethodId ?? '',
+        // Campi pagamento integrato (sempre modificabili post save)
+        paymentProviderId: existing.paymentProviderId ?? '',
+        paymentExecution: existing.paymentExecution ?? 'manuale',
+        paymentAutoStartDate:
+          existing.paymentAutoStartDate ?? existing.dueDate ?? new Date().toISOString().slice(0, 10),
+        paymentNotes: existing.paymentNotes ?? '',
+        installmentsCount: 1,
+        noticeDaysBefore: 7,
+        notes: existing.notes ?? '',
+        attachmentName: existing.attachmentName ?? '',
+        projectCode: existing.projectCode ?? '',
+        costCenterCode: existing.costCenterCode ?? '',
+        createdBy: existing.createdBy ?? 'Amministrazione',
+      });
+    });
     this.expenseModalOpen.set(true);
   }
 
@@ -6749,6 +7232,8 @@ export class SectionPageComponent {
     this.warehouseReceiptForm.reset({
       ...handoff.draft,
       supplier: supplier.businessName,
+      // ✅ Fix ISS-08: default OFF
+      syncCashPrices: (handoff.draft as { syncCashPrices?: boolean }).syncCashPrices ?? false,
     });
     this.warehouseSupplierHandoff.set({ active: false, draft: null });
     this.warehouseModalOpen.set(true);
@@ -6800,6 +7285,9 @@ export class SectionPageComponent {
   protected discardExpenseModal(): void {
     this.clearFormDraft('expense');
     this.resetExpenseForm();
+    // Quando chiudo il modale, resetto anche editingId
+    // (così il prossimo openExpenseModal torna in modalità nuova spesa).
+    this.expenseEditingId.set(null);
     this.expenseModalOpen.set(false);
   }
 
@@ -7101,10 +7589,10 @@ export class SectionPageComponent {
       return items.map((line) =>
         line.id === existingLine.id
           ? {
-              ...line,
-              quantity: line.quantity + 1,
-              total: (line.quantity + 1) * line.unitPrice,
-            }
+            ...line,
+            quantity: line.quantity + 1,
+            total: (line.quantity + 1) * line.unitPrice,
+          }
           : line,
       );
     });
@@ -7164,10 +7652,10 @@ export class SectionPageComponent {
         .map((line) =>
           line.id === lineId
             ? {
-                ...line,
-                quantity: line.quantity - 1,
-                total: Math.max((line.quantity - 1) * line.unitPrice, 0),
-              }
+              ...line,
+              quantity: line.quantity - 1,
+              total: Math.max((line.quantity - 1) * line.unitPrice, 0),
+            }
             : line,
         )
         .filter((line) => line.quantity > 0),
@@ -7716,9 +8204,9 @@ export class SectionPageComponent {
       const giornoMese = oggi.getDate();
       if (giornoMese !== 1) return;
       const isoOggi = oggi.toISOString().slice(0, 7); // YYYY-MM
-      const lastShown = localStorage.getItem(this.PAGHE_REMINDER_KEY) ?? '';
+      const lastShown = this.storage.getItem(this.PAGHE_REMINDER_KEY) ?? '';
       if (lastShown === isoOggi) return; // già mostrato questo mese
-      localStorage.setItem(this.PAGHE_REMINDER_KEY, isoOggi);
+      this.storage.setItem(this.PAGHE_REMINDER_KEY, isoOggi);
       this.pagheReminderOpen.set(true);
     } catch {
       // ignore storage errors
@@ -7754,7 +8242,7 @@ export class SectionPageComponent {
   protected readonly pagheExportGrid = computed<PagheGridRow[]>(() => {
     const dates = this.pagheDatesComputed();
     const ops = this.allCashOperators().filter(o => o.active);
-    const dowShort = ['D','L','M','M','G','V','S'];  // Sunday=0 → D
+    const dowShort = ['D', 'L', 'M', 'M', 'G', 'V', 'S'];  // Sunday=0 → D
     const risultato: PagheGridRow[] = [];
     const noteTutte: PagheNoteRow[] = []; // temporaneo (riempito dopo in computed note)
     for (const op of ops) {
@@ -7791,8 +8279,8 @@ export class SectionPageComponent {
         let minuti = 0;
         if (att.isLeave) {
           // Assenza gestita da leave record:
-          if (att.status === 'ferie') { kind = 'ferie'; display = 'F'; minuti = att.plannedMinutes > 0 ? att.plannedMinutes : (op.contractHoursWeekly ? (op.contractHoursWeekly*60/5) : 480); sommaFerie += minuti; }
-          else if (att.status === 'malattia') { kind = 'malattia'; display = 'M'; minuti = att.plannedMinutes > 0 ? att.plannedMinutes : (op.contractHoursWeekly ? (op.contractHoursWeekly*60/5) : 480); sommaMalattia += minuti; }
+          if (att.status === 'ferie') { kind = 'ferie'; display = 'F'; minuti = att.plannedMinutes > 0 ? att.plannedMinutes : (op.contractHoursWeekly ? (op.contractHoursWeekly * 60 / 5) : 480); sommaFerie += minuti; }
+          else if (att.status === 'malattia') { kind = 'malattia'; display = 'M'; minuti = att.plannedMinutes > 0 ? att.plannedMinutes : (op.contractHoursWeekly ? (op.contractHoursWeekly * 60 / 5) : 480); sommaMalattia += minuti; }
           else if (att.status === 'permesso') {
             kind = 'permesso';
             // Task7: Permesso ORARIO - priorità a leaveHours, poi plannedMinutes
@@ -7812,7 +8300,7 @@ export class SectionPageComponent {
             sommaPermesso += minuti;
           }
           else { kind = 'vuoto'; display = '·'; }
-          if (att.note?.trim()) noteTutte.push({employeeName:op.name, assenzaPer: att.status==='ferie'?'Ferie': att.status==='malattia'?'Malattia':'Permesso', dal: d.iso, al: d.iso, oreN: (minuti/60).toFixed(1)});
+          if (att.note?.trim()) noteTutte.push({ employeeName: op.name, assenzaPer: att.status === 'ferie' ? 'Ferie' : att.status === 'malattia' ? 'Malattia' : 'Permesso', dal: d.iso, al: d.iso, oreN: (minuti / 60).toFixed(1) });
         } else if (att.status === 'lavorato' || att.status === 'programmato') {
           const min = att.workedMinutes || att.plannedMinutes || 0;
           if (min <= 0) {
@@ -7825,17 +8313,17 @@ export class SectionPageComponent {
             if (Math.round(ore * 2) / 2 === Math.floor(ore)) {
               display = String(Math.round(ore));
             } else {
-              display = ore.toFixed(1).replace('.',',');
+              display = ore.toFixed(1).replace('.', ',');
             }
           }
         } else if (att.status === 'ferie' || att.status === 'malattia' || att.status === 'permesso') {
           // manual override → attendances
           const mBase = att.plannedMinutes || 0;
           minuti = mBase;
-          if (att.status === 'ferie') { kind='ferie'; display='F'; sommaFerie += minuti || 480; if(!minuti) minuti=480; }
-          else if (att.status === 'malattia') { kind='malattia'; display='M'; sommaMalattia += minuti || 480; if(!minuti) minuti=480; }
+          if (att.status === 'ferie') { kind = 'ferie'; display = 'F'; sommaFerie += minuti || 480; if (!minuti) minuti = 480; }
+          else if (att.status === 'malattia') { kind = 'malattia'; display = 'M'; sommaMalattia += minuti || 480; if (!minuti) minuti = 480; }
           else {
-            kind='permesso';
+            kind = 'permesso';
             // Task7: uniforma display permesso orario a P(Xh) per manual override
             if (minuti > 0 && minuti < 480) {
               const h = minuti / 60;
@@ -7881,10 +8369,10 @@ export class SectionPageComponent {
       // numero di "giorni lavorativi" = giorni non weekend dove il dipendente ha turni standard
       let giorniLavAttesi = 0;
       for (let d = 1; d <= 31; d++) {
-        const info = dates[d-1];
+        const info = dates[d - 1];
         if (info.dow === -1) continue;
         if (info.dow === 0 || info.dow === 6) continue; // ignore weekend per default
-        const stdShift = (op.defaultWeeklyShift ?? {})[['lun','mar','mer','gio','ven','sab','dom'][info.dow === 0 ? 6 : info.dow - 1] as keyof typeof op.defaultWeeklyShift] ?? '';
+        const stdShift = (op.defaultWeeklyShift ?? {})[['lun', 'mar', 'mer', 'gio', 'ven', 'sab', 'dom'][info.dow === 0 ? 6 : info.dow - 1] as keyof typeof op.defaultWeeklyShift] ?? '';
         if (stdShift && !/^\[(riposo|chiusura)\]\s*$/i.test(stdShift)) {
           giorniLavAttesi++;
         } else if (info.dow >= 1 && info.dow <= 5) {
@@ -7929,7 +8417,7 @@ export class SectionPageComponent {
         let kindCurr: 'ferie' | 'permesso' | 'malattia' | null = null;
         if (att.status === 'ferie' || att.status === 'permesso' || att.status === 'malattia') kindCurr = att.status;
         if (kindCurr) {
-          const minuti = att.plannedMinutes || (op.contractHoursWeekly ? op.contractHoursWeekly*12 : 480);
+          const minuti = att.plannedMinutes || (op.contractHoursWeekly ? op.contractHoursWeekly * 12 : 480);
           if (corrente && corrente.kind === kindCurr) {
             corrente.end = info.iso;
             corrente.minutes += minuti;
@@ -7947,7 +8435,7 @@ export class SectionPageComponent {
   });
   private _pagheNota(name: string, g: { kind: 'ferie' | 'permesso' | 'malattia'; start: string; end: string; minutes: number }): PagheNoteRow {
     const tipMap = { ferie: 'Ferie', permesso: 'Permesso', malattia: 'Malattia' } as const;
-    return { employeeName: name, assenzaPer: tipMap[g.kind], dal: g.start, al: g.end, oreN: (g.minutes / 60).toFixed(1).replace('.',',') + 'h' };
+    return { employeeName: name, assenzaPer: tipMap[g.kind], dal: g.start, al: g.end, oreN: (g.minutes / 60).toFixed(1).replace('.', ',') + 'h' };
   }
 
   // Titolo da stampare: "Presenze · Mese di Settembre 2026"
@@ -8154,9 +8642,9 @@ export class SectionPageComponent {
     const workedMinutes =
       status === 'lavorato'
         ? Math.max(
-            this.diffMinutesBetweenTimes(value.actualStartTime || '00:00', value.actualEndTime || '00:00') - breakMinutes,
-            0,
-          )
+          this.diffMinutesBetweenTimes(value.actualStartTime || '00:00', value.actualEndTime || '00:00') - breakMinutes,
+          0,
+        )
         : 0;
 
     this.data.upsertEmployeeAttendanceRecord({
@@ -9248,19 +9736,19 @@ export class SectionPageComponent {
     const customerEmail = this.cashNewClientEmail().trim();
     const billingProfile: ClientBillingProfile | undefined = this.cashNewClientIsCompany()
       ? {
-          kind: 'azienda',
-          taxId: this.cashNewClientTaxId().trim(),
-          sdiCode: this.cashNewClientSdiCode().trim(),
-          pec: this.cashNewClientPec().trim(),
-          billingAddress: this.cashNewClientBillingAddress().trim(),
-        }
+        kind: 'azienda',
+        taxId: this.cashNewClientTaxId().trim(),
+        sdiCode: this.cashNewClientSdiCode().trim(),
+        pec: this.cashNewClientPec().trim(),
+        billingAddress: this.cashNewClientBillingAddress().trim(),
+      }
       : {
-          kind: 'privato',
-          taxId: '',
-          sdiCode: '',
-          pec: '',
-          billingAddress: '',
-        };
+        kind: 'privato',
+        taxId: '',
+        sdiCode: '',
+        pec: '',
+        billingAddress: '',
+      };
     const existingClient =
       this.allClients().find(
         (client) =>
@@ -9632,15 +10120,15 @@ export class SectionPageComponent {
     const linkedClient = this.allClients().find((item) => item.name === ticket.customerName) ?? null;
     const materialRows = ticket.materialLines.length
       ? ticket.materialLines
-          .map(
-            (line) => `<tr>
+        .map(
+          (line) => `<tr>
               <td>${this.escapeHtml(line.itemName)}</td>
               <td style="text-align:right">${line.quantity}</td>
               <td style="text-align:right">€ ${line.unitCost.toLocaleString('it-IT')}</td>
               <td style="text-align:right">€ ${line.totalCost.toLocaleString('it-IT')}</td>
             </tr>`,
-          )
-          .join('')
+        )
+        .join('')
       : '<tr><td colspan="4">Nessun materiale assegnato.</td></tr>';
     const popup = window.open('', '_blank', 'width=1120,height=860');
 
@@ -9719,11 +10207,10 @@ export class SectionPageComponent {
   <div class="sheet">
     <section class="letterhead">
       <div class="letterhead-logo">
-        ${
-          company.logoUrl
-            ? `<img src="${company.logoUrl}" alt="Logo aziendale">`
-            : `<span class="letterhead-logo-fallback">AM</span>`
-        }
+        ${company.logoUrl
+        ? `<img src="${company.logoUrl}" alt="Logo aziendale">`
+        : `<span class="letterhead-logo-fallback">AM</span>`
+      }
       </div>
       <div>
         <h1>${this.escapeHtml(company.legalName || 'AudioMax')}</h1>
@@ -9848,9 +10335,11 @@ export class SectionPageComponent {
         return;
       }
 
-      setTimeout(() => {
+      // ✅ Fix REV-008: salva handle timeout Blob 60s per cleanup DestroyRef
+      const t60 = setTimeout(() => {
         URL.revokeObjectURL(htmlBlobUrl);
       }, 60_000);
+      this.blobTimers.add(t60);
     }
 
     if (typeof popup.focus === 'function') {
@@ -9927,6 +10416,12 @@ export class SectionPageComponent {
 
     this.editingAppointmentId.set(record.id);
     this.selectedAppointmentId.set(record.id);
+    // ✅ Fix ISS-01: valorizza il signal multi-select dei tecnici
+    // (invece di passare un array al form control, che ora è stringa semplice)
+    const techniciansArr = record.technician
+      ? record.technician.split(',').map((t) => t.trim()).filter(Boolean)
+      : [];
+    this.selectedTechnicians.set(techniciansArr);
     this.appointmentForm.setValue({
       title: record.title,
       customerName: record.customerName,
@@ -9935,7 +10430,8 @@ export class SectionPageComponent {
       address: record.address || '',
       scheduledAt: this.toDateTimeLocal(record.scheduledAt),
       durationMinutes: record.durationMinutes,
-      technician: record.technician ? record.technician.split(',').map((t) => t.trim()) : [],
+      // ✅ Fix ISS-01: technician è ora stringa semplice (es. "Marco, Luca")
+      technician: techniciansArr.join(', '),
       linkedQuoteId: record.linkedQuoteId ?? '',
       status: record.status,
     });
@@ -9975,6 +10471,8 @@ export class SectionPageComponent {
       salePrice: record.salePrice,
       supplier: record.supplier,
       location: record.location,
+      // ✅ Fix ISS-08: default OFF quando si modifica un prodotto esistente
+      syncCashPrices: false,
     });
   }
 
@@ -10197,6 +10695,10 @@ export class SectionPageComponent {
     this.quoteStageFilter.set((target?.value as 'tutte' | QuoteRecord['stage']) ?? 'tutte');
   }
 
+  protected setQuoteStageFilter(stage: 'tutte' | QuoteRecord['stage']): void {
+    this.quoteStageFilter.set(stage);
+  }
+
   protected updateQuoteClientLookup(event: Event): void {
     const target = event.target as HTMLInputElement | null;
     this.quoteClientLookup.set(target?.value ?? '');
@@ -10301,8 +10803,8 @@ export class SectionPageComponent {
     const lines =
       quote.lines?.length
         ? quote.lines
-            .map(
-              (line) => `
+          .map(
+            (line) => `
                 <tr>
                   <td>${this.escapeHtml(line.kind)}</td>
                   <td>${this.escapeHtml(line.description)}</td>
@@ -10311,8 +10813,8 @@ export class SectionPageComponent {
                   <td style="text-align:right">${line.vatRate}%</td>
                   <td style="text-align:right">€ ${this.quoteLineTotal(line).toLocaleString('it-IT')}</td>
                 </tr>`,
-            )
-            .join('')
+          )
+          .join('')
         : '<tr><td colspan="6">Nessuna riga inserita.</td></tr>';
 
     const html = `<!doctype html>
@@ -10369,11 +10871,10 @@ export class SectionPageComponent {
     <span>Totale preventivo</span>
     <strong>€ ${quote.value.toLocaleString('it-IT')}</strong>
   </div>
-  ${
-    quote.notes
-      ? `<div class="note"><strong>Note</strong><br>${this.escapeHtml(quote.notes)}</div>`
-      : ''
-  }
+  ${quote.notes
+        ? `<div class="note"><strong>Note</strong><br>${this.escapeHtml(quote.notes)}</div>`
+        : ''
+      }
 </body>
 </html>`;
 
@@ -10833,13 +11334,13 @@ export class SectionPageComponent {
     const fallbackSegments = validSegments.length
       ? validSegments
       : [
-          {
-            label: 'Nessun dato',
-            value: 1,
-            detail: 'Nessun valore disponibile al momento',
-            color: '#cbd5e1',
-          },
-        ];
+        {
+          label: 'Nessun dato',
+          value: 1,
+          detail: 'Nessun valore disponibile al momento',
+          color: '#cbd5e1',
+        },
+      ];
     const total = validSegments.reduce((sum, segment) => sum + segment.value, 0);
     let cursor = 0;
 
@@ -10910,12 +11411,12 @@ export class SectionPageComponent {
         return 'incroci moduli collegamenti fornitori servizi clienti magazzino cassa';
       case 'commerciale':
         return 'commerciale crm clienti preventivi conversione servizi vendite fidelizzazione';
-      case 'operativita':
-        return 'operativita agenda ticket tecnico magazzino consumi movimenti stock';
+      case 'operatività':
+        return 'operatività agenda ticket tecnico magazzino consumi movimenti stock';
       case 'amministrazione':
         return 'amministrazione cassa contanti pos bonifico misto spese fornitori rate';
       case 'alert':
-        return 'alert priorita insoluti urgenze scorte agenda criticita';
+        return 'alert priorità insoluti urgenze scorte agenda criticità';
     }
   }
 
@@ -10961,7 +11462,7 @@ export class SectionPageComponent {
         'destinazione',
         'rotoli',
         'metri_per_rotolo',
-        'quantita',
+        'quantità',
         'prezzo_acquisto',
         'prezzo_rivendita',
         'fornitore',
@@ -11472,12 +11973,12 @@ export class SectionPageComponent {
     this.editingQuoteId.set(null);
     this.quoteClientLookup.set('');
     this.runWithoutDraftSync('quote', () => {
-        this.quoteForm.reset({
-          issueDate: new Date().toISOString().slice(0, 10),
-          customerName: '',
-          isAnonymous: false,
-          discountAmount: 0,
-          customerPhone: '',
+      this.quoteForm.reset({
+        issueDate: new Date().toISOString().slice(0, 10),
+        customerName: '',
+        isAnonymous: false,
+        discountAmount: 0,
+        customerPhone: '',
         customerEmail: '',
         customerAddress: '',
         customerTaxId: '',
@@ -11669,11 +12170,14 @@ export class SectionPageComponent {
         address: '',
         scheduledAt: '',
         durationMinutes: 60,
-        technician: [],
+        // ✅ Fix ISS-01: technician stringa vuota
+        technician: '',
         linkedQuoteId: '',
         status: 'programmato',
       });
     });
+    // ✅ Fix ISS-01: resetta anche il signal dedicato alla UI multi-select
+    this.selectedTechnicians.set([]);
   }
 
   private resetInventoryForm(): void {
@@ -11692,6 +12196,8 @@ export class SectionPageComponent {
       salePrice: 0,
       supplier: '',
       location: '',
+      // ✅ Fix ISS-08: default OFF (non toccare il listino cassa a meno di scelta esplicita)
+      syncCashPrices: false,
     });
   }
 
@@ -11717,6 +12223,11 @@ export class SectionPageComponent {
         description: '',
         amountGross: 0,
         vatRate: 22,
+        // ⭐ Default IVA Italia: importo inserito = già ivato (fattura standard)
+        // + scorpora IVA automaticamente. Reverse charge spento (caso marginale).
+        amountAlreadyIvato: true,
+        amountSplitVat: true,
+        amountIsReverseCharge: false,
         expenseDate: new Date().toISOString().slice(0, 10),
         dueDate: new Date().toISOString().slice(0, 10),
         categoryId: '',
@@ -11725,6 +12236,12 @@ export class SectionPageComponent {
         paymentMode: 'singolo',
         recurringFrequency: null,
         paymentMethodId: '',
+        // ⭐ Default Pagamento Provider: nessun provider linkato · manuale (default sicuro)
+        // L'utente sceglie poi se usare Stripe (automatico) o altro.
+        paymentProviderId: '',
+        paymentExecution: 'manuale',
+        paymentAutoStartDate: new Date().toISOString().slice(0, 10),
+        paymentNotes: '',
         installmentsCount: 1,
         noticeDaysBefore: 7,
         notes: '',
@@ -11767,6 +12284,8 @@ export class SectionPageComponent {
         transportCost: 0,
         customsCost: 0,
         packagingCost: 0,
+        // ✅ Fix ISS-08: default OFF (non sovrascrive listino cassa)
+        syncCashPrices: false,
       });
     });
     this.syncWarehouseReceiptCategoryState();
@@ -11983,7 +12502,11 @@ export class SectionPageComponent {
   private pushToast(message: string, tone: 'success' | 'error'): void {
     this.toastMessage.set(message);
     this.toastTone.set(tone);
-    setTimeout(() => {
+    // ✅ Fix REV-007: salva handle toastTimer e ripulisci precedente
+    if (this.toastTimer !== undefined) {
+      clearTimeout(this.toastTimer);
+    }
+    this.toastTimer = setTimeout(() => {
       if (this.toastMessage() === message) {
         this.toastMessage.set(null);
       }
@@ -12020,13 +12543,13 @@ export class SectionPageComponent {
     if (line.pricingMode === 'ora') return 'ore';
     if (line.pricingMode === 'mezzora') return 'mezze ore';
     if (line.pricingMode === 'quarto') return 'quarti d’ora';
-    if (line.pricingMode === 'quantita') return 'pz';
+    if (line.pricingMode === 'quantità') return 'pz';
     return 'voce';
   }
 
   protected pricingModeLabel(mode: CashRegisterProductRecord['pricingMode']): string {
     if (mode === 'fisso') return 'prezzo fisso';
-    if (mode === 'quantita') return 'quantità';
+    if (mode === 'quantità') return 'quantità';
     if (mode === 'ora') return 'all’ora';
     if (mode === 'mezzora') return 'a mezz’ora';
     return 'a quarto d’ora';
@@ -12034,7 +12557,7 @@ export class SectionPageComponent {
 
   protected pricingModeHint(mode: CashRegisterProductRecord['pricingMode']): string {
     if (mode === 'fisso') return 'Importo unico, non dipende dalle unità.';
-    if (mode === 'quantita') return 'Totale = prezzo × quantità.';
+    if (mode === 'quantità') return 'Totale = prezzo × quantità.';
     if (mode === 'ora') return 'Totale = prezzo × ore.';
     if (mode === 'mezzora') return 'Totale = prezzo × mezze ore.';
     return 'Totale = prezzo × quarti d’ora.';
@@ -12129,12 +12652,12 @@ export class SectionPageComponent {
     const billingProfile =
       quote.customerTaxId || quote.customerPec || quote.customerSdiCode || quote.customerAddress
         ? {
-            kind: 'azienda' as const,
-            taxId: quote.customerTaxId ?? '',
-            sdiCode: quote.customerSdiCode ?? '',
-            pec: quote.customerPec ?? '',
-            billingAddress: quote.customerAddress ?? '',
-          }
+          kind: 'azienda' as const,
+          taxId: quote.customerTaxId ?? '',
+          sdiCode: quote.customerSdiCode ?? '',
+          pec: quote.customerPec ?? '',
+          billingAddress: quote.customerAddress ?? '',
+        }
         : undefined;
 
     if (existingClient) {
@@ -12276,16 +12799,16 @@ export class SectionPageComponent {
     const profile = options.existingProfile
       ? { ...options.existingProfile }
       : createClientPrivacyProfile({
-          channel,
-          operator,
-          lawfulBasis: 'contratto',
-          noticeAcknowledged: options.noticeAcknowledged,
-          emailMarketing: options.emailMarketing,
-          whatsappMarketing: options.whatsappMarketing,
-          fidelityProfiling: options.fidelityProfiling,
-          remoteConsentStatus: shouldPrepareRemoteConsent ? 'da-inviare' : 'non-inviato',
-          remoteConsentUrl: shouldPrepareRemoteConsent ? generatedUrl : null,
-        });
+        channel,
+        operator,
+        lawfulBasis: 'contratto',
+        noticeAcknowledged: options.noticeAcknowledged,
+        emailMarketing: options.emailMarketing,
+        whatsappMarketing: options.whatsappMarketing,
+        fidelityProfiling: options.fidelityProfiling,
+        remoteConsentStatus: shouldPrepareRemoteConsent ? 'da-inviare' : 'non-inviato',
+        remoteConsentUrl: shouldPrepareRemoteConsent ? generatedUrl : null,
+      });
 
     if (options.existingProfile) {
       profile.noticeAcknowledged = options.noticeAcknowledged;
@@ -12394,10 +12917,10 @@ export class SectionPageComponent {
           archive: client.privacyProfile.archive.map((entry) =>
             entry.type === 'consenso-remoto' && entry.url === client.privacyProfile.remoteConsentUrl
               ? {
-                  ...entry,
-                  status: 'inviato',
-                  createdAt: timestamp,
-                }
+                ...entry,
+                status: 'inviato',
+                createdAt: timestamp,
+              }
               : entry,
           ),
         },
@@ -12635,16 +13158,20 @@ export class SectionPageComponent {
           a.download = `etichetta-${safeName}.png`;
           document.body.appendChild(a);
           a.click();
-          setTimeout(() => {
+          // ✅ Fix REV-008: salva handle timeout Blob 150ms nel Set
+          const t150 = setTimeout(() => {
             document.body.removeChild(a);
             URL.revokeObjectURL(dl);
           }, 150);
+          this.blobTimers.add(t150);
         },
         'image/png',
         1.0,
       );
     } finally {
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      // ✅ Fix REV-008: salva handle timeout Blob 2s nel Set
+      const t2s = setTimeout(() => URL.revokeObjectURL(url), 2000);
+      this.blobTimers.add(t2s);
     }
   }
 
