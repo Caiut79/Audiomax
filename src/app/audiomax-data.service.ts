@@ -304,6 +304,8 @@ export class AudiomaxDataService {
   private localPersistTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPersistedState: string | null = null;
   private lastPersistedState = '';
+  /** AbortController per cancellare richieste pushToServer sovrapposte o stale */
+  private pushAbortController: AbortController | null = null;
   readonly currentUserRole = signal<AppUserRole>('admin');
 
   readonly clients = signal<ClientRecord[]>(initialAudiomaxState.clients);
@@ -623,6 +625,9 @@ export class AudiomaxDataService {
     effect(() => {
       this.scheduleLocalPersist(this.serializeSnapshot());
     });
+
+    // Garantisce l'ultima sincronizzazione dello stato quando la pagina viene chiusa/ricaricata
+    window.addEventListener('beforeunload', () => this.pushFinalStateOnUnload());
 
     // Carica lo stato condiviso dal server LAN (per sincronizzare PC ↔ telefono)
     // e poi reinvia lo stato locale per assicurare che il server sia aggiornato
@@ -3039,14 +3044,47 @@ export class AudiomaxDataService {
    */
   private async pushToServer(serializedState: string): Promise<void> {
     if (!this.isLanSyncEnabled) return;
+
+    // Cancello eventuali richieste precedenti ancora in volo per evitare sovrapposizioni
+    if (this.pushAbortController) {
+      this.pushAbortController.abort();
+    }
+    this.pushAbortController = new AbortController();
+
+    // keepalive ha un limite di 64KB per il body: se lo stato è più grande, uso una fetch normale
+    const bodySize = new Blob([serializedState]).size;
+    const canUseKeepalive = bodySize < 64 * 1024;
+
     try {
       await fetch('/api/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: serializedState,
+        // keepalive permette alla richiesta di completarsi anche se la pagina viene ricaricata/chiusa
+        keepalive: canUseKeepalive,
+        signal: this.pushAbortController.signal,
       });
+    } catch (err) {
+      // Ignoro errori di abort (richiesta cancellata da una push più recente)
+      // e errori di rete (server non disponibile): i dati restano salvati in locale
+      if ((err as DOMException)?.name === 'AbortError') return;
+    } finally {
+      this.pushAbortController = null;
+    }
+  }
+
+  /**
+   * Invia lo stato al server usando sendBeacon (affidabile durante l'unload della pagina).
+   * Usato nel beforeunload per garantire l'ultima sincronizzazione.
+   */
+  private pushFinalStateOnUnload(): void {
+    if (!this.isLanSyncEnabled) return;
+    try {
+      const state = this.serializeSnapshot();
+      const blob = new Blob([state], { type: 'application/json' });
+      navigator.sendBeacon('/api/state', blob);
     } catch {
-      // Server non disponibile: i dati restano salvati in locale
+      // sendBeacon non disponibile o fallito: i dati restano in locale
     }
   }
 
