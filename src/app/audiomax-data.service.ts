@@ -626,9 +626,6 @@ export class AudiomaxDataService {
       this.scheduleLocalPersist(this.serializeSnapshot());
     });
 
-    // Garantisce l'ultima sincronizzazione dello stato quando la pagina viene chiusa/ricaricata
-    window.addEventListener('beforeunload', () => this.pushFinalStateOnUnload());
-
     // Carica lo stato condiviso dal server LAN (per sincronizzare PC ↔ telefono)
     // e poi reinvia lo stato locale per assicurare che il server sia aggiornato
     void this.loadFromServer().then(() => {
@@ -3070,21 +3067,6 @@ export class AudiomaxDataService {
       if ((err as DOMException)?.name === 'AbortError') return;
     } finally {
       this.pushAbortController = null;
-    }
-  }
-
-  /**
-   * Invia lo stato al server usando sendBeacon (affidabile durante l'unload della pagina).
-   * Usato nel beforeunload per garantire l'ultima sincronizzazione.
-   */
-  private pushFinalStateOnUnload(): void {
-    if (!this.isLanSyncEnabled) return;
-    try {
-      const state = this.serializeSnapshot();
-      const blob = new Blob([state], { type: 'application/json' });
-      navigator.sendBeacon('/api/state', blob);
-    } catch {
-      // sendBeacon non disponibile o fallito: i dati restano in locale
     }
   }
 
