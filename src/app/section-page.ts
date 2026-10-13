@@ -3,6 +3,8 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
+  ViewChild,
   WritableSignal,
   computed,
   effect,
@@ -17,6 +19,7 @@ import { map, merge, startWith } from 'rxjs';
 import { BrowserStorageService } from './browser-storage.service';
 
 import { AudiomaxDataService } from './audiomax-data.service';
+import { EpScannerService } from './ep-scanner.service';
 import { crmModuleContent } from './crm-module-content';
 import { FormDraftService } from './form-draft.service';
 import { PrivacyDispatchService } from './privacy-dispatch.service';
@@ -322,6 +325,7 @@ export class SectionPageComponent {
   // ✅ Fix ISS-29: uso BrowserStorageService centralizzato (già fornito SSR-safe)
   // invece di localStorage diretto in 4 punti del component.
   private readonly storage = inject(BrowserStorageService);
+  protected readonly epScanner = inject(EpScannerService);
 
   protected readonly section = toSignal(
     this.route.data.pipe(
@@ -604,6 +608,12 @@ export class SectionPageComponent {
       vatRate: 22,
     },
   ]);
+  /**
+   * Insieme degli ID delle righe preventivo in modalità "Altro" (testo libero).
+   * Se un ID è presente, la riga usa un input testo libero invece del dropdown
+   * dei servizi/prodotti esistenti.
+   */
+  protected readonly quoteLineFreeTextIds = signal<Set<string>>(new Set());
   protected readonly expensePaymentModeFilter = signal<'tutte' | ExpenseRecord['paymentMode']>('tutte');
   protected readonly expenseSupplierFilter = signal('tutti');
   protected readonly cashSalesMode = signal<'servizi' | 'rivendita' | 'preventivi'>('servizi');
@@ -5488,6 +5498,7 @@ export class SectionPageComponent {
 
   /** Definizione delle tab del portale (barra sticky inferiore) */
   protected readonly epTabs = [
+    { id: 'dashboard' as const, label: 'Home', icon: '🏠' },
     { id: 'magazzino' as const, label: 'Magazzino', icon: '📦' },
     { id: 'ddt' as const, label: 'DDT', icon: '🚚' },
     { id: 'servizi' as const, label: 'Servizi', icon: '💶' },
@@ -5498,8 +5509,8 @@ export class SectionPageComponent {
 
   /** Tab attualmente selezionata (persistenza in sessione per ricaricamenti pagina) */
   protected readonly epActiveTab = signal<
-    'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'
-  >('magazzino');
+    'dashboard' | 'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'
+  >('dashboard');
 
   /** Visibilità modale "Link telefono / QR" (header) */
   protected epOpenMobilePanel = false;
@@ -5507,14 +5518,14 @@ export class SectionPageComponent {
   // ✅ EP v3: Menu hamburger drawer (navigazione portale dedicato, niente voci gestionali complete!)
   protected readonly epNavDrawerOpen = signal(false);
 
-  // Home: vista portale principale (tab magazzino + sommario)
+  // Home: vista portale principale (tab dashboard + sommario)
   protected epResetPortalView(): void {
-    this.epActiveTab.set('magazzino');
+    this.epActiveTab.set('dashboard');
     this.epNavDrawerOpen.set(false);
     this.epSelectedCommId.set(null);
   }
 
-  protected epGotoTab(id: 'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'): void {
+  protected epGotoTab(id: 'dashboard' | 'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'): void {
     this.epActiveTab.set(id);
     this.epSelectedCommId.set(null);
     this.epNavDrawerOpen.set(false);
@@ -5654,7 +5665,7 @@ export class SectionPageComponent {
   protected epLogout(): void {
     try { this.storage.removeItem(this.EP_SESSION_STORAGE_KEY); } catch { /* ignore */ }
     this.epSession.set(null);
-    this.epActiveTab.set('magazzino');
+    this.epActiveTab.set('dashboard');
   }
 
   /** Helper UUID compatibile. */
@@ -5858,6 +5869,37 @@ export class SectionPageComponent {
     return groups.filter((g) => g.items.length > 0);
   });
 
+  // ============ DASHBOARD: statistiche rapide ============
+  /** Numero di appuntamenti di oggi per il tecnico */
+  protected readonly epDashboardTodayAppts = computed(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    return this.epMyAgendaAppts().filter((a) => a.scheduledAt.slice(0, 10) === todayIso).length;
+  });
+
+  /** Numero di articoli in giacenza sotto la soglia minima */
+  protected readonly epDashboardLowStock = computed(() =>
+    this.allInventoryItems().filter((it) => it.stock <= it.minStock).length,
+  );
+
+  /** Numero di ordini in attesa (pending/seen) creati dal tecnico */
+  protected readonly epDashboardPendingOrders = computed(() =>
+    this.epMieiOrdini().filter((o) => o.status === 'pending' || o.status === 'seen').length,
+  );
+
+  /** Numero di comunicazioni non lette per il tecnico */
+  protected readonly epDashboardUnreadComms = computed(() => {
+    const me = this.epSessionOperator();
+    if (!me) return 0;
+    return this.data.portalCommunications().filter(
+      (c) => c.targetTechnicianIds.includes(me.id) && !c.readBy.some((r) => r.operatorId === me.id),
+    ).length;
+  });
+
+  /** Data odierna formattata (per la dashboard) */
+  protected readonly epDashboardToday = computed(() =>
+    this.epFormatDate(new Date().toISOString()),
+  );
+
   protected epAppointmentTypeLabel(t: AppointmentRecord['appointmentType']): string {
     switch (t) {
       case 'negozio': return 'In negozio';
@@ -5903,6 +5945,9 @@ export class SectionPageComponent {
   /** Bozza locale delle righe del preventivo che il tecnico sta modificando */
   protected readonly epQuoteLineDraft = signal<QuoteLineRecord[]>([]);
 
+  /** Insieme degli ID delle righe preventivo (portale dipendenti) in modalità testo libero */
+  protected readonly epQuoteLineFreeTextIds = signal<Set<string>>(new Set());
+
   /** Restituisce il preventivo collegato a un appuntamento, se esiste */
   protected epQuoteForAppointment(appt: AppointmentRecord): QuoteRecord | null {
     if (!appt.linkedQuoteId) return null;
@@ -5917,9 +5962,29 @@ export class SectionPageComponent {
       return;
     }
     // Copia profonda delle righe esistenti (o array vuoto)
-    this.epQuoteLineDraft.set(
-      (quote.lines ?? []).map((l) => ({ ...l })),
-    );
+    const lines = (quote.lines ?? []).map((l) => ({ ...l }));
+    this.epQuoteLineDraft.set(lines);
+
+    // Per ogni riga, verifica se la descrizione corrisponde a un articolo/servizio esistente.
+    // Se non corrisponde, attiva la modalità testo libero per mostrare il valore originale.
+    const freeTextIds = new Set<string>();
+    for (const line of lines) {
+      if (line.kind === 'materiale') {
+        const match = this.allInventoryItems().some(
+          (it) => it.name.toLowerCase() === line.description.toLowerCase(),
+        );
+        if (!match && line.description.trim()) freeTextIds.add(line.id);
+      } else if (line.kind === 'servizio') {
+        const match = this.services().some(
+          (s) => s.name.toLowerCase() === line.description.toLowerCase(),
+        );
+        if (!match && line.description.trim()) freeTextIds.add(line.id);
+      } else {
+        // 'altro' è sempre testo libero
+        freeTextIds.add(line.id);
+      }
+    }
+    this.epQuoteLineFreeTextIds.set(freeTextIds);
     this.epEditingQuoteApptId.set(appt.id);
   }
 
@@ -5927,6 +5992,22 @@ export class SectionPageComponent {
   protected epCloseQuoteEditor(): void {
     this.epEditingQuoteApptId.set(null);
     this.epQuoteLineDraft.set([]);
+    this.epQuoteLineFreeTextIds.set(new Set());
+  }
+
+  /** Attiva/disattiva la modalità testo libero per una riga (portale dipendenti) */
+  protected epToggleQuoteLineFreeText(id: string): void {
+    this.epQuoteLineFreeTextIds.update((set) => {
+      const next = new Set(set);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** Restituisce true se la riga è in modalità testo libero (portale dipendenti) */
+  protected epIsQuoteLineFreeText(id: string): boolean {
+    return this.epQuoteLineFreeTextIds().has(id);
   }
 
   /** Aggiorna un campo di una riga della bozza */
@@ -5938,8 +6019,38 @@ export class SectionPageComponent {
     this.epQuoteLineDraft.update((lines) =>
       lines.map((line) => {
         if (line.id !== id) return line;
-        if (field === 'description') return { ...line, description: value };
-        if (field === 'kind') return { ...line, kind: value as QuoteLineRecord['kind'] };
+        if (field === 'description') {
+          // Se l'utente seleziona "Altro (scrittura libera)" dal dropdown
+          if (value === '__altro__') {
+            this.epQuoteLineFreeTextIds.update((set) => {
+              if (set.has(id)) return set;
+              const next = new Set(set);
+              next.add(id);
+              return next;
+            });
+            return { ...line, description: '' };
+          }
+          return { ...line, description: value };
+        }
+        if (field === 'kind') {
+          const newKind = value as QuoteLineRecord['kind'];
+          if (newKind === 'altro') {
+            this.epQuoteLineFreeTextIds.update((set) => {
+              if (set.has(id)) return set;
+              const next = new Set(set);
+              next.add(id);
+              return next;
+            });
+          } else {
+            this.epQuoteLineFreeTextIds.update((set) => {
+              if (!set.has(id)) return set;
+              const next = new Set(set);
+              next.delete(id);
+              return next;
+            });
+          }
+          return { ...line, kind: newKind };
+        }
         const numeric = Number(value) || 0;
         if (field === 'quantity') return { ...line, quantity: Math.max(0, numeric) };
         if (field === 'unitPrice') return { ...line, unitPrice: Math.max(0, numeric) };
@@ -5967,6 +6078,10 @@ export class SectionPageComponent {
 
   /** Rimuove una riga dalla bozza */
   protected epRemoveDraftLine(id: string): void {
+    // 🛡️ Conferma di sicurezza: evita eliminazioni accidentali
+    const line = this.epQuoteLineDraft().find((l) => l.id === id);
+    const msg = `Rimuovere la riga "${line?.description || '(senza descrizione)'}" dal preventivo?\n\nQuesta azione non può essere annullata.`;
+    if (!window.confirm(msg)) return;
     this.epQuoteLineDraft.update((lines) => lines.filter((l) => l.id !== id));
   }
 
@@ -6610,6 +6725,11 @@ export class SectionPageComponent {
 
   protected epDdtRemoveLine(i: number): void {
     if (this.epDdtLines.length <= 1) return;
+    // 🛡️ Conferma di sicurezza: evita eliminazioni accidentali
+    const ctrl = this.epDdtLines.at(i) as FormGroup;
+    const desc = ctrl?.get('description')?.value || '(senza descrizione)';
+    const msg = `Rimuovere la riga "${desc}" dal DDT?\n\nQuesta azione non può essere annullata.`;
+    if (!window.confirm(msg)) return;
     this.epDdtLines.removeAt(i);
   }
 
@@ -6647,6 +6767,65 @@ export class SectionPageComponent {
     this.epDdtLines.push(line);
     this.epDdtClienteSearch.set('');
     this.epDdtEditorVisible.set(true);
+  }
+
+  /**
+   * Crea un DDT precompilato a partire da un preventivo.
+   * Vengono importate solo le righe di tipo 'materiale' (i servizi non vanno nel DDT).
+   * Utile per le installazioni esterne: il tecnico apre il DDT già popolato e lo modifica in corso d'opera.
+   */
+  protected epOpenDdtFromQuote(quoteId: string): void {
+    const quote = this.allQuotes().find((q) => q.id === quoteId);
+    if (!quote) {
+      this.pushToast('Preventivo non trovato', 'error');
+      return;
+    }
+
+    // Filtra solo le righe materiale
+    const materialLines = (quote.lines ?? []).filter((l) => l.kind === 'materiale');
+
+    if (materialLines.length === 0) {
+      this.pushToast('Il preventivo non contiene righe materiale da trasportare', 'error');
+      return;
+    }
+
+    // Resetta il form e popola con i dati del preventivo
+    while (this.epDdtLines.length) this.epDdtLines.removeAt(0);
+
+    for (const line of materialLines) {
+      const fg = this.epMakeDdtLine();
+      // Cerca l'articolo corrispondente nel magazzino per nome
+      const matched = this.allInventoryItems().find(
+        (it) => it.name.toLowerCase() === line.description.toLowerCase(),
+      );
+      fg.patchValue({
+        inventoryItemId: matched?.id ?? '',
+        description: line.description,
+        search: line.description,
+        quantity: line.quantity,
+      });
+      this.epDdtLines.push(fg);
+    }
+
+    // Cerca il cliente collegato al preventivo
+    const client = quote.clientId
+      ? this.allClients().find((c) => c.id === quote.clientId) ?? null
+      : null;
+
+    this.epDdtForm.patchValue({
+      clientSearch: client?.name ?? quote.customerName ?? '',
+      clientId: client?.id ?? '',
+      destination: quote.fulfillmentAddress || quote.customerAddress || '',
+      note: `Installazione: ${quote.projectType}${quote.notes ? ' — ' + quote.notes : ''}`,
+      alsoDeduct: true,
+    });
+    this.epDdtClienteSearch.set(client?.name ?? quote.customerName ?? '');
+    this.epDdtEditorVisible.set(true);
+
+    this.pushToast(
+      `DDT precompilato dal preventivo (${materialLines.length} righe materiale). Modificalo se necessario.`,
+      'success',
+    );
   }
 
   protected epCloseDdtEditor(): void {
@@ -6744,6 +6923,10 @@ export class SectionPageComponent {
   });
 
   protected epDdtSetStatus(ddt: any, next: 'bozza' | 'emesso' | 'consegnato'): void {
+    // 🛡️ Conferma per il cambio stato del DDT (modifica)
+    const statusLabel = next === 'bozza' ? 'Bozza' : next === 'emesso' ? 'Emesso' : 'Consegnato';
+    const msg = `Cambiare lo stato del DDT in "${statusLabel}"?`;
+    if (!window.confirm(msg)) return;
     this.data.updateWarehouseDdtStatus(ddt.id, next);
   }
 
@@ -6903,6 +7086,84 @@ export class SectionPageComponent {
   protected readonly epOrderClienteSearch = signal<string>('');
   protected readonly epOrderLastConfirmMessage = signal<string>('');
 
+  // ===== SCANNER BARCODE / QR CODE (fotocamera) =====
+  /** True se il modale scanner è aperto */
+  protected readonly epScannerVisible = signal<boolean>(false);
+  /** Indica dove applicare il risultato: 'ordini' (riga ordine corrente) o 'magazzino' (ricerca) */
+  protected readonly epScannerTarget = signal<'ordini' | 'magazzino'>('ordini');
+  /** Indice della riga ordine da riempire quando lo scanner è in target 'ordini' */
+  protected readonly epScannerOrderLineIndex = signal<number>(0);
+  /** Ultimo testo scannerizzato (mostrato in anteprima nel modale) */
+  protected readonly epScannerDetected = signal<string>('');
+  /** Riferimento all'elemento video del modale scanner */
+  @ViewChild('epScannerVideo') protected epScannerVideoRef?: ElementRef<HTMLVideoElement>;
+
+  /** Apre il modale scanner e avvia la fotocamera */
+  protected epOpenScanner(target: 'ordini' | 'magazzino', orderLineIndex = 0): void {
+    this.epScannerTarget.set(target);
+    this.epScannerOrderLineIndex.set(orderLineIndex);
+    this.epScannerDetected.set('');
+    this.epScannerVisible.set(true);
+    // Piccolo delay per assicurarsi che il video element sia renderizzato
+    setTimeout(() => this.epStartScanner(), 150);
+  }
+
+  /** Avvia la decodifica sulla fotocamera */
+  private epStartScanner(): void {
+    const video = this.epScannerVideoRef?.nativeElement ?? null;
+    if (!video) return;
+    this.epScanner.start(video, (text) => this.epHandleScanResult(text));
+  }
+
+  /** Chiude il modale scanner e ferma la fotocamera */
+  protected epCloseScanner(): void {
+    this.epScanner.stop();
+    this.epScannerVisible.set(false);
+  }
+
+  /** Callback quando un codice viene rilevato: cerca l'articolo e lo applica al target */
+  private epHandleScanResult(text: string): void {
+    const code = String(text ?? '').trim();
+    this.epScannerDetected.set(code);
+    if (!code) return;
+
+    // Cerco l'articolo per barcode o sku
+    const item = this.data.inventoryItems().find(
+      (it) =>
+        it.barcode?.trim().toLowerCase() === code.toLowerCase() ||
+        it.sku?.trim().toLowerCase() === code.toLowerCase(),
+    );
+
+    const target = this.epScannerTarget();
+    if (target === 'ordini') {
+      const idx = this.epScannerOrderLineIndex();
+      const ctrl = this.epOrderLines.at(idx) as FormGroup | undefined;
+      if (ctrl) {
+        if (item) {
+          ctrl.patchValue({
+            inventoryItemId: item.id,
+            description: item.name,
+            search: item.name,
+          });
+          this.pushToast(`Articolo trovato: ${item.name}`, 'success');
+        } else {
+          // Codice non in anagrafica: uso come descrizione libera
+          ctrl.patchValue({ description: code, search: code, inventoryItemId: '' });
+          this.pushToast(`Codice ${code} non in catalogo, inserito come descrizione`, 'success');
+        }
+      }
+    } else if (target === 'magazzino') {
+      // Nel magazzino uso il codice come termine di ricerca
+      this.epWarehouseSearch.set(code);
+      if (item) {
+        this.pushToast(`Trovato: ${item.name}`, 'success');
+      }
+    }
+
+    // Chiudo automaticamente dopo una breve pausa per dare feedback visivo
+    setTimeout(() => this.epCloseScanner(), 600);
+  }
+
   private epMakeOrderLine(): FormGroup {
     return this.formBuilder.nonNullable.group({
       search: [''],
@@ -6953,7 +7214,7 @@ export class SectionPageComponent {
 
   protected epOrderLineSuggestions(i: number): InventoryItemRecord[] {
     const ctrl = this.epOrderLines.at(i) as FormGroup;
-    const q = String(ctrl.get('search')?.value ?? '').trim().toLowerCase();
+    const q = String(ctrl.get('description')?.value ?? '').trim().toLowerCase();
     if (!q) return [];
     return this.allInventoryItems()
       .filter((it) => {
@@ -6972,12 +7233,12 @@ export class SectionPageComponent {
     });
   }
 
-  /** Sincronizza il campo libero "search" con "description" per la riga ordine i (evita required description vuota in inserimento manuale) */
-  protected epOrderLineSyncDescription(i: number): void {
+  /** Sincronizza il campo "search" con "description" per i suggerimenti */
+  protected epOrderLineSyncSearch(i: number): void {
     const ctrl = this.epOrderLines.at(i) as FormGroup;
-    const searchVal = String(ctrl.get('search')?.value ?? '').trim();
-    if (searchVal !== ctrl.get('description')?.value) {
-      ctrl.get('description')?.setValue(searchVal, { emitEvent: false });
+    const descVal = String(ctrl.get('description')?.value ?? '').trim();
+    if (descVal !== ctrl.get('search')?.value) {
+      ctrl.get('search')?.setValue(descVal, { emitEvent: false });
     }
   }
 
@@ -8552,6 +8813,7 @@ export class SectionPageComponent {
   protected openQuoteModal(): void {
     this.resetQuoteForm();
     this.restoreFormDraft('quote', this.quoteForm);
+    this.quoteLineFreeTextIds.set(new Set());
     this.quoteModalOpen.set(true);
   }
 
@@ -8592,6 +8854,27 @@ export class SectionPageComponent {
     });
 
     this.quoteDraftLines.set(quote.lines || []);
+
+    // Imposta la modalità testo libero per le righe che non corrispondono a
+    // articoli/servizi esistenti (per mostrare il valore originale nel dropdown)
+    const freeTextIds = new Set<string>();
+    for (const line of (quote.lines || [])) {
+      if (line.kind === 'materiale') {
+        const match = this.allInventoryItems().some(
+          (it) => it.name.toLowerCase() === line.description.toLowerCase(),
+        );
+        if (!match && line.description.trim()) freeTextIds.add(line.id);
+      } else if (line.kind === 'servizio') {
+        const match = this.services().some(
+          (s) => s.name.toLowerCase() === line.description.toLowerCase(),
+        );
+        if (!match && line.description.trim()) freeTextIds.add(line.id);
+      } else {
+        freeTextIds.add(line.id);
+      }
+    }
+    this.quoteLineFreeTextIds.set(freeTextIds);
+
     this.quoteModalOpen.set(true);
   }
 
@@ -14030,10 +14313,44 @@ export class SectionPageComponent {
   }
 
   protected removeQuoteDraftLine(id: string): void {
+    // 🛡️ Conferma di sicurezza: evita eliminazioni accidentali
+    const line = this.quoteDraftLines().find((l) => l.id === id);
+    if (line && this.quoteDraftLines().length > 1) {
+      const msg = `Eliminare la riga "${line.description || '(senza descrizione)'}"?\n\nQuesta azione non può essere annullata.`;
+      if (!window.confirm(msg)) return;
+    }
     this.quoteDraftLines.update((lines) => {
       const next = lines.filter((line) => line.id !== id);
       return next.length ? next : lines;
     });
+    // Pulisce anche l'ID dal set delle righe in modalità testo libero
+    this.quoteLineFreeTextIds.update((set) => {
+      if (!set.has(id)) return set;
+      const next = new Set(set);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  /**
+   * Attiva/disattiva la modalità testo libero per una riga preventivo.
+   * Quando attiva, la riga usa un input testo invece del dropdown dei servizi/prodotti.
+   */
+  protected toggleQuoteLineFreeText(id: string): void {
+    this.quoteLineFreeTextIds.update((set) => {
+      const next = new Set(set);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  /** Restituisce true se la riga è in modalità testo libero ("Altro") */
+  protected isQuoteLineFreeText(id: string): boolean {
+    return this.quoteLineFreeTextIds().has(id);
   }
 
   protected updateQuoteDraftLine(
@@ -14048,11 +14365,40 @@ export class SectionPageComponent {
         }
 
         if (field === 'description') {
+          // Se l'utente seleziona "Altro (scrittura libera)" dal dropdown,
+          // attiva la modalità testo libero e pulisce la descrizione
+          if (value === '__altro__') {
+            this.quoteLineFreeTextIds.update((set) => {
+              if (set.has(id)) return set;
+              const next = new Set(set);
+              next.add(id);
+              return next;
+            });
+            return { ...line, description: '' };
+          }
           return { ...line, description: value };
         }
 
         if (field === 'kind') {
-          return { ...line, kind: value as QuoteLineRecord['kind'] };
+          const newKind = value as QuoteLineRecord['kind'];
+          // Se il tipo è 'altro', attiva automaticamente la modalità testo libero
+          if (newKind === 'altro') {
+            this.quoteLineFreeTextIds.update((set) => {
+              if (set.has(id)) return set;
+              const next = new Set(set);
+              next.add(id);
+              return next;
+            });
+          } else {
+            // Se torna a servizio/materiale, disattiva il testo libero
+            this.quoteLineFreeTextIds.update((set) => {
+              if (!set.has(id)) return set;
+              const next = new Set(set);
+              next.delete(id);
+              return next;
+            });
+          }
+          return { ...line, kind: newKind };
         }
 
         const numeric = Number(value) || 0;

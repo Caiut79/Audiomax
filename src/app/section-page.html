@@ -1114,21 +1114,36 @@
                       </select>
                     </td>
                     <td>
-                      <input type="text" [attr.aria-label]="'Descrizione riga preventivo ' + line.id"
-                        [attr.list]="'quote-suggestions-' + line.id" [value]="line.description"
-                        (input)="updateQuoteDraftLine(line.id, 'description', $any($event.target).value)"
-                        placeholder="Cerca o digita...">
-                      <datalist [id]="'quote-suggestions-' + line.id">
+                      @if (isQuoteLineFreeText(line.id)) {
+                      <!-- Modalità "Altro": input testo libero -->
+                      <div class="quote-line-free-text">
+                        <input type="text" [attr.aria-label]="'Descrizione riga preventivo ' + line.id"
+                          [value]="line.description"
+                          (input)="updateQuoteDraftLine(line.id, 'description', $any($event.target).value)"
+                          placeholder="Descrizione libera...">
+                        <button type="button" class="btn-sm"
+                          (click)="toggleQuoteLineFreeText(line.id)" title="Torna all'elenco">
+                          ↩ Elenco
+                        </button>
+                      </div>
+                      } @else {
+                      <!-- Modalità normale: dropdown con servizi/prodotti esistenti -->
+                      <select [attr.aria-label]="'Seleziona ' + line.kind + ' per riga preventivo ' + line.id"
+                        [value]="line.description"
+                        (change)="updateQuoteDraftLine(line.id, 'description', $any($event.target).value)">
+                        <option value="">— Seleziona {{ line.kind === 'servizio' ? 'servizio' : line.kind === 'materiale' ? 'materiale' : 'voce' }} —</option>
                         @if (line.kind === 'servizio') {
                         @for (serv of services(); track serv.id) {
-                        <option [value]="serv.name"></option>
+                        <option [value]="serv.name">{{ serv.name }} (€ {{ serv.price.toLocaleString('it-IT', {maximumFractionDigits: 2}) }})</option>
                         }
                         } @else if (line.kind === 'materiale') {
                         @for (prod of allInventoryItems(); track prod.id) {
-                        <option [value]="prod.name"></option>
+                        <option [value]="prod.name">{{ prod.name }} (€ {{ prod.unitCost.toLocaleString('it-IT', {maximumFractionDigits: 2}) }})</option>
                         }
                         }
-                      </datalist>
+                        <option value="__altro__">✏️ Altro (scrittura libera)</option>
+                      </select>
+                      }
                     </td>
                     <td><input type="number" [attr.aria-label]="'Quantità riga preventivo ' + line.id"
                         [value]="line.quantity"
@@ -6440,10 +6455,6 @@
             <span class="ep-bell-badge">{{ epBellUnreadCount() > 99 ? '99+' : epBellUnreadCount() }}</span>
             }
           </button>
-          <button type="button" class="chip-btn chip-blue ep-chip-small" title="Apri portale sul telefono"
-            (click)="epOpenMobilePanel = true">
-            📱 Link telefono
-          </button>
           <button type="button" class="chip-btn chip-warning ep-chip-small" title="Esci dal portale"
             (click)="epLogout()">
             🚪 Esci
@@ -6535,12 +6546,115 @@
       </aside>
       }
 
+      <!-- Tab DASHBOARD (Home con collegamenti rapidi) -->
+      @if (epActiveTab() === 'dashboard') {
+      <section class="ep-tab-content ep-dashboard">
+        <!-- Saluto e data -->
+        <div class="ep-dashboard-hero">
+          <h2 class="ep-dashboard-greeting">
+            Ciao {{ (epSessionOperator()?.name?.split(' ') || [])[0] || 'tecnico' }} 👋
+          </h2>
+          <p class="ep-dashboard-date">{{ epDashboardToday() }}</p>
+        </div>
+
+        <!-- Statistiche rapide -->
+        <div class="ep-dashboard-stats">
+          <button type="button" class="ep-stat-card" (click)="epGotoTab('agenda')">
+            <span class="ep-stat-icon">📅</span>
+            <span class="ep-stat-value">{{ epDashboardTodayAppts() }}</span>
+            <span class="ep-stat-label">Appuntamenti oggi</span>
+          </button>
+          <button type="button" class="ep-stat-card" (click)="epGotoTab('magazzino')">
+            <span class="ep-stat-icon">⚠️</span>
+            <span class="ep-stat-value">{{ epDashboardLowStock() }}</span>
+            <span class="ep-stat-label">Giacenza bassa</span>
+          </button>
+          <button type="button" class="ep-stat-card" (click)="epGotoTab('ordini')">
+            <span class="ep-stat-icon">🛒</span>
+            <span class="ep-stat-value">{{ epDashboardPendingOrders() }}</span>
+            <span class="ep-stat-label">Ordini in attesa</span>
+          </button>
+          <button type="button" class="ep-stat-card" (click)="epGotoTab('comunicazioni')">
+            <span class="ep-stat-icon">🔔</span>
+            <span class="ep-stat-value">{{ epDashboardUnreadComms() }}</span>
+            <span class="ep-stat-label">Messaggi</span>
+          </button>
+        </div>
+
+        <!-- Collegamenti rapidi (pulsanti grandi stile app) -->
+        <h3 class="ep-dashboard-section-title">Azioni rapide</h3>
+        <div class="ep-quick-grid">
+          <button type="button" class="ep-quick-btn ep-quick-magazzino" (click)="epGotoTab('magazzino')">
+            <span class="ep-quick-icon">📦</span>
+            <span class="ep-quick-label">Magazzino</span>
+            <span class="ep-quick-desc">Prelievo articoli</span>
+          </button>
+          <button type="button" class="ep-quick-btn ep-quick-ddt" (click)="epGotoTab('ddt')">
+            <span class="ep-quick-icon">🚚</span>
+            <span class="ep-quick-label">DDT</span>
+            <span class="ep-quick-desc">Documenti trasporto</span>
+          </button>
+          <button type="button" class="ep-quick-btn ep-quick-servizi" (click)="epGotoTab('servizi')">
+            <span class="ep-quick-icon">💶</span>
+            <span class="ep-quick-label">Servizi</span>
+            <span class="ep-quick-desc">Ricevute / pagamenti</span>
+          </button>
+          <button type="button" class="ep-quick-btn ep-quick-ordini" (click)="epGotoTab('ordini')">
+            <span class="ep-quick-icon">🛒</span>
+            <span class="ep-quick-label">Ordini</span>
+            <span class="ep-quick-desc">Richieste materiale</span>
+          </button>
+          <button type="button" class="ep-quick-btn ep-quick-agenda" (click)="epGotoTab('agenda')">
+            <span class="ep-quick-icon">📅</span>
+            <span class="ep-quick-label">Agenda</span>
+            <span class="ep-quick-desc">Appuntamenti e preventivi</span>
+          </button>
+          <button type="button" class="ep-quick-btn ep-quick-comunicazioni" (click)="epGotoTab('comunicazioni')">
+            <span class="ep-quick-icon">🔔</span>
+            <span class="ep-quick-label">Comunicazioni</span>
+            <span class="ep-quick-desc">Messaggi dal titolare</span>
+          </button>
+        </div>
+
+        <!-- Prossimi appuntamenti (se presenti) -->
+        @if (epMyAgendaGroups().length > 0) {
+        <h3 class="ep-dashboard-section-title">Prossimi appuntamenti</h3>
+        <ul class="ep-list">
+          @for (a of epMyAgendaAppts().slice(0, 3); track a.id) {
+          <li class="ep-list-item ep-agenda-card" (click)="epGotoTab('agenda')">
+            <div class="ep-list-main">
+              <div class="ep-agenda-time">
+                <strong>{{ epAppointmentTimeRange(a).start }}</strong>
+                <span>→ {{ epAppointmentTimeRange(a).end }}</span>
+              </div>
+              <div class="ep-list-meta">
+                <span class="ep-agenda-type">{{ epAppointmentTypeLabel(a.appointmentType) }}</span>
+                <span class="ep-agenda-sep">·</span>
+                <span class="ep-agenda-customer">{{ a.customerName }}</span>
+              </div>
+              @if (a.address) {
+              <div class="ep-list-meta ep-agenda-addr">📍 {{ a.address }}</div>
+              }
+            </div>
+            <span class="badge" [class.badge-warning]="a.status === 'programmato'"
+              [class.badge-info]="a.status === 'in-corso'" [class.badge-success]="a.status === 'chiuso'">
+              {{ epAppointmentStatusLabel(a.status) }}
+            </span>
+          </li>
+          }
+        </ul>
+        }
+      </section>
+      }
+
       <!-- Tab MAGAZZINO (riportato invariato da v1, check JIT già nel TS) -->
       @if (epActiveTab() === 'magazzino') {
       <section class="ep-tab-content">
         <div class="ep-search-row">
           <input type="search" class="ep-input ep-search" placeholder="Cerca prodotto (nome, codice, marca, categoria)"
             [ngModel]="epWarehouseSearch()" (ngModelChange)="epWarehouseSearch.set($event)">
+          <button type="button" class="chip-btn chip-blue ep-chip-small" title="Scansiona barcode / QR"
+            (click)="epOpenScanner('magazzino')">📷</button>
           <span class="badge badge-ghost">{{ epFilteredInventoryItems().length }} articoli</span>
         </div>
 
@@ -6989,9 +7103,11 @@
             @for (ctrl of epOrderLineGroups; track ctrl; let i = $index) {
             <div class="ep-ddt-line" [formGroup]="ctrl">
               <div class="ep-ddt-line-head">
-                <input type="search" class="ep-input ep-wide" formControlName="search"
-                  (input)="epOrderLineSyncDescription(i)"
-                  placeholder="Cerca articolo (opzionale: descrivi liberamente)">
+                <input type="search" class="ep-input ep-wide" formControlName="description"
+                  (input)="epOrderLineSyncSearch(i)"
+                  placeholder="Cerca articolo o descrivi liberamente...">
+                <button type="button" class="chip-btn chip-blue ep-chip-small" title="Scansiona barcode / QR"
+                  (click)="epOpenScanner('ordini', i)">📷</button>
                 <button type="button" class="chip-btn chip-warning ep-chip-small"
                   (click)="epOrderRemoveLine(i)">🗑️</button>
               </div>
@@ -7039,7 +7155,7 @@
           </label>
           <div class="ep-form-actions">
             <button type="button" class="btn-ghost" (click)="epOrderEditorVisible.set(false)">Annulla</button>
-            <button type="submit" class="btn-primary" [attr.disabled]="epOrderForm.invalid ? '' : null">Invia
+            <button type="submit" class="btn-primary" [disabled]="epOrderForm.invalid">Invia
               ordine</button>
           </div>
           @if (epOrderLastConfirmMessage()) {
@@ -7111,7 +7227,7 @@
                 <span class="ep-agenda-sep">·</span>
                 <span>{{ epAppointmentLocationLabel(a.locationType) }}</span>
                 <span class="ep-agenda-sep">·</span>
-                <span class="ep-agenda-customer">{{ a.customerName }}</span>
+                <span class="ep-agenda-customer">{{ a.customerName || (epQuoteForAppointment(a)?.customerName) || 'Cliente' }}</span>
               </div>
               @if (a.address) {
               <div class="ep-list-meta ep-agenda-addr">📍 {{ a.address }}</div>
@@ -7136,6 +7252,12 @@
                   [disabled]="epEditingQuoteApptId() === a.id" (click)="epOpenQuoteEditor(a)">
                   🛠️ Modifica righe installazione
                 </button>
+                @if (epQuoteForAppointment(a); as q) {
+                <button type="button" class="chip-btn chip-green ep-chip-small"
+                  (click)="epOpenDdtFromQuote(q.id)" title="Crea DDT precompilato dalle righe materiale del preventivo">
+                  📦 Crea DDT da preventivo
+                </button>
+                }
               </div>
               }
             </div>
@@ -7145,6 +7267,17 @@
             <div class="ep-quote-editor">
               <div class="ep-quote-editor-head">
                 <strong>🧾 Righe del preventivo</strong>
+                @if (epQuoteForAppointment(a); as q) {
+                <div class="ep-quote-client-info">
+                  <span class="ep-quote-client-name">👤 {{ q.customerName }}</span>
+                  @if (q.projectType) {
+                  <span class="ep-list-meta">· {{ q.projectType }}</span>
+                  }
+                  @if (q.customerAddress || q.fulfillmentAddress) {
+                  <div class="ep-list-meta ep-agenda-addr">📍 {{ q.fulfillmentAddress || q.customerAddress }}</div>
+                  }
+                </div>
+                }
                 <span class="ep-list-meta">Modifica quantità, prezzi, aggiungi o rimuovi voci</span>
               </div>
 
@@ -7165,9 +7298,32 @@
                     <button type="button" class="chip-btn chip-warning ep-chip-small" title="Rimuovi riga"
                       (click)="epRemoveDraftLine(line.id)">🗑️</button>
                   </div>
-                  <input type="text" class="ep-input ep-quote-desc" placeholder="Descrizione (es. Spina elettrica)"
-                    [value]="line.description"
-                    (input)="epUpdateDraftLine(line.id, 'description', $any($event.target).value)" />
+                  @if (epIsQuoteLineFreeText(line.id)) {
+                  <!-- Modalità testo libero -->
+                  <div class="ep-quote-desc-wrap">
+                    <input type="text" class="ep-input ep-quote-desc" placeholder="Descrizione libera..."
+                      [value]="line.description"
+                      (input)="epUpdateDraftLine(line.id, 'description', $any($event.target).value)" />
+                    <button type="button" class="chip-btn chip-gray ep-chip-small"
+                      (click)="epToggleQuoteLineFreeText(line.id)" title="Torna all'elenco">↩ Elenco</button>
+                  </div>
+                  } @else {
+                  <!-- Dropdown con materiali/servizi esistenti -->
+                  <select class="ep-input ep-quote-desc" [value]="line.description"
+                    (change)="epUpdateDraftLine(line.id, 'description', $any($event.target).value)">
+                    <option value="">— Seleziona {{ line.kind === 'servizio' ? 'servizio' : line.kind === 'materiale' ? 'materiale' : 'voce' }} —</option>
+                    @if (line.kind === 'servizio') {
+                    @for (serv of services(); track serv.id) {
+                    <option [value]="serv.name">{{ serv.name }} (€ {{ serv.price.toLocaleString('it-IT', {maximumFractionDigits: 2}) }})</option>
+                    }
+                    } @else if (line.kind === 'materiale') {
+                    @for (prod of allInventoryItems(); track prod.id) {
+                    <option [value]="prod.name">{{ prod.name }} (€ {{ prod.unitCost.toLocaleString('it-IT', {maximumFractionDigits: 2}) }})</option>
+                    }
+                    }
+                    <option value="__altro__">✏️ Altro (scrittura libera)</option>
+                  </select>
+                  }
                   <div class="ep-quote-line-row">
                     <label class="ep-quote-field">
                       <span>Q.tà</span>
@@ -7396,51 +7552,41 @@
         }
       </nav>
 
-      <!-- Modale "Apri portale sul telefono" (invariato) -->
-      @if (epOpenMobilePanel) {
-      <div class="ep-modal-mask" (click)="epOpenMobilePanel = false">
-        <div class="ep-modal-body" (click)="$event.stopPropagation()">
+      <!-- Modale Scanner Barcode / QR Code (fotocamera) -->
+      @if (epScannerVisible()) {
+      <div class="ep-modal-mask ep-scanner-mask" (click)="epCloseScanner()">
+        <div class="ep-modal-body ep-scanner-body" (click)="$event.stopPropagation()">
           <div class="ep-detail-head">
-            <h3>📱 Apri il Portale sul tuo telefono</h3>
-            <button type="button" class="chip-btn chip-gray ep-chip-small"
-              (click)="epOpenMobilePanel = false">✕</button>
+            <h3>📷 Scansiona codice a barre / QR</h3>
+            <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epCloseScanner()">✕</button>
           </div>
-          <p class="ep-onboarding-desc">
-            Assicurati che il PC e lo smartphone siano sulla <strong>stessa rete Wi-Fi</strong>.
-          </p>
-          <pre class="ep-code-block"><code>npm run start -- --host 0.0.0.0 --port 4200</code>
-<button type="button" class="chip-btn chip-blue ep-chip-small ep-copy-code"
-  (click)="epCopyToClipboard('npm run start -- --host 0.0.0.0 --port 4200', 'Comando copiato')">
-  Copia comando
-</button>
-</pre>
-          <div class="ep-form-row">
-            <label>
-              <span>IP locale del PC</span>
-              <input type="text" class="ep-input" placeholder="es. 192.168.1.50" [ngModel]="epLanIp()"
-                (ngModelChange)="epLanIp.set($event)">
-            </label>
-            <label>
-              <span>Porta</span>
-              <input type="number" min="1" class="ep-input ep-numeric-input" [ngModel]="epLanPort()"
-                (ngModelChange)="epLanPort.set(epToNum($event))">
-            </label>
-          </div>
-          <div class="ep-qr-card">
-            @if (epLanUrl()) {
-            <h4>{{ epLanUrl() }}</h4>
-            <img [src]="epQrSrc()" alt="QR code per accedere al portale" class="ep-qr-img">
-            <div class="ep-form-actions">
-              <button type="button" class="btn-ghost"
-                (click)="epCopyToClipboard(epLanUrl()!, 'URL copiato negli appunti')">
-                Copia URL
-              </button>
-              <a class="btn-primary" [href]="epLanUrl()" target="_blank" rel="noopener">Apri nel browser</a>
+          <div class="ep-scanner-viewfinder">
+            <video #epScannerVideo class="ep-scanner-video" playsinline muted autoplay></video>
+            <!-- Overlay cornice di scansione -->
+            <div class="ep-scanner-frame">
+              <span class="ep-scanner-corner ep-scanner-corner-tl"></span>
+              <span class="ep-scanner-corner ep-scanner-corner-tr"></span>
+              <span class="ep-scanner-corner ep-scanner-corner-bl"></span>
+              <span class="ep-scanner-corner ep-scanner-corner-br"></span>
+              <div class="ep-scanner-line"></div>
             </div>
-            <p class="ep-last-copy">{{ epMobileLastMessage() || '&nbsp;' }}</p>
-            } @else {
-            <p class="ep-empty">Inserisci IP e porta per generare URL e QR code.</p>
-            }
+          </div>
+
+          @if (epScanner.error()) {
+          <div class="ep-scanner-error">⚠️ {{ epScanner.error() }}</div>
+          }
+
+          @if (epScannerDetected()) {
+          <div class="ep-scanner-result">
+            ✅ Rilevato: <strong>{{ epScannerDetected() }}</strong>
+          </div>
+          }
+
+          <p class="ep-scanner-hint">
+            Inquadra il codice a barre o il QR code dell'articolo. La scansione è automatica.
+          </p>
+          <div class="ep-form-actions">
+            <button type="button" class="btn-ghost" (click)="epCloseScanner()">Annulla</button>
           </div>
         </div>
       </div>
