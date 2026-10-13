@@ -7095,14 +7095,22 @@ export class SectionPageComponent {
   protected readonly epScannerOrderLineIndex = signal<number>(0);
   /** Ultimo testo scannerizzato (mostrato in anteprima nel modale) */
   protected readonly epScannerDetected = signal<string>('');
+  /** Contatore tentavi di retry (per mostrare istruzioni dopo il secondo tentativo fallito) */
+  protected readonly epScannerRetryCount = signal<number>(0);
   /** Riferimento all'elemento video del modale scanner */
   @ViewChild('epScannerVideo') protected epScannerVideoRef?: ElementRef<HTMLVideoElement>;
+
+  /** Restituisce le istruzioni per abilitare la fotocamera nel browser corrente */
+  protected get epScannerPermissionSteps(): { browser: string; steps: string[] } {
+    return this.epScanner.getPermissionInstructions();
+  }
 
   /** Apre il modale scanner e avvia la fotocamera */
   protected epOpenScanner(target: 'ordini' | 'magazzino', orderLineIndex = 0): void {
     this.epScannerTarget.set(target);
     this.epScannerOrderLineIndex.set(orderLineIndex);
     this.epScannerDetected.set('');
+    this.epScannerRetryCount.set(0);
     this.epScannerVisible.set(true);
     // Piccolo delay per assicurarsi che il video element sia renderizzato
     setTimeout(() => this.epStartScanner(), 150);
@@ -7113,6 +7121,14 @@ export class SectionPageComponent {
     const video = this.epScannerVideoRef?.nativeElement ?? null;
     if (!video) return;
     this.epScanner.start(video, (text) => this.epHandleScanResult(text));
+  }
+
+  /** Riprova ad avviare la fotocamera (dopo che l'utente ha abilitato i permessi) */
+  protected epRetryScanner(): void {
+    this.epScannerRetryCount.update((c) => c + 1);
+    this.epScanner.error.set('');
+    // Riavvio la scansione
+    this.epStartScanner();
   }
 
   /** Chiude il modale scanner e ferma la fotocamera */

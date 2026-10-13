@@ -7560,6 +7560,30 @@
             <h3>📷 Scansiona codice a barre / QR</h3>
             <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epCloseScanner()">✕</button>
           </div>
+
+          <!-- Caso: permessi fotocamera negati o errore -->
+          @if (epScanner.error() && (epScanner.permissionState() === 'denied' || epScannerRetryCount() > 0)) {
+          <div class="ep-scanner-perm-help">
+            <div class="ep-scanner-perm-icon">🔒</div>
+            <h4>Accesso alla fotocamera negato</h4>
+            <p>Per scansionare i codici devi abilitare i permessi della fotocamera per questo sito.</p>
+            <div class="ep-scanner-perm-browser">
+              <strong>Browser rilevato: {{ epScannerPermissionSteps.browser }}</strong>
+            </div>
+            <ol class="ep-scanner-perm-steps">
+              @for (step of epScannerPermissionSteps.steps; track step) {
+              <li>{{ step }}</li>
+              }
+            </ol>
+            <div class="ep-scanner-perm-actions">
+              <button type="button" class="btn-primary" (click)="epRetryScanner()">🔄 Riprova</button>
+              <button type="button" class="btn-ghost" (click)="epCloseScanner()">Annulla</button>
+            </div>
+          </div>
+          }
+
+          <!-- Caso: scanner attivo o in attesa -->
+          @if (!epScanner.error() || (epScanner.permissionState() !== 'denied' && epScannerRetryCount() === 0)) {
           <div class="ep-scanner-viewfinder">
             <video #epScannerVideo class="ep-scanner-video" playsinline muted autoplay></video>
             <!-- Overlay cornice di scansione -->
@@ -7571,9 +7595,13 @@
               <div class="ep-scanner-line"></div>
             </div>
           </div>
+          }
 
-          @if (epScanner.error()) {
-          <div class="ep-scanner-error">⚠️ {{ epScanner.error() }}</div>
+          @if (epScanner.error() && epScanner.permissionState() !== 'denied' && epScannerRetryCount() === 0) {
+          <div class="ep-scanner-error">
+            ⚠️ {{ epScanner.error() }}
+            <button type="button" class="ep-scanner-error-retry" (click)="epRetryScanner()">Riprova</button>
+          </div>
           }
 
           @if (epScannerDetected()) {
@@ -7582,12 +7610,17 @@
           </div>
           }
 
+          @if (!epScanner.error() || (epScanner.permissionState() !== 'denied' && epScannerRetryCount() === 0)) {
           <p class="ep-scanner-hint">
             Inquadra il codice a barre o il QR code dell'articolo. La scansione è automatica.
           </p>
+          }
+
+          @if (!epScanner.error() || (epScanner.permissionState() !== 'denied' && epScannerRetryCount() === 0)) {
           <div class="ep-form-actions">
             <button type="button" class="btn-ghost" (click)="epCloseScanner()">Annulla</button>
           </div>
+          }
         </div>
       </div>
       }

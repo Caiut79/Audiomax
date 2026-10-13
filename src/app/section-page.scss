@@ -17894,6 +17894,74 @@ h2.op-card-title {
   text-align: center;
 }
 
+.ep-scanner-error-retry {
+  margin-left: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* Pannello istruzioni permessi fotocamera */
+.ep-scanner-perm-help {
+  text-align: center;
+  padding: 0.5rem 0.2rem;
+}
+
+.ep-scanner-perm-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ep-scanner-perm-help h4 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  color: var(--text, #1e293b);
+}
+
+.ep-scanner-perm-help p {
+  margin: 0 0 0.8rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+}
+
+.ep-scanner-perm-browser {
+  margin-bottom: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--text-muted, #64748b);
+}
+
+.ep-scanner-perm-steps {
+  text-align: left;
+  margin: 0 auto 1rem;
+  padding-left: 1.2rem;
+  max-width: 280px;
+  font-size: 0.82rem;
+  color: var(--text, #1e293b);
+  line-height: 1.6;
+}
+
+.ep-scanner-perm-steps li {
+  margin-bottom: 0.3rem;
+}
+
+.ep-scanner-perm-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.ep-scanner-perm-actions .btn-primary,
+.ep-scanner-perm-actions .btn-ghost {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+
 .ep-scanner-result {
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.3);
