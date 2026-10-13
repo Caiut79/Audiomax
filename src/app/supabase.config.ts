@@ -10,5 +10,12 @@ export const supabaseConfig = {
     cashTransactions: 'crm_cash_transactions',
     cashShifts: 'crm_cash_shifts',
     serviceTickets: 'crm_service_tickets',
+    cashOperators: 'crm_cash_operators',
+    // ===== Portale Dipendenti v1 =====
+    warehouseDdts: 'crm_ep_warehouse_ddts',
+    pendingServices: 'crm_ep_pending_services',
+    warehouseOrders: 'crm_ep_warehouse_orders',
+    // ===== Portale Dipendenti v2 =====
+    portalCommunications: 'crm_ep_portal_communications',
   },
 };

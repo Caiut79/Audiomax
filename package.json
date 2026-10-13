@@ -4,6 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "start:lan": "node state-server.mjs & ng serve --host 0.0.0.0 --port 4201 --allowed-hosts=all",
+    "start:portal": "node state-server.mjs & ng serve --host 0.0.0.0 --port 4201 --allowed-hosts=all --open",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",

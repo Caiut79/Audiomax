@@ -229,6 +229,162 @@ export interface WarehouseAuditRecord {
   createdAt: string;
 }
 
+/** Documento di trasporto (DDT) creato dal Portale Dipendenti */
+export interface WarehouseDdtLineRecord {
+  id: string;
+  inventoryItemId: string | null;
+  itemSnapshot: string;          // snapshot nome prodotto / descrizione libera
+  quantity: number;
+  unitCost: number;              // prezzo di riferimento al momento della creazione
+  note: string;
+}
+
+export interface WarehouseDdtRecord {
+  id: string;
+  number: string;                // progressivo: DDT-EP-YYYY-NNNN
+  createdAt: string;
+  emittedAt: string | null;
+  deliveredAt: string | null;
+  createdByOperatorId: string;
+  createdByOperatorName: string;
+  clientId: string | null;
+  clientSnapshot: string;        // ragione sociale cliente al momento della creazione
+  vehicle: string;
+  destination: string;
+  note: string;
+  lines: WarehouseDdtLineRecord[];
+  status: 'bozza' | 'emesso' | 'consegnato';
+}
+
+/** Servizio pendente inviato dal portale dipendenti alla cassa per l'incasso */
+export interface PendingServiceRecord {
+  id: string;
+  createdAt: string;
+  createdByOperatorId: string;
+  createdByOperatorName: string;
+  serviceDate: string;           // data/ora effettuazione
+  clientId: string;
+  clientSnapshot: string;
+  type:
+  | 'installazione'
+  | 'officina'
+  | 'sopralluogo'
+  | 'ritiro'
+  | 'altro';
+  description: string;
+  priceUnit: number;
+  quantity: number;
+  totalAmount: number;           // calcolato = priceUnit * quantity
+  status: 'inviato' | 'pagato' | 'annullato';
+  paidAt: string | null;
+  linkedCashTransactionId: string | null;
+}
+
+/** Ordine creato dal Portale Dipendenti, gestito poi dal crm principale (magazzino) */
+export interface WarehouseOrderLineRecord {
+  id: string;
+  inventoryItemId: string | null;
+  description: string;           // descrizione libera o snapshot nome prodotto
+  quantity: number;
+  expectedUnitPrice: number | null;
+  note: string;
+}
+
+export interface WarehouseOrderRecord {
+  id: string;
+  number: string;                // progressivo: ORD-EP-YYYY-NNNN
+  createdAt: string;
+  updatedAt: string;
+  createdByOperatorId: string;
+  createdByOperatorName: string;
+  orderType: 'richiesta-cliente' | 'riordino' | 'uso-interno' | 'altro';
+  clientId: string | null;
+  clientSnapshot: string;
+  urgency: 'bassa' | 'media' | 'alta';
+  note: string;
+  expectedDeliveryDate: string | null;
+  lines: WarehouseOrderLineRecord[];
+  status: 'pending' | 'seen' | 'approved' | 'received' | 'cancelled';
+}
+
+/** Helpers per generare progressivi Portale Dipendenti (DDT-EP / ORD-EP) */
+export function generatePortaleDipendentiCode(
+  prefix: 'DDT' | 'ORD',
+  referenceDate: Date | string | number,
+  existing: Array<{ id?: string; createdAt?: string | null; number?: string | null }>,
+): string {
+  const date = referenceDate instanceof Date ? referenceDate : new Date(referenceDate);
+  const year = String(date.getFullYear());
+  const sameYear = existing.filter((r) => {
+    if (r.number) {
+      const m = r.number.match(`^${prefix}-EP-(${year})-(\\d{4})$`);
+      return !!m;
+    }
+    if (r.createdAt) {
+      const y = new Date(r.createdAt).getFullYear();
+      return String(y) === year;
+    }
+    return false;
+  });
+  let max = 0;
+  for (const r of sameYear) {
+    if (r.number) {
+      const m = r.number.match(/(\d{4})$/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (Number.isFinite(n) && n > max) max = n;
+      }
+    }
+  }
+  const next = String(max + 1).padStart(4, '0');
+  return `${prefix}-EP-${year}-${next}`;
+}
+
+// ===== PORTALE DIPENDENTI v2 - Comunicazioni dal titolare al tecnico =====
+/** Riga materiale dentro una comunicazione portale (può arrivare da un preventivo o essere manuale) */
+export interface PortalCommunicationLine {
+  id: string;
+  /** Id della riga del preventivo originale (se derivata da un QuoteLineRecord kind='materiale') */
+  fromQuoteLineId: string | null;
+  /** Descrizione da mostrare (ereditata dal preventivo o inserita manualmente) */
+  description: string;
+  /** Id articolo d'inventario (OBBLIGATORIO perché il tecnico possa scaricare da magazzino).
+   *  Il titolare lo seleziona esplicitamente nel form di creazione: nessun fuzzy-match automatico, per evitare scarichi sbagliati.
+   *  Se null, la riga non è caricabile (sola nota descrittiva).
+   */
+  inventoryItemId: string | null;
+  /** Quantità da caricare prevista */
+  requiredQuantity: number;
+  /** Quantità effettivamente caricata dal tecnico (0 = non ancora caricato) */
+  loadedQuantity: number;
+  /** Id operatore tecnico che ha caricato il materiale */
+  loadedByOperatorId: string | null;
+  /** Timestamp di caricamento */
+  loadedAt: string | null;
+  /** Id del movimento di magazzino creato (FIFO consume) */
+  warehouseMovementId: string | null;
+}
+
+/** Comunicazione dal titolare/gestionale → tecnici, con workflow di lettura e prelievo materiale. */
+export interface PortalCommunicationRecord {
+  id: string;
+  createdAt: string;
+  createdBy: string;                               // nome operatore / titolare che ha creato la comunicazione
+  title: string;
+  body: string;                                    // note / descrizione libera
+  priority: 'bassa' | 'media' | 'alta';
+  /** Id dei tecnici destinatari (solo cash operator role='tecnico') */
+  targetTechnicianIds: string[];
+  /** Preventivo collegato (opzionale) */
+  linkedQuoteId: string | null;
+  /** Appuntamento collegato (opzionale) */
+  linkedAppointmentId: string | null;
+  status: 'bozza' | 'inviata' | 'letta' | 'materiale-caricato' | 'completata';
+  lines: PortalCommunicationLine[];
+  /** Storico delle letture (chi, quando) */
+  readBy: Array<{ operatorId: string; at: string }>;
+}
+
 export interface CashRegisterProductRecord {
   id: string;
   name: string;
@@ -325,6 +481,17 @@ export interface CashOperatorRecord {
   shiftPatterns: Array<Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', string>>;
   shiftCycleStartDate: string;
   defaultWeeklyShift: Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', string>;
+  // ===== PORTALE DIPENDENTI v2 - Autenticazione =====
+  // Flag abilitazione accesso al portale (SOLO se role === 'tecnico' ha senso)
+  epPortalEnabled: boolean;
+  // Username di accesso (normalizzato: nome.cognome lowercase)
+  epPortalUsername: string | null;
+  // Hash SHA-256 base64 di (salt + password) — MAI salvare la password in chiaro
+  epPortalPasswordHash: string | null;
+  // Timestamp revoca A TEMPO ZERO: se valorizzato, QUALSIASI accesso viene negato
+  epPortalAccessRevokedAt: string | null;
+  // Ultimo login riuscito (sola lettura / audit)
+  epPortalLastLoginAt: string | null;
 }
 
 export interface EmployeeLeaveRecord {
@@ -561,6 +728,12 @@ export interface AudiomaxState {
   cashShifts: CashShiftRecord[];
   cashFiscalSettings: CashFiscalSettings;
   serviceTickets: ServiceTicketRecord[];
+  // ===== Portale Dipendenti v1 =====
+  warehouseDdts: WarehouseDdtRecord[];
+  pendingServices: PendingServiceRecord[];
+  warehouseOrders: WarehouseOrderRecord[];
+  // ===== Portale Dipendenti v2 =====
+  portalCommunications: PortalCommunicationRecord[];
   // ===== NUOVI Task 1/2/4: negozio chiusure settimanali / aperture straordinarie / chiusure collettive =====
   storeClosingDaysWeekly: Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>;
   storeExtraOpeningDates: Array<{ id: string; date: string; note?: string }>;
@@ -1251,6 +1424,11 @@ export const initialAudiomaxState: AudiomaxState = {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     },
     {
       id: 'cash-op-002',
@@ -1263,6 +1441,11 @@ export const initialAudiomaxState: AudiomaxState = {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     },
     {
       id: 'cash-op-003',
@@ -1275,6 +1458,11 @@ export const initialAudiomaxState: AudiomaxState = {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     },
     {
       id: 'cash-op-004',
@@ -1287,6 +1475,11 @@ export const initialAudiomaxState: AudiomaxState = {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     },
     {
       id: 'cash-op-005',
@@ -1299,6 +1492,11 @@ export const initialAudiomaxState: AudiomaxState = {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     },
     {
       id: 'cash-op-006',
@@ -1311,6 +1509,11 @@ export const initialAudiomaxState: AudiomaxState = {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: '2025-01-01',
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     },
   ],
   employeeLeaves: [],
@@ -1664,6 +1867,12 @@ export const initialAudiomaxState: AudiomaxState = {
       updatedAt: null,
     },
   ],
+  // ===== Portale Dipendenti v1 (default: vuoti) =====
+  warehouseDdts: [],
+  pendingServices: [],
+  warehouseOrders: [],
+  // ===== Portale Dipendenti v2 =====
+  portalCommunications: [],
   // ===== NUOVI Task 1: valori DEFAULT per chiusure negozio =====
   storeClosingDaysWeekly: { lun: false, mar: false, mer: false, gio: false, ven: false, sab: false, dom: true }, // Domenica = chiusa di default
   storeExtraOpeningDates: [],

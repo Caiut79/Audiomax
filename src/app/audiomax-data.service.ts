@@ -35,6 +35,14 @@ import {
   WarehouseMovementRecord,
   WarehousePositionRecord,
   WarehousePurchaseRecord,
+  WarehouseDdtLineRecord,
+  WarehouseDdtRecord,
+  PendingServiceRecord,
+  WarehouseOrderLineRecord,
+  WarehouseOrderRecord,
+  PortalCommunicationRecord,
+  PortalCommunicationLine,
+  generatePortaleDipendentiCode,
   createClientPrivacyProfile,
   initialAudiomaxState,
 } from './crm-runtime-data';
@@ -165,6 +173,39 @@ interface ServiceTicketRow {
   closed_at: string | null;
   created_at: string;
   updated_at?: string | null;
+}
+
+interface CashOperatorRow {
+  id: string;
+  name: string;
+  role: CashOperatorRecord['role'];
+  active: boolean;
+  employment_type: CashOperatorRecord['employmentType'];
+  job_title: string;
+  contract_hours_weekly: number;
+  shift_patterns: CashOperatorRecord['shiftPatterns'];
+  shift_cycle_start_date: string;
+  default_weekly_shift: CashOperatorRecord['defaultWeeklyShift'];
+  ep_portal_enabled: boolean;
+  ep_portal_username: string | null;
+  ep_portal_password_hash: string | null;
+  ep_portal_access_revoked_at: string | null;
+  ep_portal_last_login_at: string | null;
+}
+
+interface PortalCommunicationRow {
+  id: string;
+  created_at: string;
+  created_by: string;
+  title: string;
+  body: string;
+  priority: PortalCommunicationRecord['priority'];
+  target_technician_ids: string[];
+  linked_quote_id: string | null;
+  linked_appointment_id: string | null;
+  status: PortalCommunicationRecord['status'];
+  lines: PortalCommunicationLine[];
+  read_by: PortalCommunicationRecord['readBy'];
 }
 
 interface WarehouseReceivePayload {
@@ -324,6 +365,16 @@ export class AudiomaxDataService {
   readonly storeClosingDaysWeekly = signal<Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>>(initialAudiomaxState.storeClosingDaysWeekly);
   readonly storeExtraOpeningDates = signal<Array<{ id: string; date: string; note?: string }>>(initialAudiomaxState.storeExtraOpeningDates);
   readonly storeBulkClosures = signal<Array<{ id: string; startDate: string; endDate: string; reason: string }>>(initialAudiomaxState.storeBulkClosures);
+  // ===== Portale Dipendenti v1: nuove collection =====
+  readonly warehouseDdts = signal<WarehouseDdtRecord[]>(initialAudiomaxState.warehouseDdts);
+  readonly pendingServices = signal<PendingServiceRecord[]>(initialAudiomaxState.pendingServices);
+  readonly warehouseOrders = signal<WarehouseOrderRecord[]>(initialAudiomaxState.warehouseOrders);
+  // ===== Portale Dipendenti v2: comunicazioni dal titolare ai tecnici =====
+  readonly portalCommunications = signal<PortalCommunicationRecord[]>(initialAudiomaxState.portalCommunications);
+  // ===== Costante SHA-256 salt per hash password portale =====
+  readonly EP_PORTAL_PASSWORD_SALT = 'AUDIOMAX_EP_V2_SALT_2026';
+  // ===== Durata sessione portale: 2 ore (TTL) =====
+  readonly EP_PORTAL_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 
   readonly activeClients = computed(
     () => this.clients().filter((client) => client.status !== 'lead').length,
@@ -571,6 +622,12 @@ export class AudiomaxDataService {
 
     effect(() => {
       this.scheduleLocalPersist(this.serializeSnapshot());
+    });
+
+    // Carica lo stato condiviso dal server LAN (per sincronizzare PC ↔ telefono)
+    // e poi reinvia lo stato locale per assicurare che il server sia aggiornato
+    void this.loadFromServer().then(() => {
+      void this.pushToServer(this.serializeSnapshot());
     });
 
     if (this.supabase.isConfigured) {
@@ -1573,9 +1630,16 @@ export class AudiomaxDataService {
     const record: CashOperatorRecord = {
       id: `cash-op-${crypto.randomUUID()}`,
       ...payload,
+      // ===== Defaults Portale Dipendenti v2 =====
+      epPortalEnabled: payload.epPortalEnabled ?? false,
+      epPortalUsername: payload.epPortalUsername ?? null,
+      epPortalPasswordHash: payload.epPortalPasswordHash ?? null,
+      epPortalAccessRevokedAt: payload.epPortalAccessRevokedAt ?? null,
+      epPortalLastLoginAt: payload.epPortalLastLoginAt ?? null,
     };
 
     this.cashOperators.update((items) => [record, ...items]);
+    this.queueRemoteSync('cash-operator', record);
   }
 
   addServiceTicket(
@@ -1594,6 +1658,175 @@ export class AudiomaxDataService {
     this.queueRemoteSync('ticket', record);
     return record;
   }
+
+  // ============ Portale Dipendenti v1: DDT ============
+  /**
+   * Crea un nuovo DDT come bozza. Il numero progressivo viene assegnato
+   * nel momento dell'emissione (updateWarehouseDdtStatus → 'emesso').
+   */
+  addWarehouseDdt(
+    payload: Omit<WarehouseDdtRecord, 'id' | 'number' | 'createdAt' | 'emittedAt' | 'deliveredAt' | 'status'> & {
+      number?: string;
+      createdAt?: string;
+    },
+  ): WarehouseDdtRecord {
+    const record: WarehouseDdtRecord = {
+      id: `ddt-${crypto.randomUUID()}`,
+      number: payload.number ?? '', // numero assegnato in emissione
+      createdAt: payload.createdAt ?? new Date().toISOString(),
+      emittedAt: null,
+      deliveredAt: null,
+      status: 'bozza',
+      lines: payload.lines ?? [],
+      vehicle: payload.vehicle ?? '',
+      destination: payload.destination ?? '',
+      note: payload.note ?? '',
+      clientId: payload.clientId ?? null,
+      clientSnapshot: payload.clientSnapshot ?? '',
+      createdByOperatorId: payload.createdByOperatorId,
+      createdByOperatorName: payload.createdByOperatorName,
+    };
+    this.warehouseDdts.update((items) => [record, ...items]);
+    this.queueRemoteSync('warehouse-ddt', record);
+    return record;
+  }
+
+  /**
+   * Aggiorna lo stato del DDT. Se passiamo a 'emesso' assegniamo anche
+   * il numero progressivo DDT-EP-YYYY-NNNN e la data emissione.
+   */
+  updateWarehouseDdtStatus(
+    id: string,
+    next: WarehouseDdtRecord['status'],
+    opts: { assignNumberIfMissing?: boolean } = { assignNumberIfMissing: true },
+  ): WarehouseDdtRecord | null {
+    let updated: WarehouseDdtRecord | null = null;
+    this.warehouseDdts.update((items) =>
+      items.map((it) => {
+        if (it.id !== id) return it;
+        const now = new Date().toISOString();
+        let number = it.number;
+        if (next === 'emesso' && opts.assignNumberIfMissing && !number) {
+          number = generatePortaleDipendentiCode('DDT', it.createdAt ?? now, items);
+        }
+        const patch: Partial<WarehouseDdtRecord> = { status: next, number };
+        if (next === 'emesso' && !it.emittedAt) patch.emittedAt = now;
+        if (next === 'consegnato' && !it.deliveredAt) patch.deliveredAt = now;
+        updated = { ...it, ...patch };
+        return updated;
+      }),
+    );
+    if (updated) this.queueRemoteSync('warehouse-ddt', updated);
+    return updated;
+  }
+
+  /** Aggiorna l'intero record DDT (righe, note, veicolo, ecc.) finché è in bozza. */
+  updateWarehouseDdt(record: WarehouseDdtRecord): void {
+    this.warehouseDdts.update((items) => items.map((it) => (it.id === record.id ? record : it)));
+    this.queueRemoteSync('warehouse-ddt', record);
+  }
+
+  // ============ Portale Dipendenti v1: Servizi pendenti da incassare ============
+  addPendingService(
+    payload: Omit<
+      PendingServiceRecord,
+      'id' | 'createdAt' | 'status' | 'paidAt' | 'linkedCashTransactionId' | 'totalAmount'
+    > & {
+      totalAmount?: number;
+    },
+  ): PendingServiceRecord {
+    const total = payload.totalAmount ?? payload.priceUnit * payload.quantity;
+    const record: PendingServiceRecord = {
+      id: `ps-${crypto.randomUUID()}`,
+      createdAt: new Date().toISOString(),
+      status: 'inviato',
+      paidAt: null,
+      linkedCashTransactionId: null,
+      totalAmount: total,
+      ...payload,
+    };
+    this.pendingServices.update((items) => [record, ...items]);
+    this.queueRemoteSync('pending-service', record);
+    return record;
+  }
+
+  /** Marca il servizio come pagato (tipicamente dopo che in cassa è stato incassato). */
+  markPendingServicePaid(
+    id: string,
+    transactionId: string | null = null,
+    paidAt: string = new Date().toISOString(),
+  ): PendingServiceRecord | null {
+    let updated: PendingServiceRecord | null = null;
+    this.pendingServices.update((items) =>
+      items.map((it) => {
+        if (it.id !== id) return it;
+        updated = { ...it, status: 'pagato', paidAt, linkedCashTransactionId: transactionId };
+        return updated;
+      }),
+    );
+    if (updated) this.queueRemoteSync('pending-service', updated);
+    return updated;
+  }
+
+  deletePendingService(id: string): void {
+    this.pendingServices.update((items) => items.filter((it) => it.id !== id));
+    this.queueRemoteDelete('pending-service', id);
+  }
+
+  // ============ Portale Dipendenti v1: Ordini da portale ============
+  addWarehouseOrder(
+    payload: Omit<WarehouseOrderRecord, 'id' | 'number' | 'createdAt' | 'updatedAt' | 'status'> & {
+      createdAt?: string;
+    },
+  ): WarehouseOrderRecord {
+    const now = new Date();
+    const createdAt = payload.createdAt ?? now.toISOString();
+    // Assegno già il numero ORD in fase di creazione: lo usiamo come
+    // riferimento immediato sia per il dipendente che per il gestionale.
+    const existing = this.warehouseOrders();
+    const number = generatePortaleDipendentiCode('ORD', createdAt, existing);
+    const record: WarehouseOrderRecord = {
+      id: `ord-${crypto.randomUUID()}`,
+      number,
+      createdAt,
+      updatedAt: createdAt,
+      status: 'pending',
+      lines: payload.lines ?? [],
+      note: payload.note ?? '',
+      orderType: payload.orderType,
+      clientId: payload.clientId ?? null,
+      clientSnapshot: payload.clientSnapshot ?? '',
+      urgency: payload.urgency,
+      expectedDeliveryDate: payload.expectedDeliveryDate ?? null,
+      createdByOperatorId: payload.createdByOperatorId,
+      createdByOperatorName: payload.createdByOperatorName,
+    };
+    this.warehouseOrders.update((items) => [record, ...items]);
+    this.queueRemoteSync('warehouse-order', record);
+    return record;
+  }
+
+  updateWarehouseOrderStatus(id: string, next: WarehouseOrderRecord['status']): WarehouseOrderRecord | null {
+    let updated: WarehouseOrderRecord | null = null;
+    const now = new Date().toISOString();
+    this.warehouseOrders.update((items) =>
+      items.map((it) => {
+        if (it.id !== id) return it;
+        updated = { ...it, status: next, updatedAt: now };
+        return updated;
+      }),
+    );
+    if (updated) this.queueRemoteSync('warehouse-order', updated);
+    return updated;
+  }
+
+  updateWarehouseOrder(record: WarehouseOrderRecord): void {
+    const patched: WarehouseOrderRecord = { ...record, updatedAt: new Date().toISOString() };
+    this.warehouseOrders.update((items) => items.map((it) => (it.id === record.id ? patched : it)));
+    this.queueRemoteSync('warehouse-order', patched);
+  }
+
+  // ============ Fine Portale Dipendenti v1 ============
 
   updateAppointment(record: AppointmentRecord): void {
     this.appointments.update((items) => items.map((item) => (item.id === record.id ? record : item)));
@@ -1692,6 +1925,7 @@ export class AudiomaxDataService {
 
   updateCashOperator(record: CashOperatorRecord): void {
     this.cashOperators.update((items) => items.map((item) => (item.id === record.id ? record : item)));
+    this.queueRemoteSync('cash-operator', record);
   }
 
   addEmployeeLeave(payload: Omit<EmployeeLeaveRecord, 'id'>): void {
@@ -1705,6 +1939,347 @@ export class AudiomaxDataService {
 
   deleteEmployeeLeave(id: string): void {
     this.employeeLeaves.update((items) => items.filter((item) => item.id !== id));
+  }
+
+  // ============================================================
+  // ===== PORTALE DIPENDENTI v2 - Autenticazione e sicurezza =====
+  // ============================================================
+
+  /**
+   * Calcola l'hash SHA-256 di (salt + password) e lo restituisce in base64.
+   * MAI salvare password in chiaro.
+   *
+   * Usa crypto.subtle su contesti sicuri (HTTPS/localhost). Su HTTP (es. LAN da
+   * iPhone) crypto.subtle non è disponibile: usa un fallback SHA-256 in puro JS.
+   */
+  private async epHashPassword(plainPassword: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(this.EP_PORTAL_PASSWORD_SALT + String(plainPassword ?? ''));
+    let hashBuf: ArrayBuffer;
+    try {
+      if (typeof crypto !== 'undefined' && crypto.subtle && typeof crypto.subtle.digest === 'function') {
+        hashBuf = await crypto.subtle.digest('SHA-256', data);
+      } else {
+        hashBuf = this.epSha256Fallback(data);
+      }
+    } catch {
+      // crypto.subtle a volte lancia su contesti non sicuri
+      hashBuf = this.epSha256Fallback(data);
+    }
+    // Converti ArrayBuffer in base64
+    const bytes = new Uint8Array(hashBuf);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  /**
+   * Fallback SHA-256 in puro JS (per contesti non sicuri dove crypto.subtle manca).
+   * Implementazione standard FIPS 180-4.
+   */
+  private epSha256Fallback(data: Uint8Array): ArrayBuffer {
+    const K = new Uint32Array([
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ]);
+    const H = new Uint32Array([
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ]);
+    const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
+    const len = data.length;
+    const bitLen = len * 8;
+    const blockCount = Math.ceil((len + 9) / 64);
+    const buf = new Uint8Array(blockCount * 64);
+    buf.set(data);
+    buf[len] = 0x80;
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(buf.length - 8, Math.floor(bitLen / 0x100000000));
+    dv.setUint32(buf.length - 4, bitLen >>> 0);
+    const w = new Uint32Array(64);
+    for (let i = 0; i < blockCount; i++) {
+      for (let t = 0; t < 16; t++) w[t] = dv.getUint32(i * 64 + t * 4);
+      for (let t = 16; t < 64; t++) {
+        const s0 = rotr(w[t - 15], 7) ^ rotr(w[t - 15], 18) ^ (w[t - 15] >>> 3);
+        const s1 = rotr(w[t - 2], 17) ^ rotr(w[t - 2], 19) ^ (w[t - 2] >>> 10);
+        w[t] = (w[t - 16] + s0 + w[t - 7] + s1) >>> 0;
+      }
+      let [a, b, c, d, e, f, g, h] = H;
+      for (let t = 0; t < 64; t++) {
+        const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[t] + w[t]) >>> 0;
+        const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) >>> 0;
+        h = g; g = f; f = e; e = (d + t1) >>> 0;
+        d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0;
+      H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+      H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0;
+      H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
+    }
+    const out = new Uint8Array(32);
+    const outDv = new DataView(out.buffer);
+    for (let i = 0; i < 8; i++) outDv.setUint32(i * 4, H[i]);
+    return out.buffer;
+  }
+
+  /**
+   * Imposta (o sovrascrive) username e password per l'accesso al Portale Dipendenti.
+   * Richiede l'operatore esistente (non crea nuovi operatori da qui).
+   *
+   * Regola password:
+   *  - Se plainPassword è valorizzato → salva il nuovo hash (cambia password).
+   *  - Se plainPassword è vuoto:
+   *      • se l'operatore ha già un hash salvato → MANTIENE la password attuale
+   *        (aggiorna solo username / flag abilitazione).
+   *      • se non ha hash → restituisce false (bisogna fornire una password).
+   *
+   * @returns true se le credenziali sono state salvate.
+   */
+  async setEpPortalCredentials(operatorId: string, username: string, plainPassword: string): Promise<boolean> {
+    const target = this.cashOperators().find((op) => op.id === operatorId);
+    if (!target) return false;
+    if (!username) return false;
+    const usernameClean = String(username).trim().toLowerCase();
+
+    // Password vuota: mantieni quella esistente se presente, altrimenti fallisci.
+    let hash = target.epPortalPasswordHash;
+    if (plainPassword && plainPassword.trim().length > 0) {
+      hash = await this.epHashPassword(plainPassword);
+    } else if (!hash) {
+      // Nessuna password fornita e nessuna esistente: non possiamo salvare.
+      return false;
+    }
+
+    const updated: CashOperatorRecord = {
+      ...target,
+      epPortalEnabled: true,
+      epPortalUsername: usernameClean,
+      epPortalPasswordHash: hash,
+      // Quando si assegnano nuove credenziali, si ripristina anche una eventuale revoca
+      epPortalAccessRevokedAt: null,
+    };
+    this.updateCashOperator(updated);
+    return true;
+  }
+
+  /**
+   * REVOCA A TEMPO ZERO l'accesso di un operatore al Portale Dipendenti.
+   * Imposta epPortalAccessRevokedAt = now(). I check JIT (just-in-time) su ogni render
+   * e su ogni submit cacceranno fuori il tecnico immediatamente, anche se aveva una sessione attiva.
+   */
+  revokeEpPortalAccess(operatorId: string): void {
+    const target = this.cashOperators().find((op) => op.id === operatorId);
+    if (!target) return;
+    const updated: CashOperatorRecord = {
+      ...target,
+      epPortalAccessRevokedAt: new Date().toISOString(),
+    };
+    this.updateCashOperator(updated);
+  }
+
+  /**
+   * Ripristina l'accesso dopo una revoca. Non genera nuove credenziali (il chiamante
+   * è invitato a chiamare setEpPortalCredentials per fare reset password).
+   */
+  restoreEpPortalAccess(operatorId: string): void {
+    const target = this.cashOperators().find((op) => op.id === operatorId);
+    if (!target) return;
+    const updated: CashOperatorRecord = {
+      ...target,
+      epPortalAccessRevokedAt: null,
+    };
+    this.updateCashOperator(updated);
+  }
+
+  /**
+   * Sincrono. Verifica che per l'operatore:
+   *   - esista ancora e sia active
+   *   - role === 'tecnico'
+   *   - epPortalEnabled === true
+   *   - epPortalAccessRevokedAt === null
+   *   - hash password salvato
+   *
+   * Usato per il CHECK JUST-IN-TIME a tempo zero: dopo una revoca,
+   * al prossimo render/submit torna false e l'utente viene cacciato.
+   */
+  isEpPortalSessionValid(operatorId: string): boolean {
+    if (!operatorId) return false;
+    const op = this.cashOperators().find((o) => o.id === operatorId);
+    if (!op) return false;
+    if (!op.active) return false;
+    if (op.role !== 'tecnico') return false;
+    if (!op.epPortalEnabled) return false;
+    if (op.epPortalAccessRevokedAt) return false;
+    if (!op.epPortalPasswordHash) return false;
+    return true;
+  }
+
+  /**
+   * Verifica le credenziali al login. Se corrette, aggiorna last login e ritorna l'operatore.
+   * Se NON valide (utente non trovato, password errata, ruolo non tecnico, revocato, disabilitato),
+   * ritorna null.
+   */
+  async verifyEpPortalLogin(
+    username: string,
+    plainPassword: string,
+  ): Promise<CashOperatorRecord | null> {
+    if (!username || !plainPassword) return null;
+    const usernameClean = String(username).trim().toLowerCase();
+    const candidate = this.cashOperators().find(
+      (op) => !!op.epPortalUsername && op.epPortalUsername.toLowerCase() === usernameClean,
+    );
+    if (!candidate) return null;
+    if (!candidate.epPortalPasswordHash) return null;
+    // Check prima i controlli semplici (prima di spendere tempo nell'hash)
+    if (!this.isEpPortalSessionValid(candidate.id)) return null;
+    const hashAttempt = await this.epHashPassword(plainPassword);
+    if (hashAttempt !== candidate.epPortalPasswordHash) return null;
+    // Login OK: marca ultimo login
+    const updated: CashOperatorRecord = {
+      ...candidate,
+      epPortalLastLoginAt: new Date().toISOString(),
+    };
+    this.updateCashOperator(updated);
+    return updated;
+  }
+
+  // ============================================================
+  // ===== PORTALE DIPENDENTI v2 - Comunicazioni Portale =====
+  // ============================================================
+
+  /** Crea una nuova comunicazione portale (bozza o inviata). */
+  addPortalCommunication(
+    payload: Omit<PortalCommunicationRecord, 'id' | 'createdAt' | 'readBy'> & {
+      createdAt?: string;
+      readBy?: PortalCommunicationRecord['readBy'];
+    },
+  ): PortalCommunicationRecord {
+    const record: PortalCommunicationRecord = {
+      id: `com-ep-${crypto.randomUUID()}`,
+      createdAt: payload.createdAt ?? new Date().toISOString(),
+      readBy: payload.readBy ?? [],
+      lines: payload.lines ?? [],
+      status: payload.status ?? 'bozza',
+      priority: payload.priority ?? 'media',
+      targetTechnicianIds: payload.targetTechnicianIds ?? [],
+      linkedQuoteId: payload.linkedQuoteId ?? null,
+      linkedAppointmentId: payload.linkedAppointmentId ?? null,
+      title: payload.title,
+      body: payload.body ?? '',
+      createdBy: payload.createdBy ?? 'Sistema',
+    };
+    this.portalCommunications.update((items) => [record, ...items]);
+    this.queueRemoteSync('portal-communication', record);
+    return record;
+  }
+
+  /** Aggiorna una comunicazione esistente. */
+  updatePortalCommunication(record: PortalCommunicationRecord): void {
+    this.portalCommunications.update((items) =>
+      items.map((item) => (item.id === record.id ? record : item)),
+    );
+    this.queueRemoteSync('portal-communication', record);
+  }
+
+  /**
+   * Marca la comunicazione come "letta" dal tecnico specificato.
+   * Se lo stato è 'inviata', lo promuove a 'letta'.
+   */
+  markPortalCommunicationRead(commId: string, operatorId: string): void {
+    if (!commId || !operatorId) return;
+    this.portalCommunications.update((items) =>
+      items.map((item) => {
+        if (item.id !== commId) return item;
+        const already = item.readBy.find((r) => r.operatorId === operatorId);
+        const readBy = already
+          ? item.readBy
+          : [...item.readBy, { operatorId, at: new Date().toISOString() }];
+        const status: PortalCommunicationRecord['status'] =
+          item.status === 'inviata' ? 'letta' : item.status;
+        return { ...item, readBy, status };
+      }),
+    );
+  }
+
+  /**
+   * DATA QUALUNQUE COMUNICAZIONE + RIGA:
+   *  - verifica JIT revoca sessione tecnico
+   *  - chiama consumeInventoryFifoByItemId (FIFO scarico)
+   *  - marca loadedQuantity / loadedBy / loadedAt / warehouseMovementId
+   *  - promuove stato comunicazione (se tutte le righe con inventoryItemId sono caricate → 'materiale-caricato')
+   * @returns Quantità effettivamente scaricata (0 se qualcosa è fallito).
+   */
+  loadPortalCommunicationLine(params: {
+    commId: string;
+    lineId: string;
+    operatorId: string;
+    operatorName: string;
+  }): number {
+    const { commId, lineId, operatorId, operatorName } = params;
+    if (!commId || !lineId || !operatorId) return 0;
+    // 1) Check JIT revoca (tempo zero)
+    if (!this.isEpPortalSessionValid(operatorId)) return 0;
+    let loadedQty = 0;
+    let lastMovementId: string | null = null;
+
+    this.portalCommunications.update((items) =>
+      items.map((comm) => {
+        if (comm.id !== commId) return comm;
+        const line = comm.lines.find((l) => l.id === lineId);
+        if (!line) return comm;
+        if (!line.inventoryItemId) return comm; // riga non scaricabile
+        if (line.loadedQuantity >= Math.max(1, line.requiredQuantity)) return comm; // già caricata
+        const item = this.inventoryItems().find((it) => it.id === line.inventoryItemId);
+        if (!item) return comm;
+        // 2) Scarico FIFO
+        const qty = line.requiredQuantity;
+        loadedQty = this.consumeInventoryFifoByItemId({
+          inventoryItemId: line.inventoryItemId,
+          quantity: qty,
+          reason: `Prelievo servizio portale - ${comm.id}${comm.linkedQuoteId ? ` - ${comm.linkedQuoteId}` : ''}`,
+          documentNumber: `PORTALE-${comm.id.slice(0, 10)}`,
+          operator: operatorName ?? 'Portale Dipendenti',
+          sourceModule: 'magazzino',
+        });
+        if (!loadedQty) return comm;
+        // 3) Prendi ID ultimo movimento (inserito in testa da consumeInventoryFifoByItemId)
+        const lastMov = this.warehouseMovements()[0];
+        if (lastMov && lastMov.inventoryItemId === line.inventoryItemId) {
+          lastMovementId = lastMov.id;
+        }
+        // 4) Aggiorna riga
+        const lines = comm.lines.map((l) =>
+          l.id === lineId
+            ? {
+              ...l,
+              loadedQuantity: loadedQty,
+              loadedByOperatorId: operatorId,
+              loadedAt: new Date().toISOString(),
+              warehouseMovementId: lastMovementId,
+            }
+            : l,
+        );
+        // 5) Promuovi stato se tutte le righe "caricabili" sono caricate
+        const loadableLines = lines.filter((l) => !!l.inventoryItemId && l.requiredQuantity > 0);
+        const allLoaded =
+          loadableLines.length > 0 &&
+          loadableLines.every((l) => l.loadedQuantity >= Math.max(1, l.requiredQuantity));
+        const status: PortalCommunicationRecord['status'] =
+          allLoaded ? 'materiale-caricato' : comm.status === 'bozza' ? 'letta' : comm.status;
+        return { ...comm, lines, status };
+      }),
+    );
+    return loadedQty;
   }
 
   upsertEmployeeAttendanceRecord(payload: Omit<EmployeeAttendanceRecord, 'id'>): void {
@@ -2333,6 +2908,12 @@ export class AudiomaxDataService {
       cashShifts: this.cashShifts(),
       cashFiscalSettings: this.cashFiscalSettings(),
       serviceTickets: this.serviceTickets(),
+      // ===== Portale Dipendenti v1 =====
+      warehouseDdts: this.warehouseDdts(),
+      pendingServices: this.pendingServices(),
+      warehouseOrders: this.warehouseOrders(),
+      // ===== Portale Dipendenti v2 =====
+      portalCommunications: this.portalCommunications(),
       // ===== NUOVI Task 1: negozio chiusure =====
       storeClosingDaysWeekly: this.storeClosingDaysWeekly(),
       storeExtraOpeningDates: this.storeExtraOpeningDates(),
@@ -2347,6 +2928,14 @@ export class AudiomaxDataService {
       return;
     }
 
+    this.applyRawState(rawState);
+  }
+
+  /**
+   * Applica uno stato serializzato (JSON) ai signal del servizio.
+   * Usato sia per il caricamento da localStorage che per la sincronizzazione LAN.
+   */
+  private applyRawState(rawState: string): void {
     try {
       const parsedState = JSON.parse(rawState) as Partial<AudiomaxState>;
       this.restoreCollectionState(this.clients, parsedState.clients);
@@ -2393,6 +2982,10 @@ export class AudiomaxDataService {
       this.restoreValueState(this.cashFiscalSettings, parsedState.cashFiscalSettings);
       this.cashFiscalSettings.update((current) => ({ ...initialAudiomaxState.cashFiscalSettings, ...current }));
       this.restoreCollectionState(this.serviceTickets, parsedState.serviceTickets);
+      // ===== Portale Dipendenti v1 =====
+      this.restoreCollectionState(this.warehouseDdts, parsedState.warehouseDdts);
+      this.restoreCollectionState(this.pendingServices, parsedState.pendingServices);
+      this.restoreCollectionState(this.warehouseOrders, parsedState.warehouseOrders);
       // ===== NUOVI Task 1: ripristina impostazioni negozio + fallback defaults per retrocompatibilità =====
       this.restoreCollectionState(this.storeExtraOpeningDates, parsedState.storeExtraOpeningDates);
       this.restoreCollectionState(this.storeBulkClosures, parsedState.storeBulkClosures);
@@ -2402,6 +2995,58 @@ export class AudiomaxDataService {
       this.lastPersistedState = rawState;
     } catch {
       this.storage.removeItem(this.storageKey);
+    }
+  }
+
+  /**
+   * Indica se la sincronizzazione LAN è abilitata.
+   * È attiva solo in sviluppo su localhost o su indirizzi di rete locale,
+   * dove il server Vite espone l'endpoint /api/state.
+   * In produzione (Vercel) questo flag è falso e vengono usati solo i dati locali.
+   */
+  private get isLanSyncEnabled(): boolean {
+    const host = location.hostname;
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+    );
+  }
+
+  /**
+   * Carica lo stato condiviso dal server LAN (endpoint /api/state).
+   * Se il server non risponde o non ha dati, lascia invariato lo stato locale.
+   * Questo permette al dipendente di vedere le credenziali create dal titolare sul PC.
+   */
+  private async loadFromServer(): Promise<void> {
+    if (!this.isLanSyncEnabled) return;
+    try {
+      const res = await fetch('/api/state', { cache: 'no-store' });
+      if (!res.ok) return;
+      const rawState = await res.text();
+      if (!rawState || rawState === '{}') return;
+      this.applyRawState(rawState);
+    } catch {
+      // Server non disponibile: uso i dati locali
+    }
+  }
+
+  /**
+   * Invia lo stato corrente al server LAN per condividerlo con altri dispositivi.
+   * Chiamato automaticamente dopo la persistenza locale.
+   */
+  private async pushToServer(serializedState: string): Promise<void> {
+    if (!this.isLanSyncEnabled) return;
+    try {
+      await fetch('/api/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: serializedState,
+      });
+    } catch {
+      // Server non disponibile: i dati restano salvati in locale
     }
   }
 
@@ -2431,6 +3076,8 @@ export class AudiomaxDataService {
       if (didPersist) {
         this.lastPersistedState = persistedState;
       }
+      // Sincronizza lo stato con il server LAN per condividerlo con altri dispositivi
+      void this.pushToServer(persistedState);
       this.pendingPersistedState = null;
       this.localPersistTimer = null;
     }, this.localPersistDelayMs);
@@ -2520,6 +3167,9 @@ export class AudiomaxDataService {
       cashTransactionsResult,
       cashShiftsResult,
       serviceTicketsResult,
+      warehouseDdtsResult,
+      pendingServicesResult,
+      warehouseOrdersResult,
     ] =
       await Promise.all([
         client
@@ -2564,6 +3214,19 @@ export class AudiomaxDataService {
             'id, title, customer_name, service_type, location_type, priority, status, technician, linked_quote_id, linked_appointment_id, material_summary, material_cost, material_lines, work_summary, resolution_status, closed_at, created_at',
           )
           .order('created_at', { ascending: false }),
+        // ===== Portale Dipendenti v1 =====
+        client
+          .from(supabaseConfig.tables.warehouseDdts)
+          .select('*')
+          .order('created_at', { ascending: false }),
+        client
+          .from(supabaseConfig.tables.pendingServices)
+          .select('*')
+          .order('created_at', { ascending: false }),
+        client
+          .from(supabaseConfig.tables.warehouseOrders)
+          .select('*')
+          .order('created_at', { ascending: false }),
       ]);
 
     const firstError =
@@ -2574,7 +3237,12 @@ export class AudiomaxDataService {
       cashProductsResult.error ??
       cashTransactionsResult.error ??
       cashShiftsResult.error ??
-      serviceTicketsResult?.error;
+      serviceTicketsResult?.error ??
+      // Portale Dipendenti: se la tabella non esiste, trattiamo come
+      // "schema-required" (non è un errore bloccante, dato che vivono in localStorage).
+      (warehouseDdtsResult?.error?.code === '42P01' ? null : warehouseDdtsResult?.error) ??
+      (pendingServicesResult?.error?.code === '42P01' ? null : pendingServicesResult?.error) ??
+      (warehouseOrdersResult?.error?.code === '42P01' ? null : warehouseOrdersResult?.error);
 
     if (firstError) {
       this.supabase.connectionState.set(firstError.code === '42P01' ? 'schema-required' : 'error');
@@ -2596,6 +3264,16 @@ export class AudiomaxDataService {
     const remoteCashShifts = (cashShiftsResult.data ?? []).map((row) => this.mapCashShiftRow(row));
     const remoteServiceTickets = (serviceTicketsResult?.data ?? []).map((row: ServiceTicketRow) =>
       this.mapServiceTicketRow(row),
+    );
+    // ===== Portale Dipendenti v1: merge remoto (se tabelle esistono) =====
+    const remoteWarehouseDdts: WarehouseDdtRecord[] = (warehouseDdtsResult?.data ?? []).map((row: any) =>
+      this.mapWarehouseDdtRow(row),
+    );
+    const remotePendingServices: PendingServiceRecord[] = (pendingServicesResult?.data ?? []).map((row: any) =>
+      this.mapPendingServiceRow(row),
+    );
+    const remoteWarehouseOrders: WarehouseOrderRecord[] = (warehouseOrdersResult?.data ?? []).map((row: any) =>
+      this.mapWarehouseOrderRow(row),
     );
 
     if (
@@ -2647,6 +3325,17 @@ export class AudiomaxDataService {
       this.serviceTickets.set(this.mergeRemoteWithLocalUpdates(remoteServiceTickets, this.serviceTickets()));
     }
 
+    // ===== Portale Dipendenti v1 merge =====
+    if (remoteWarehouseDdts.length) {
+      this.warehouseDdts.set(this.mergeRemoteWithLocalUpdates(remoteWarehouseDdts, this.warehouseDdts()));
+    }
+    if (remotePendingServices.length) {
+      this.pendingServices.set(this.mergeRemoteWithLocalUpdates(remotePendingServices, this.pendingServices()));
+    }
+    if (remoteWarehouseOrders.length) {
+      this.warehouseOrders.set(this.mergeRemoteWithLocalUpdates(remoteWarehouseOrders, this.warehouseOrders()));
+    }
+
     this.supabase.connectionState.set('connected');
     this.isRemoteLoaded.set(true);
   }
@@ -2660,7 +3349,12 @@ export class AudiomaxDataService {
       | 'cash-product'
       | 'cash-transaction'
       | 'cash-shift'
-      | 'ticket',
+      | 'ticket'
+      | 'cash-operator'
+      | 'warehouse-ddt'
+      | 'pending-service'
+      | 'warehouse-order'
+      | 'portal-communication',
     payload:
       | ClientRecord
       | QuoteRecord
@@ -2669,7 +3363,12 @@ export class AudiomaxDataService {
       | CashRegisterProductRecord
       | CashTransactionRecord
       | CashShiftRecord
-      | ServiceTicketRecord,
+      | ServiceTicketRecord
+      | CashOperatorRecord
+      | WarehouseDdtRecord
+      | PendingServiceRecord
+      | WarehouseOrderRecord
+      | PortalCommunicationRecord,
   ): void {
     if (!this.supabase.isConfigured) {
       return;
@@ -2694,7 +3393,12 @@ export class AudiomaxDataService {
       | 'cash-product'
       | 'cash-transaction'
       | 'cash-shift'
-      | 'ticket',
+      | 'ticket'
+      | 'cash-operator'
+      | 'warehouse-ddt'
+      | 'pending-service'
+      | 'warehouse-order'
+      | 'portal-communication',
     id: string,
   ): void {
     if (!this.supabase.isConfigured) {
@@ -2726,6 +3430,9 @@ export class AudiomaxDataService {
       cashTransactionsResult,
       cashShiftsResult,
       serviceTicketsResult,
+      warehouseDdtsResult,
+      pendingServicesResult,
+      warehouseOrdersResult,
     ] =
       await Promise.all([
         snapshot.clients.length
@@ -2768,6 +3475,22 @@ export class AudiomaxDataService {
             .from(supabaseConfig.tables.serviceTickets)
             .upsert(snapshot.serviceTickets.map((item) => this.toServiceTicketRow(item)))
           : Promise.resolve({ error: null }),
+        // ===== Portale Dipendenti v1 =====
+        snapshot.warehouseDdts.length
+          ? client
+            .from(supabaseConfig.tables.warehouseDdts)
+            .upsert(snapshot.warehouseDdts.map((item) => this.toWarehouseDdtRow(item)))
+          : Promise.resolve({ error: null }),
+        snapshot.pendingServices.length
+          ? client
+            .from(supabaseConfig.tables.pendingServices)
+            .upsert(snapshot.pendingServices.map((item) => this.toPendingServiceRow(item)))
+          : Promise.resolve({ error: null }),
+        snapshot.warehouseOrders.length
+          ? client
+            .from(supabaseConfig.tables.warehouseOrders)
+            .upsert(snapshot.warehouseOrders.map((item) => this.toWarehouseOrderRow(item)))
+          : Promise.resolve({ error: null }),
       ]);
 
     const firstError =
@@ -2778,7 +3501,11 @@ export class AudiomaxDataService {
       cashProductsResult.error ??
       cashTransactionsResult.error ??
       cashShiftsResult.error ??
-      serviceTicketsResult?.error;
+      serviceTicketsResult.error ??
+      // Portale Dipendenti: se la tabella non esiste (42P01), trattiamo come schema-required e non falliamo.
+      (warehouseDdtsResult?.error?.code === '42P01' ? null : warehouseDdtsResult?.error) ??
+      (pendingServicesResult?.error?.code === '42P01' ? null : pendingServicesResult?.error) ??
+      (warehouseOrdersResult?.error?.code === '42P01' ? null : warehouseOrdersResult?.error);
 
     if (firstError) {
       this.supabase.connectionState.set(firstError.code === '42P01' ? 'schema-required' : 'error');
@@ -2795,7 +3522,12 @@ export class AudiomaxDataService {
       | 'cash-product'
       | 'cash-transaction'
       | 'cash-shift'
-      | 'ticket',
+      | 'ticket'
+      | 'cash-operator'
+      | 'warehouse-ddt'
+      | 'pending-service'
+      | 'warehouse-order'
+      | 'portal-communication',
     payload:
       | ClientRecord
       | QuoteRecord
@@ -2804,7 +3536,12 @@ export class AudiomaxDataService {
       | CashRegisterProductRecord
       | CashTransactionRecord
       | CashShiftRecord
-      | ServiceTicketRecord,
+      | ServiceTicketRecord
+      | CashOperatorRecord
+      | WarehouseDdtRecord
+      | PendingServiceRecord
+      | WarehouseOrderRecord
+      | PortalCommunicationRecord,
   ): Promise<void> {
     const client = this.supabase.client;
 
@@ -2843,9 +3580,30 @@ export class AudiomaxDataService {
                     ? await client
                       .from(supabaseConfig.tables.appointments)
                       .upsert(this.toAppointmentRow(payload as AppointmentRecord))
-                    : await client
-                      .from(supabaseConfig.tables.serviceTickets)
-                      .upsert(this.toServiceTicketRow(payload as ServiceTicketRecord));
+                    : kind === 'ticket'
+                      ? await client
+                        .from(supabaseConfig.tables.serviceTickets)
+                        .upsert(this.toServiceTicketRow(payload as ServiceTicketRecord))
+                      : kind === 'warehouse-ddt'
+                        ? await client
+                          .from(supabaseConfig.tables.warehouseDdts)
+                          .upsert(this.toWarehouseDdtRow(payload as WarehouseDdtRecord))
+                        : kind === 'pending-service'
+                          ? await client
+                            .from(supabaseConfig.tables.pendingServices)
+                            .upsert(this.toPendingServiceRow(payload as PendingServiceRecord))
+                          : kind === 'warehouse-order'
+                            ? await client
+                              .from(supabaseConfig.tables.warehouseOrders)
+                              .upsert(this.toWarehouseOrderRow(payload as WarehouseOrderRecord))
+                            : kind === 'cash-operator'
+                              ? await client
+                                .from(supabaseConfig.tables.cashOperators)
+                                .upsert(this.toCashOperatorRow(payload as CashOperatorRecord))
+                              : // portal-communication
+                              await client
+                                .from(supabaseConfig.tables.portalCommunications)
+                                .upsert(this.toPortalCommunicationRow(payload as PortalCommunicationRecord));
 
     if (result.error) {
       this.supabase.connectionState.set(result.error.code === '42P01' ? 'schema-required' : 'error');
@@ -2864,7 +3622,12 @@ export class AudiomaxDataService {
       | 'cash-product'
       | 'cash-transaction'
       | 'cash-shift'
-      | 'ticket',
+      | 'ticket'
+      | 'cash-operator'
+      | 'warehouse-ddt'
+      | 'pending-service'
+      | 'warehouse-order'
+      | 'portal-communication',
     id: string,
   ): Promise<void> {
     const client = this.supabase.client;
@@ -2890,7 +3653,17 @@ export class AudiomaxDataService {
                   ? supabaseConfig.tables.cashShifts
                   : kind === 'appointment'
                     ? supabaseConfig.tables.appointments
-                    : supabaseConfig.tables.serviceTickets;
+                    : kind === 'ticket'
+                      ? supabaseConfig.tables.serviceTickets
+                      : kind === 'cash-operator'
+                        ? supabaseConfig.tables.cashOperators
+                        : kind === 'warehouse-ddt'
+                          ? supabaseConfig.tables.warehouseDdts
+                          : kind === 'pending-service'
+                            ? supabaseConfig.tables.pendingServices
+                            : kind === 'warehouse-order'
+                              ? supabaseConfig.tables.warehouseOrders
+                              : supabaseConfig.tables.portalCommunications;
 
     const result = await client.from(table).delete().eq('id', id);
 
@@ -3039,6 +3812,159 @@ export class AudiomaxDataService {
       created_at: item.createdAt,
     };
   }
+
+  // ============ Portale Dipendenti v1: row mapper (flat per Supabase) ============
+  private toWarehouseDdtRow(item: WarehouseDdtRecord) {
+    return {
+      id: item.id,
+      number: item.number,
+      created_at: item.createdAt,
+      emitted_at: item.emittedAt,
+      delivered_at: item.deliveredAt,
+      created_by_operator_id: item.createdByOperatorId,
+      created_by_operator_name: item.createdByOperatorName,
+      client_id: item.clientId,
+      client_snapshot: item.clientSnapshot,
+      vehicle: item.vehicle,
+      destination: item.destination,
+      note: item.note,
+      lines: item.lines,
+      status: item.status,
+    };
+  }
+  private toPendingServiceRow(item: PendingServiceRecord) {
+    return {
+      id: item.id,
+      created_at: item.createdAt,
+      created_by_operator_id: item.createdByOperatorId,
+      created_by_operator_name: item.createdByOperatorName,
+      service_date: item.serviceDate,
+      client_id: item.clientId,
+      client_snapshot: item.clientSnapshot,
+      type: item.type,
+      description: item.description,
+      price_unit: item.priceUnit,
+      quantity: item.quantity,
+      total_amount: item.totalAmount,
+      status: item.status,
+      paid_at: item.paidAt,
+      linked_cash_transaction_id: item.linkedCashTransactionId,
+    };
+  }
+  private toWarehouseOrderRow(item: WarehouseOrderRecord) {
+    return {
+      id: item.id,
+      number: item.number,
+      created_at: item.createdAt,
+      updated_at: item.updatedAt,
+      created_by_operator_id: item.createdByOperatorId,
+      created_by_operator_name: item.createdByOperatorName,
+      order_type: item.orderType,
+      client_id: item.clientId,
+      client_snapshot: item.clientSnapshot,
+      urgency: item.urgency,
+      note: item.note,
+      expected_delivery_date: item.expectedDeliveryDate,
+      lines: item.lines,
+      status: item.status,
+    };
+  }
+
+  // ===== Portale Dipendenti v2: Row mapper per cash-operators =====
+  private toCashOperatorRow(item: CashOperatorRecord): CashOperatorRow {
+    return {
+      id: item.id,
+      name: item.name,
+      role: item.role,
+      active: item.active,
+      employment_type: item.employmentType,
+      job_title: item.jobTitle,
+      contract_hours_weekly: item.contractHoursWeekly,
+      shift_patterns: item.shiftPatterns,
+      shift_cycle_start_date: item.shiftCycleStartDate,
+      default_weekly_shift: item.defaultWeeklyShift,
+      ep_portal_enabled: item.epPortalEnabled,
+      ep_portal_username: item.epPortalUsername,
+      ep_portal_password_hash: item.epPortalPasswordHash,
+      ep_portal_access_revoked_at: item.epPortalAccessRevokedAt,
+      ep_portal_last_login_at: item.epPortalLastLoginAt,
+    };
+  }
+
+  // ===== Portale Dipendenti v2: Row mapper per portal-communications =====
+  private toPortalCommunicationRow(item: PortalCommunicationRecord): PortalCommunicationRow {
+    return {
+      id: item.id,
+      created_at: item.createdAt,
+      created_by: item.createdBy,
+      title: item.title,
+      body: item.body,
+      priority: item.priority,
+      target_technician_ids: item.targetTechnicianIds,
+      linked_quote_id: item.linkedQuoteId,
+      linked_appointment_id: item.linkedAppointmentId,
+      status: item.status,
+      lines: item.lines,
+      read_by: item.readBy,
+    };
+  }
+
+  private mapWarehouseDdtRow(row: any): WarehouseDdtRecord {
+    return {
+      id: row.id,
+      number: row.number ?? '',
+      createdAt: row.created_at,
+      emittedAt: row.emitted_at ?? null,
+      deliveredAt: row.delivered_at ?? null,
+      createdByOperatorId: row.created_by_operator_id,
+      createdByOperatorName: row.created_by_operator_name ?? '',
+      clientId: row.client_id ?? null,
+      clientSnapshot: row.client_snapshot ?? '',
+      vehicle: row.vehicle ?? '',
+      destination: row.destination ?? '',
+      note: row.note ?? '',
+      lines: (row.lines ?? []) as WarehouseDdtLineRecord[],
+      status: (row.status ?? 'bozza') as WarehouseDdtRecord['status'],
+    };
+  }
+  private mapPendingServiceRow(row: any): PendingServiceRecord {
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      createdByOperatorId: row.created_by_operator_id,
+      createdByOperatorName: row.created_by_operator_name ?? '',
+      serviceDate: row.service_date,
+      clientId: row.client_id,
+      clientSnapshot: row.client_snapshot ?? '',
+      type: row.type as PendingServiceRecord['type'],
+      description: row.description ?? '',
+      priceUnit: Number(row.price_unit ?? 0),
+      quantity: Number(row.quantity ?? 1),
+      totalAmount: Number(row.total_amount ?? 0),
+      status: (row.status ?? 'inviato') as PendingServiceRecord['status'],
+      paidAt: row.paid_at ?? null,
+      linkedCashTransactionId: row.linked_cash_transaction_id ?? null,
+    };
+  }
+  private mapWarehouseOrderRow(row: any): WarehouseOrderRecord {
+    return {
+      id: row.id,
+      number: row.number ?? '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at ?? row.created_at,
+      createdByOperatorId: row.created_by_operator_id,
+      createdByOperatorName: row.created_by_operator_name ?? '',
+      orderType: row.order_type as WarehouseOrderRecord['orderType'],
+      clientId: row.client_id ?? null,
+      clientSnapshot: row.client_snapshot ?? '',
+      urgency: row.urgency as WarehouseOrderRecord['urgency'],
+      note: row.note ?? '',
+      expectedDeliveryDate: row.expected_delivery_date ?? null,
+      lines: (row.lines ?? []) as WarehouseOrderLineRecord[],
+      status: (row.status ?? 'pending') as WarehouseOrderRecord['status'],
+    };
+  }
+  // ============ Fine Portale Dipendenti v1 row mapper ============
 
   private mapClientRow(row: ClientRow): ClientRecord {
     const fallbackPrivacyProfile = createClientPrivacyProfile();
@@ -3266,6 +4192,49 @@ export class AudiomaxDataService {
       closedAt: row.closed_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at ?? null,
+    };
+  }
+
+  // ===== Portale Dipendenti v2: map row -> CashOperatorRecord =====
+  private mapCashOperatorRow(row: CashOperatorRow): CashOperatorRecord {
+    return {
+      id: row.id,
+      name: row.name,
+      role: row.role,
+      active: row.active,
+      employmentType: row.employment_type,
+      jobTitle: row.job_title,
+      contractHoursWeekly: Number(row.contract_hours_weekly) || 0,
+      shiftPatterns: row.shift_patterns ?? [
+        { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      ],
+      shiftCycleStartDate: row.shift_cycle_start_date ?? new Date().toISOString().slice(0, 10),
+      defaultWeeklyShift: row.default_weekly_shift ?? {
+        lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '',
+      },
+      epPortalEnabled: !!row.ep_portal_enabled,
+      epPortalUsername: row.ep_portal_username ?? null,
+      epPortalPasswordHash: row.ep_portal_password_hash ?? null,
+      epPortalAccessRevokedAt: row.ep_portal_access_revoked_at ?? null,
+      epPortalLastLoginAt: row.ep_portal_last_login_at ?? null,
+    };
+  }
+
+  // ===== Portale Dipendenti v2: map row -> PortalCommunicationRecord =====
+  private mapPortalCommunicationRow(row: PortalCommunicationRow): PortalCommunicationRecord {
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      createdBy: row.created_by ?? 'Sistema',
+      title: row.title,
+      body: row.body ?? '',
+      priority: row.priority,
+      targetTechnicianIds: Array.isArray(row.target_technician_ids) ? row.target_technician_ids : [],
+      linkedQuoteId: row.linked_quote_id ?? null,
+      linkedAppointmentId: row.linked_appointment_id ?? null,
+      status: row.status,
+      lines: Array.isArray(row.lines) ? (row.lines as PortalCommunicationLine[]) : [],
+      readBy: Array.isArray(row.read_by) ? (row.read_by as PortalCommunicationRecord['readBy']) : [],
     };
   }
 

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject, signal } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs';
 
 import { AudiomaxDataService } from './audiomax-data.service';
 import { BrowserStorageService } from './browser-storage.service';
@@ -20,7 +21,13 @@ export class App {
   private readonly supabase = inject(SupabaseService);
   private readonly themeService = inject(ThemeService);
   private readonly router = inject(Router);
+  private readonly rootRoute = inject(ActivatedRoute);
   private readonly sidebarStorageKey = 'audiomax-sidebar-collapsed';
+
+  // ✅ EP v3: Portale Dipendenti STANDALONE (via route data standalonePortal === true).
+  // Quando TRUE: nascondiamo completamente sidebar + topbar + workspace del CRM:
+  // il dipendente vede SOLO il portalino dedicato (NIENTE gestionale completo!).
+  protected readonly hideCrmShell = signal(false);
 
   protected readonly sections = crmSections;
   // Menu laterale: collassato di default (stato retrattile).
@@ -118,6 +125,26 @@ export class App {
     if (persisted === '1') {
       this.sidebarCollapsed.set(true);
     }
+
+    // ✅ EP v3: aggiorna hideCrmShell su NavigationEnd (la route lazy-loaded ha data.standalonePortal sulla leaf)
+    this.router.events
+      .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
+      .subscribe(() => {
+        // Attraversa tutta la gerarchia ActivatedRoute fino alla foglia per trovare 'standalonePortal'
+        let child: ActivatedRoute | null = this.rootRoute.firstChild;
+        let standalone = false;
+        while (child) {
+          if ((child.snapshot.data as any)?.standalonePortal === true) {
+            standalone = true;
+          }
+          child = child.firstChild;
+        }
+        // Controllo diretto: URL inizia per /portale-dipendenti
+        if (!standalone && this.router.url.startsWith('/portale-dipendenti')) {
+          standalone = true;
+        }
+        this.hideCrmShell.set(standalone);
+      });
   }
 
   protected toggleTheme(): void {

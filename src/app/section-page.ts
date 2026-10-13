@@ -10,7 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormArray, FormBuilder, FormGroup, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { map, merge, startWith } from 'rxjs';
 // ✅ Fix ISS-29: import del servizio storage centralizzato SSR-safe
@@ -39,12 +39,17 @@ import {
   PaymentProviderKind,
   PaymentExecutionMode,
   PaymentProviderRecord,
+  PortalCommunicationLine,
+  PortalCommunicationRecord,
   QuoteLineRecord,
   QuoteRecord,
   ServiceTicketRecord,
   WarehouseLotRecord,
   WarehouseMovementRecord,
   WarehousePurchaseRecord,
+  WarehouseDdtRecord,
+  PendingServiceRecord,
+  WarehouseOrderRecord,
   createClientPrivacyProfile,
 } from './crm-runtime-data';
 import { crmSections } from './crm-sections';
@@ -299,7 +304,7 @@ interface PagheNoteRow {
 
 @Component({
   selector: 'app-section-page',
-  imports: [CommonModule, ReactiveFormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, RouterLink],
   templateUrl: './section-page.html',
   styleUrl: './section-page.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -625,6 +630,19 @@ export class SectionPageComponent {
   protected readonly cashNewClientSdiCode = signal('');
   protected readonly cashNewClientPec = signal('');
   protected readonly cashNewClientBillingAddress = signal('');
+
+  // ✅ Modale Dati Identificativi Fattura (quando passi da scontrino → fattura con cliente walk-in o incompleto)
+  protected readonly cashInvoiceDataModalOpen = signal(false);
+  protected readonly cashInvIsCompany = signal(false);
+  protected readonly cashInvName = signal('');
+  protected readonly cashInvPhone = signal('');
+  protected readonly cashInvCity = signal('');
+  protected readonly cashInvEmail = signal('');
+  protected readonly cashInvTaxId = signal('');
+  protected readonly cashInvSdiCode = signal('');
+  protected readonly cashInvPec = signal('');
+  protected readonly cashInvBillingAddress = signal('');
+  protected readonly cashInvCapturedType: WritableSignal<CashTransactionRecord['documentType'] | null> = signal(null);
   protected readonly cashPrivacyDispatchChannel = signal<'whatsapp' | 'email' | 'firma'>('whatsapp');
   protected readonly cashPrivacyNoticeAcknowledged = signal(false);
   protected readonly cashPrivacyEmailMarketing = signal(false);
@@ -5424,6 +5442,1767 @@ export class SectionPageComponent {
     reason: ['', Validators.required],
     operator: ['Magazzino', Validators.required],
   });
+
+  /** Valore live reattivo del form di rettifica (per aggiornamenti sincronizzati con l'UI) */
+  protected readonly warehouseAdjustmentFormLive = toSignal(
+    this.warehouseAdjustmentForm.valueChanges.pipe(
+      startWith(this.warehouseAdjustmentForm.getRawValue()),
+      map(() => this.warehouseAdjustmentForm.getRawValue()),
+    ),
+    { initialValue: this.warehouseAdjustmentForm.getRawValue() },
+  );
+
+  /** Giacenza attuale dell'articolo selezionato nel form di rettifica (sola lettura, reattiva) */
+  protected readonly warehouseAdjustmentCurrentStock = computed(() => {
+    const id = this.warehouseAdjustmentFormLive().inventoryItemId;
+    if (!id) return null;
+    const found = this.allInventoryItems().find((item) => item.id === id);
+    return found ? found.stock : null;
+  });
+
+  /** Elenco operatori per la rettifica: dipendenti attivi + voci standard sempre disponibili */
+  protected readonly warehouseAdjustmentOperatorList = computed(() => {
+    const fromEmployees = this.data
+      .activeCashOperators()
+      .map((op) => op.name.trim())
+      .filter((name) => name.length > 0);
+    const defaults = ['Magazzino', 'Cassa', 'Amministrazione'];
+    const merged = [...defaults, ...fromEmployees];
+    // rimuove duplicati preservando ordine
+    return Array.from(new Set(merged));
+  });
+
+  /** Ripristina il form di rettifica rapida ai valori iniziali (pulsante Annulla) */
+  protected resetWarehouseAdjustmentForm(): void {
+    this.warehouseAdjustmentForm.reset({
+      inventoryItemId: '',
+      actualQuantity: 0,
+      reason: '',
+      operator: 'Magazzino',
+    });
+  }
+
+  // ============ INIZIO PORTALE DIPENDENTI v1 (mobile-first, 4 moduli) ============
+  /** Chiave storage per ricordare l'ultimo operatore selezionato sul dispositivo */
+  private readonly EP_OPERATOR_STORAGE_KEY = 'audiomax.ep.activeOperatorId';
+
+  /** Definizione delle tab del portale (barra sticky inferiore) */
+  protected readonly epTabs = [
+    { id: 'magazzino' as const, label: 'Magazzino', icon: '📦' },
+    { id: 'ddt' as const, label: 'DDT', icon: '🚚' },
+    { id: 'servizi' as const, label: 'Servizi', icon: '💶' },
+    { id: 'ordini' as const, label: 'Ordini', icon: '🛒' },
+    { id: 'agenda' as const, label: 'Agenda', icon: '📅' },
+    { id: 'comunicazioni' as const, label: 'Comunicazioni', icon: '🔔' },
+  ] as const;
+
+  /** Tab attualmente selezionata (persistenza in sessione per ricaricamenti pagina) */
+  protected readonly epActiveTab = signal<
+    'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'
+  >('magazzino');
+
+  /** Visibilità modale "Link telefono / QR" (header) */
+  protected epOpenMobilePanel = false;
+
+  // ✅ EP v3: Menu hamburger drawer (navigazione portale dedicato, niente voci gestionali complete!)
+  protected readonly epNavDrawerOpen = signal(false);
+
+  // Home: vista portale principale (tab magazzino + sommario)
+  protected epResetPortalView(): void {
+    this.epActiveTab.set('magazzino');
+    this.epNavDrawerOpen.set(false);
+    this.epSelectedCommId.set(null);
+  }
+
+  protected epGotoTab(id: 'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'): void {
+    this.epActiveTab.set(id);
+    this.epSelectedCommId.set(null);
+    this.epNavDrawerOpen.set(false);
+  }
+
+  /** Elenco operatori attivi da mostrare nella fase di onboarding */
+  protected readonly epOperatoriAttivi = this.data.activeCashOperators;
+
+  /** ID operatore attivo attualmente selezionato (signal + persistenza storage) */
+  protected readonly epActiveOperatorId = (() => {
+    let initial: string | null = null;
+    try {
+      const stored = this.storage.getItem(this.EP_OPERATOR_STORAGE_KEY);
+      initial = typeof stored === 'string' ? stored : null;
+    } catch {
+      initial = null;
+    }
+    return signal<string | null>(initial);
+  })();
+
+  /** Operatore attualmente attivo (computed da signal id + elenco operatori) */
+  protected readonly epActiveOperator = computed(() => {
+    const id = this.epActiveOperatorId();
+    if (!id) return null;
+    return this.data.activeCashOperators().find((o) => o.id === id) ?? null;
+  });
+
+  /** Permette all'utente di cambiare operatore (ritorna all'onboarding) */
+  protected epChangeOperator(): void {
+    this.storage.removeItem(this.EP_OPERATOR_STORAGE_KEY);
+    this.epActiveOperatorId.set(null);
+  }
+
+  /** Seleziona l'operatore per questa sessione e salva nel browser (legacy v1) */
+  protected epSelectOperator(operatorId: string): void {
+    const op = this.data.activeCashOperators().find((o) => o.id === operatorId);
+    if (!op) return;
+    this.storage.setItem(this.EP_OPERATOR_STORAGE_KEY, op.id);
+    this.epActiveOperatorId.set(op.id);
+  }
+
+  // ============ PORTALE DIPENDENTI v2 - Autenticazione e sessione JIT ============
+  /** Chiave storage per la sessione portale (autenticazione tecnici) */
+  private readonly EP_SESSION_STORAGE_KEY = 'audiomax.ep.session';
+  /** Durata massima sessione (2 ore), allineata a AudiomaxDataService.EP_PORTAL_SESSION_TTL_MS */
+  private readonly EP_SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+
+  /** Form di login portale (username + password) */
+  protected readonly epLoginForm = this.formBuilder.nonNullable.group({
+    username: ['', Validators.required],
+    password: ['', Validators.required],
+  });
+  /** Eventuale messaggio di errore di login */
+  protected readonly epLoginError = signal<string>('');
+  /** Stato di submit durante l'hash SHA-256 (operazione async) */
+  protected readonly epLoginLoading = signal<boolean>(false);
+
+  /** Carica e valida la sessione dal localStorage. */
+  private epReadSessionFromStorage(): { operatorId: string; expireAt: number } | null {
+    try {
+      const raw = this.storage.getItem(this.EP_SESSION_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as any;
+      if (!parsed || typeof parsed.operatorId !== 'string' || typeof parsed.expireAt !== 'number') return null;
+      if (parsed.expireAt < Date.now()) {
+        this.storage.removeItem(this.EP_SESSION_STORAGE_KEY);
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+  /** Signal sessione (inizializzato da storage). */
+  protected readonly epSession = (() => {
+    const init = this.epReadSessionFromStorage();
+    return signal<{ operatorId: string; expireAt: number } | null>(init);
+  })();
+
+  /**
+   * ✅ OPERATORE ATTUALE VALIDATO.
+   * Computed JIT (just-in-time): ad ogni render ricontrolla SEMPRE:
+   *   1) Sessione localStorage valida (expireAt non scaduto)
+   *   2) Ruolo = tecnico
+   *   3) epPortalEnabled = true
+   *   4) epPortalAccessRevokedAt = null
+   *   5) hash password ancora presente
+   * Qualsiasi controllo fallisce → ritorna NULL = utente cacciato fuori IMMEDIATAMENTE (tempo zero).
+   */
+  protected readonly epSessionOperator = computed<CashOperatorRecord | null>(() => {
+    const session = this.epSession();
+    if (!session) return null;
+    if (session.expireAt < Date.now()) {
+      queueMicrotask(() => this.epLogout());
+      return null;
+    }
+    // Check JIT via service: legge signal cashOperators LIVE (revokedAt visto immediatamente).
+    const ok = this.data.isEpPortalSessionValid(session.operatorId);
+    if (!ok) {
+      queueMicrotask(() => this.epLogout());
+      return null;
+    }
+    return this.data.cashOperators().find((o) => o.id === session.operatorId) ?? null;
+  });
+
+  /** True se siamo nella schermata di login (nessuna sessione valida). */
+  protected readonly epIsLoginScreen = computed(() => this.epSessionOperator() === null);
+
+  /** Submit login: chiama verifyEpPortalLogin (async hash) e se ok salva la sessione. */
+  protected async epSubmitLogin(): Promise<void> {
+    if (this.epLoginLoading()) return;
+    const raw = this.epLoginForm.getRawValue();
+    if (!raw.username || !raw.password) {
+      this.epLoginError.set('Inserisci username e password.');
+      return;
+    }
+    this.epLoginLoading.set(true);
+    this.epLoginError.set('');
+    try {
+      const op = await this.data.verifyEpPortalLogin(String(raw.username).trim(), String(raw.password));
+      if (!op) {
+        this.epLoginError.set('Credenziali errate, oppure accesso revocato o non abilitato. Contatta il titolare.');
+        return;
+      }
+      const expireAt = Date.now() + this.EP_SESSION_TTL_MS;
+      const session = { operatorId: op.id, expireAt };
+      this.storage.setItem(this.EP_SESSION_STORAGE_KEY, JSON.stringify(session));
+      this.epSession.set(session);
+      this.epLoginForm.reset({ username: '', password: '' });
+      this.pushToast(`Benvenuto ${op.name}, accesso portale riuscito.`, 'success');
+    } finally {
+      this.epLoginLoading.set(false);
+    }
+  }
+
+  /** Logout e pulizia storage. */
+  protected epLogout(): void {
+    try { this.storage.removeItem(this.EP_SESSION_STORAGE_KEY); } catch { /* ignore */ }
+    this.epSession.set(null);
+    this.epActiveTab.set('magazzino');
+  }
+
+  /** Helper UUID compatibile. */
+  private epUuid(): string {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    } catch { /* ignore */ }
+    return 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  }
+
+  // ============ PORTALE DIPENDENTI v2 - Admin dipendenti: credenziali + revoca ============
+  /** Stato modale "Crea/Resetta credenziali Portale" */
+  protected readonly epCredentialsModalOpen = signal<boolean>(false);
+  /** Id operatore che stiamo modificando */
+  protected readonly epCredentialsTargetId = signal<string | null>(null);
+  /** Username suggerito (modificabile) */
+  protected readonly epCredentialsUsername = signal<string>('');
+  /** Password generata: mostrata UNA SOLA VOLTA dopo il salvataggio. */
+  protected readonly epCredentialsPassword = signal<string>('');
+  /** True se l'utente ha già salvato e adesso sta vedendo la password. */
+  protected readonly epCredentialsShowOnce = signal<boolean>(false);
+
+  /** Normalizza un nome in username (minuscolo, no spazi, no accenti) → "marco.rossi" */
+  protected epNormalizeUsername(name: string): string {
+    const cleaned = String(name ?? '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s.-]/g, '')
+      .trim()
+      .replace(/\s+/g, '.');
+    return cleaned || 'utente';
+  }
+
+  /** Genera password casuale. */
+  protected epGeneratePassword(len = 12): string {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghjkmnpqrstuvwxyz';
+    const nums = '23456789';
+    const syms = '!@#$%*-_=+';
+    const all = upper + lower + nums + syms;
+    try {
+      const bytes = new Uint8Array(len);
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+      let pwd = '';
+      for (let i = 0; i < len; i++) pwd += all[(bytes[i] ?? Math.floor(Math.random() * 256)) % all.length];
+      return pwd;
+    } catch {
+      let pwd = '';
+      for (let i = 0; i < len; i++) pwd += all[Math.floor(Math.random() * all.length)];
+      return pwd;
+    }
+  }
+
+  /** Apre modale credenziali per un operatore (tecnico).
+   *  - Se l'operatore ha già una password salvata, il campo viene lasciato VUOTO:
+   *    lasciandolo vuoto al salvataggio si MANTIENE la password attuale.
+   *  - Se non ha credenziali, viene proposta una password generata automaticamente
+   *    (modificabile a piacere).
+   */
+  protected epOpenCredentialsModal(operatorId: string): void {
+    const op = this.data.cashOperators().find((o) => o.id === operatorId);
+    if (!op) return;
+    if (op.role !== 'tecnico') { this.pushToast('Il portale dipendenti è disponibile solo per i tecnici.', 'error'); return; }
+    this.epCredentialsTargetId.set(operatorId);
+    this.epCredentialsUsername.set(op.epPortalUsername || this.epNormalizeUsername(op.name));
+    // Se l'operatore ha già una password, lasciamo vuoto il campo: l'utente potrà
+    // mantenerla (non modificandola) oppure cambiarla. Generiamo solo se non esiste.
+    if (op.epPortalPasswordHash) {
+      this.epCredentialsPassword.set('');
+    } else {
+      this.epCredentialsPassword.set(this.epGeneratePassword(12));
+    }
+    this.epCredentialsShowOnce.set(false);
+    this.epCredentialsModalOpen.set(true);
+  }
+
+  /** Genera una nuova password casuale e la inserisce nel campo (su richiesta). */
+  protected epGenerateRandomPassword(): void {
+    this.epCredentialsPassword.set(this.epGeneratePassword(12));
+  }
+
+  /** Chiude il modale credenziali (svuota subito la password per sicurezza). */
+  protected epCloseCredentialsModal(): void {
+    this.epCredentialsModalOpen.set(false);
+    this.epCredentialsTargetId.set(null);
+    this.epCredentialsUsername.set('');
+    this.epCredentialsPassword.set('');
+    this.epCredentialsShowOnce.set(false);
+  }
+
+  /** Salva le credenziali.
+   *  - Se la password è valorizzata → viene cambiata e mostrata 1 sola volta (auto-copiata).
+   *  - Se la password è vuota:
+   *      • se l'operatore ha già una password → MANTIENE quella attuale (non la mostra).
+   *      • se non ha password → errore (bisogna inserirne una).
+   */
+  protected async epSaveCredentialsAndShowOnce(): Promise<void> {
+    const opId = this.epCredentialsTargetId();
+    if (!opId) return;
+    const op = this.data.cashOperators().find((o) => o.id === opId);
+    if (!op) return;
+    const user = this.epCredentialsUsername().trim();
+    const pwd = this.epCredentialsPassword();
+    if (!user) {
+      this.pushToast('Inserisci uno username.', 'error');
+      return;
+    }
+    // Password vuota: è consentito solo se l'operatore ha già una password salvata.
+    if (!pwd && !op.epPortalPasswordHash) {
+      this.pushToast('Inserisci una password (oppure genera quella automatica).', 'error');
+      return;
+    }
+    const ok = await this.data.setEpPortalCredentials(opId, user, pwd);
+    if (!ok) {
+      this.pushToast('Impossibile salvare le credenziali.', 'error');
+      return;
+    }
+    if (pwd) {
+      // Password cambiata: mostrala una sola volta e auto-copiala.
+      this.epCredentialsShowOnce.set(true);
+      try {
+        if (typeof navigator !== 'undefined' && (navigator as any).clipboard && typeof (navigator as any).clipboard.writeText === 'function') {
+          await (navigator as any).clipboard.writeText(pwd).catch(() => undefined);
+        }
+      } catch { /* ignore */ }
+      this.pushToast('Password aggiornata. Copia SUBITO: non la vedrai più!', 'success');
+    } else {
+      // Password invariata: chiudi il modale.
+      this.pushToast('Credenziali aggiornate (password mantenuta).', 'success');
+      this.epCloseCredentialsModal();
+    }
+  }
+
+  /** Revoca immediatamente l'accesso dell'operatore (tempo zero). */
+  protected epRevokePortalAccess(operatorId: string): void {
+    const op = this.data.cashOperators().find((o) => o.id === operatorId);
+    if (!op) return;
+    const confirmMsg = `ATTENZIONE: stai revocando l'accesso a ${op.name}.\n` +
+      `Da ADESSO non potrà più entrare nel Portale Dipendenti, vedere ordini/DDT/magazzino/agenda/comunicazioni, ` +
+      `né scaricare materiale da magazzino tramite l'app.\n` +
+      `Per riattivarlo dovrai assegnare una NUOVA password.\n\nConfermi revoca a TEMPO ZERO?`;
+    if (!window.confirm(confirmMsg)) return;
+    this.data.revokeEpPortalAccess(operatorId);
+    this.pushToast(`Accesso revocato immediatamente per ${op.name}.`, 'success');
+  }
+
+  /** Ripristina accesso revocato (e auto-apre modale nuova password). */
+  protected epRestorePortalAccess(operatorId: string): void {
+    this.data.restoreEpPortalAccess(operatorId);
+    this.pushToast('Accesso ripristinato. Assegna una nuova password.', 'success');
+    this.epOpenCredentialsModal(operatorId);
+  }
+
+  /** Toggle "Abilita accesso portale" in anagrafica dipendente (solo abilita flag, non crea credenziali). */
+  protected epTogglePortalEnabled(operatorId: string, enabled: boolean): void {
+    const op = this.data.cashOperators().find((o) => o.id === operatorId);
+    if (!op) return;
+    this.data.updateCashOperator({ ...op, epPortalEnabled: !!enabled });
+  }
+
+  /** Ritornata la label di stato per l'accesso portale (usata nella lista riga operatore). */
+  protected epPortalStatusBadge(op: CashOperatorRecord): { label: string; tone: 'ok' | 'warn' | 'err' | 'dim' } {
+    if (op.role !== 'tecnico') return { label: 'Non tecnico', tone: 'dim' };
+    if (op.epPortalAccessRevokedAt) return { label: '🛑 REVOCATO', tone: 'err' };
+    if (op.epPortalEnabled && op.epPortalPasswordHash) return { label: '✅ Portale attivo', tone: 'ok' };
+    if (op.epPortalEnabled) return { label: '⚙️ Credenziali da creare', tone: 'warn' };
+    return { label: '🔒 Accesso disabilitato', tone: 'dim' };
+  }
+
+  // ============ PORTALE DIPENDENTI v2 - Agenda tecnico ============
+  /** Appuntamenti del tecnico attuale (solo suo) ordinati per data. */
+  protected readonly epMyAgendaAppts = computed(() => {
+    const me = this.epSessionOperator();
+    if (!me) return [] as AppointmentRecord[];
+    return [...this.data.appointments()]
+      .filter((a) => a.technician && a.technician === me.name)
+      .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  });
+
+  /** Appuntamenti raggruppati per fascia: Oggi / Domani / Questa settimana / Dopo */
+  protected readonly epMyAgendaGroups = computed(() => {
+    const items = this.epMyAgendaAppts();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayIso = today.toISOString().slice(0, 10);
+    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    const tomorrowIso = tomorrow.toISOString().slice(0, 10);
+    const weekEnd = new Date(today); weekEnd.setDate(today.getDate() + 7);
+    const groups: { label: string; items: AppointmentRecord[] }[] = [
+      { label: 'Oggi', items: [] },
+      { label: 'Domani', items: [] },
+      { label: 'Questa settimana', items: [] },
+      { label: 'Dopo', items: [] },
+    ];
+    for (const a of items) {
+      const d = a.scheduledAt.slice(0, 10);
+      if (d === todayIso) groups[0].items.push(a);
+      else if (d === tomorrowIso) groups[1].items.push(a);
+      else if (new Date(d).getTime() <= weekEnd.getTime()) groups[2].items.push(a);
+      else groups[3].items.push(a);
+    }
+    return groups.filter((g) => g.items.length > 0);
+  });
+
+  protected epAppointmentTypeLabel(t: AppointmentRecord['appointmentType']): string {
+    switch (t) {
+      case 'negozio': return 'In negozio';
+      case 'uscita': return 'Uscita';
+      case 'installazione': return 'Installazione';
+      case 'assistenza': return 'Assistenza';
+      case 'sopralluogo': return 'Sopralluogo';
+      default: return String(t ?? '');
+    }
+  }
+  protected epAppointmentLocationLabel(t: AppointmentRecord['locationType']): string {
+    switch (t) {
+      case 'showroom': return 'Showroom';
+      case 'domicilio': return 'Domicilio';
+      case 'officina': return 'Officina';
+      default: return String(t ?? '');
+    }
+  }
+  protected epAppointmentStatusLabel(s: AppointmentRecord['status']): string {
+    switch (s) {
+      case 'programmato': return 'Programmato';
+      case 'in-corso': return 'In corso';
+      case 'chiuso': return 'Chiuso';
+      default: return String(s ?? 'Programmato');
+    }
+  }
+  /** Formatta scheduledAt in orari "14:30 - 15:30". */
+  protected epAppointmentTimeRange(a: AppointmentRecord): { start: string; end: string } {
+    const start = new Date(a.scheduledAt);
+    const end = new Date(start.getTime() + (Number(a.durationMinutes) || 0) * 60 * 1000);
+    const fmt = (d: Date) => d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return { start: fmt(start), end: fmt(end) };
+  }
+
+  // ============ PORTALE DIPENDENTI v3 - Modifica righe installazione da preventivo ============
+  // Il tecnico, in fase di installazione, può aggiungere/rimuovere/modificare le righe
+  // del preventivo (es. 3 spine preventivate, ne servono 2). Il costo finale viene ricalcolato
+  // e salvato sul preventivo, che poi andrà in cassa con il valore corretto.
+
+  /** ID dell'appuntamento di cui si sta modificando il preventivo (null = nessun editor aperto) */
+  protected readonly epEditingQuoteApptId = signal<string | null>(null);
+
+  /** Bozza locale delle righe del preventivo che il tecnico sta modificando */
+  protected readonly epQuoteLineDraft = signal<QuoteLineRecord[]>([]);
+
+  /** Restituisce il preventivo collegato a un appuntamento, se esiste */
+  protected epQuoteForAppointment(appt: AppointmentRecord): QuoteRecord | null {
+    if (!appt.linkedQuoteId) return null;
+    return this.allQuotes().find((q) => q.id === appt.linkedQuoteId) ?? null;
+  }
+
+  /** Apre l'editor delle righe per il preventivo di un appuntamento */
+  protected epOpenQuoteEditor(appt: AppointmentRecord): void {
+    const quote = this.epQuoteForAppointment(appt);
+    if (!quote) {
+      this.pushToast('Nessun preventivo collegato a questo appuntamento', 'error');
+      return;
+    }
+    // Copia profonda delle righe esistenti (o array vuoto)
+    this.epQuoteLineDraft.set(
+      (quote.lines ?? []).map((l) => ({ ...l })),
+    );
+    this.epEditingQuoteApptId.set(appt.id);
+  }
+
+  /** Chiude l'editor delle righe senza salvare */
+  protected epCloseQuoteEditor(): void {
+    this.epEditingQuoteApptId.set(null);
+    this.epQuoteLineDraft.set([]);
+  }
+
+  /** Aggiorna un campo di una riga della bozza */
+  protected epUpdateDraftLine(
+    id: string,
+    field: 'description' | 'quantity' | 'unitPrice' | 'vatRate' | 'kind' | 'discountPercent',
+    value: string,
+  ): void {
+    this.epQuoteLineDraft.update((lines) =>
+      lines.map((line) => {
+        if (line.id !== id) return line;
+        if (field === 'description') return { ...line, description: value };
+        if (field === 'kind') return { ...line, kind: value as QuoteLineRecord['kind'] };
+        const numeric = Number(value) || 0;
+        if (field === 'quantity') return { ...line, quantity: Math.max(0, numeric) };
+        if (field === 'unitPrice') return { ...line, unitPrice: Math.max(0, numeric) };
+        if (field === 'discountPercent')
+          return { ...line, discountPercent: Math.max(0, Math.min(100, numeric)) };
+        return { ...line, vatRate: Math.max(0, numeric) };
+      }),
+    );
+  }
+
+  /** Aggiunge una nuova riga vuota alla bozza */
+  protected epAddDraftLine(kind: QuoteLineRecord['kind'] = 'materiale'): void {
+    this.epQuoteLineDraft.update((lines) => [
+      ...lines,
+      {
+        id: `qline-${crypto.randomUUID()}`,
+        kind,
+        description: kind === 'materiale' ? 'Nuovo materiale' : kind === 'servizio' ? 'Nuovo servizio' : 'Altro',
+        quantity: 1,
+        unitPrice: 0,
+        vatRate: 22,
+      },
+    ]);
+  }
+
+  /** Rimuove una riga dalla bozza */
+  protected epRemoveDraftLine(id: string): void {
+    this.epQuoteLineDraft.update((lines) => lines.filter((l) => l.id !== id));
+  }
+
+  /** Totale della bozza (somma dei totali riga, IVA inclusa) */
+  protected readonly epDraftTotal = computed(() =>
+    this.epQuoteLineDraft().reduce((sum, l) => sum + this.quoteLineTotal(l), 0),
+  );
+
+  /** Salva le righe modificate sul preventivo e aggiorna il valore totale */
+  protected epSaveQuoteLines(): void {
+    const me = this.epSessionOperator();
+    if (!me) {
+      this.pushToast('Sessione scaduta, ripeti il login', 'error');
+      return;
+    }
+    // Check JIT revoca
+    if (!this.data.isEpPortalSessionValid(me.id)) {
+      this.pushToast('Accesso revocato dal titolare', 'error');
+      this.epLogout();
+      return;
+    }
+
+    const apptId = this.epEditingQuoteApptId();
+    if (!apptId) return;
+    const appt = this.epMyAgendaAppts().find((a) => a.id === apptId);
+    const quote = appt ? this.epQuoteForAppointment(appt) : null;
+    if (!quote) {
+      this.pushToast('Preventivo non trovato', 'error');
+      return;
+    }
+
+    const updatedQuote: QuoteRecord = {
+      ...quote,
+      lines: this.epQuoteLineDraft().map((l) => ({ ...l })),
+      value: Math.round(this.epDraftTotal() * 100) / 100,
+    };
+    this.data.updateQuote(updatedQuote);
+    this.pushToast(
+      `Preventivo aggiornato: € ${updatedQuote.value.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      'success',
+    );
+    this.epCloseQuoteEditor();
+  }
+
+  // ============ PORTALE DIPENDENTI v2 - Comunicazioni lato tecnico + campanella ============
+  /** Comunicazioni destinate al tecnico attuale (target include me). Più recenti prima. */
+  protected readonly epMyCommunications = computed(() => {
+    const me = this.epSessionOperator();
+    if (!me) return [] as PortalCommunicationRecord[];
+    return [...this.data.portalCommunications()]
+      .filter((c) => c.targetTechnicianIds.includes(me.id))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+
+  /** Conteggio comunicazioni nuove/non-lette per la campanella. */
+  protected readonly epBellUnreadCount = computed(() => {
+    const me = this.epSessionOperator();
+    if (!me) return 0;
+    return this.epMyCommunications().filter((c) => {
+      const alreadyRead = c.readBy.some((r) => r.operatorId === me.id);
+      // Stato "inviata" e non ancora letta = nuova.
+      return c.status === 'inviata' && !alreadyRead;
+    }).length;
+  });
+
+  /** Comunicazione selezionata nel portale tecnico (dettaglio). */
+  protected readonly epSelectedCommId = signal<string | null>(null);
+  protected readonly epSelectedComm = computed(() => {
+    const id = this.epSelectedCommId();
+    if (!id) return null;
+    return this.epMyCommunications().find((c) => c.id === id) ?? null;
+  });
+
+  /** Apre dettaglio comunicazione e marca come letta (solo se non già letta). */
+  protected epOpenCommAndMarkRead(commId: string): void {
+    const me = this.epSessionOperator();
+    if (!me) return;
+    this.epSelectedCommId.set(commId);
+    this.data.markPortalCommunicationRead(commId, me.id);
+  }
+  protected epCloseCommDetail(): void { this.epSelectedCommId.set(null); }
+
+  /** Trigger: tecnico conferma "carica materiale" → scarico FIFO immediato. */
+  protected epLoadCommLine(line: PortalCommunicationLine): void {
+    const me = this.epSessionOperator();
+    const comm = this.epSelectedComm();
+    if (!me || !comm) { this.pushToast('Sessione non valida o comunicazione non trovata.', 'error'); return; }
+    // Check JIT revoca prima di qualunque cosa.
+    if (!this.data.isEpPortalSessionValid(me.id)) { this.epLogout(); this.pushToast('Sessione scaduta o revocata.', 'error'); return; }
+    if (line.loadedQuantity >= Math.max(1, line.requiredQuantity)) {
+      this.pushToast('Riga già caricata.', 'error');
+      return;
+    }
+    if (!line.inventoryItemId) {
+      this.pushToast('Questa riga non è stata associata a un articolo di magazzino dal titolare: non puoi caricarla.', 'error');
+      return;
+    }
+    const qty = this.data.loadPortalCommunicationLine({
+      commId: comm.id,
+      lineId: line.id,
+      operatorId: me.id,
+      operatorName: me.name,
+    });
+    if (!qty || qty <= 0) {
+      this.pushToast('Impossibile caricare: scorte insufficienti in magazzino o accesso revocato.', 'error');
+      return;
+    }
+    this.pushToast(`✅ Caricato ${qty} pz · "${line.description.slice(0, 40)}" · Scaricato da magazzino (FIFO).`, 'success');
+  }
+
+  /** Marca la comunicazione "completata" dal tecnico (solo dopo caricato materiale o se non ci sono righe). */
+  protected epMarkCommCompleted(commId: string): void {
+    const me = this.epSessionOperator();
+    if (!me) return;
+    if (!this.data.isEpPortalSessionValid(me.id)) { this.epLogout(); this.pushToast('Sessione scaduta o revocata.', 'error'); return; }
+    const comm = this.data.portalCommunications().find((c) => c.id === commId);
+    if (!comm) return;
+    const loadableLines = comm.lines.filter((l) => l.inventoryItemId && l.requiredQuantity > 0);
+    const allLoaded = loadableLines.every((l) => l.loadedQuantity >= l.requiredQuantity);
+    if (loadableLines.length > 0 && !allLoaded && comm.status !== 'materiale-caricato') {
+      this.pushToast('Devi prima caricare TUTTO il materiale previsto (righe verdi "✅").', 'error');
+      return;
+    }
+    this.data.updatePortalCommunication({ ...comm, status: 'completata' });
+    this.pushToast('Servizio segnato come completato 🎉', 'success');
+  }
+
+  /** Nome tecnico per readBy (label nel dettaglio). */
+  protected epReadAtForMe(comm: PortalCommunicationRecord): string | null {
+    const me = this.epSessionOperator();
+    if (!me) return null;
+    const found = comm.readBy.find((r) => r.operatorId === me.id);
+    if (!found) return null;
+    return new Date(found.at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+  protected epPriorityLabel(p: PortalCommunicationRecord['priority']): string {
+    return p === 'alta' ? 'ALTA' : p === 'bassa' ? 'bassa' : 'media';
+  }
+  protected epPriorityTone(p: PortalCommunicationRecord['priority']): 'ok' | 'warn' | 'err' | 'dim' | 'info' {
+    return p === 'alta' ? 'err' : p === 'bassa' ? 'dim' : 'warn';
+  }
+  protected epCommStatusLabel(s: PortalCommunicationRecord['status']): string {
+    switch (s) {
+      case 'bozza': return 'Bozza';
+      case 'inviata': return 'Inviata';
+      case 'letta': return 'Letta';
+      case 'materiale-caricato': return 'Materiale caricato';
+      case 'completata': return 'Completata';
+      default: return String(s ?? '');
+    }
+  }
+  protected epCommStatusTone(s: PortalCommunicationRecord['status']): 'ok' | 'warn' | 'err' | 'dim' | 'info' {
+    switch (s) {
+      case 'bozza': return 'dim';
+      case 'inviata': return 'warn';
+      case 'letta': return 'info';
+      case 'materiale-caricato': return 'info';
+      case 'completata': return 'ok';
+      default: return 'dim';
+    }
+  }
+  /** Preventivo collegato (se esiste). */
+  protected epQuoteById(id: string | null): QuoteRecord | null {
+    if (!id) return null;
+    return this.data.quotes().find((q) => q.id === id) ?? null;
+  }
+  /** Articolo di inventario per id (usato nel dettaglio riga). */
+  protected epInventoryItemById(id: string | null): InventoryItemRecord | null {
+    if (!id) return null;
+    return this.data.inventoryItems().find((i) => i.id === id) ?? null;
+  }
+
+  // ============ PORTALE DIPENDENTI v2 - Sezione admin "Comunicazioni Portale" (titolare) ============
+  /** Tutte le comunicazioni lato admin (più recenti prima). */
+  protected readonly epAdminAllComms = computed(() =>
+    [...this.data.portalCommunications()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  );
+
+  /** Stato editor "Nuova/Modifica comunicazione". */
+  protected readonly epAdminCommEditorOpen = signal<boolean>(false);
+  protected readonly epAdminCommEditingId = signal<string | null>(null);
+  protected readonly epAdminCommTitle = signal<string>('');
+  protected readonly epAdminCommPriority = signal<PortalCommunicationRecord['priority']>('media');
+  protected readonly epAdminCommBody = signal<string>('');
+  protected readonly epAdminCommLinkedQuoteId = signal<string | null>(null);
+  protected readonly epAdminCommLinkedApptId = signal<string | null>(null);
+  protected readonly epAdminCommTargetIds = signal<string[]>([]);
+  /** Righe bozza della comunicazione (prima del salvataggio). */
+  protected readonly epAdminCommLines = signal<PortalCommunicationLine[]>([]);
+  /** Riga nuova in inserimento (aggiunta manuale). */
+  protected epAdminNewLineForm: { description: string; requiredQuantity: number; inventoryItemId: string | null } = {
+    description: '',
+    requiredQuantity: 1,
+    inventoryItemId: null,
+  };
+
+  protected epAdminOpenNewComm(): void {
+    this.epAdminCommEditingId.set(null);
+    this.epAdminCommTitle.set('');
+    this.epAdminCommPriority.set('media');
+    this.epAdminCommBody.set('');
+    this.epAdminCommLinkedQuoteId.set(null);
+    this.epAdminCommLinkedApptId.set(null);
+    this.epAdminCommTargetIds.set([]);
+    this.epAdminCommLines.set([]);
+    this.epAdminNewLineForm.description = '';
+    this.epAdminNewLineForm.requiredQuantity = 1;
+    this.epAdminNewLineForm.inventoryItemId = null;
+    this.epAdminCommEditorOpen.set(true);
+  }
+  protected epAdminCloseCommEditor(): void { this.epAdminCommEditorOpen.set(false); }
+
+  /** Elenco dei soli tecnici attivi per il picker destinatari. */
+  protected readonly epAdminTechnicians = computed(() =>
+    this.data.activeCashOperators().filter((o) => o.role === 'tecnico'),
+  );
+
+  /** Toggle tecnico destinatario. */
+  protected epAdminToggleTech(opId: string): void {
+    const list = this.epAdminCommTargetIds();
+    this.epAdminCommTargetIds.set(list.includes(opId) ? list.filter((x) => x !== opId) : [...list, opId]);
+  }
+
+  /**
+   * Quando l'admin seleziona un preventivo dal picker:
+   * auto-imposta titolo (se vuoto) + auto-importa righe kind="materiale"
+   * con inventoryItemId=null (titolare DEVE scegliere esplicitamente).
+   */
+  protected epAdminOnLinkedQuoteChange(quoteId: string | null): void {
+    this.epAdminCommLinkedQuoteId.set(quoteId);
+    if (!quoteId) return;
+    const q = this.data.quotes().find((x) => x.id === quoteId);
+    if (!q) return;
+    if (!this.epAdminCommTitle().trim()) {
+      this.epAdminCommTitle.set(`Servizio ${q.id} · ${q.customerName}`);
+    }
+    if (!q.lines || q.lines.length === 0) return;
+    const existing = this.epAdminCommLines();
+    const fromQuote: PortalCommunicationLine[] = q.lines
+      .filter((l) => l.kind === 'materiale')
+      .map((l) => ({
+        id: `com-line-${this.epUuid()}`,
+        fromQuoteLineId: l.id,
+        description: l.description,
+        inventoryItemId: null,
+        requiredQuantity: Number(l.quantity) || 1,
+        loadedQuantity: 0,
+        loadedByOperatorId: null,
+        loadedAt: null,
+        warehouseMovementId: null,
+      }));
+    if (fromQuote.length) {
+      this.epAdminCommLines.set([...existing, ...fromQuote]);
+      this.pushToast(`Importate ${fromQuote.length} righe materiale dal preventivo. Associa ORA ogni articolo di magazzino!`, 'success');
+    }
+  }
+
+  /** Aggiungi riga manuale all'editor. */
+  protected epAdminAddLine(): void {
+    const desc = String(this.epAdminNewLineForm.description ?? '').trim();
+    const qty = Math.max(1, Number(this.epAdminNewLineForm.requiredQuantity) || 1);
+    if (!desc) { this.pushToast('Inserisci descrizione riga.', 'error'); return; }
+    const line: PortalCommunicationLine = {
+      id: `com-line-${this.epUuid()}`,
+      fromQuoteLineId: null,
+      description: desc,
+      inventoryItemId: this.epAdminNewLineForm.inventoryItemId,
+      requiredQuantity: qty,
+      loadedQuantity: 0,
+      loadedByOperatorId: null,
+      loadedAt: null,
+      warehouseMovementId: null,
+    };
+    this.epAdminCommLines.set([...this.epAdminCommLines(), line]);
+    this.epAdminNewLineForm.description = '';
+    this.epAdminNewLineForm.requiredQuantity = 1;
+    this.epAdminNewLineForm.inventoryItemId = null;
+  }
+
+  /** Rimuove riga dall'editor. */
+  protected epAdminRemoveLine(lineId: string): void {
+    this.epAdminCommLines.set(this.epAdminCommLines().filter((l) => l.id !== lineId));
+  }
+
+  /** Aggiorna l'articolo di magazzino di una riga. */
+  protected epAdminSetLineItem(lineId: string, itemId: string | null): void {
+    this.epAdminCommLines.set(this.epAdminCommLines().map((l) =>
+      l.id === lineId ? { ...l, inventoryItemId: itemId } : l,
+    ));
+  }
+
+  /** Aggiorna qty richiesta (modifica riga). */
+  protected epAdminSetLineQty(lineId: string, qty: number): void {
+    const n = Math.max(1, Number(qty) || 1);
+    this.epAdminCommLines.set(this.epAdminCommLines().map((l) =>
+      l.id === lineId ? { ...l, requiredQuantity: n } : l,
+    ));
+  }
+
+  /** Salva comunicazione: come bozza o invia (status='inviata'). */
+  protected epAdminSaveComm(sendNow: boolean): void {
+    const title = this.epAdminCommTitle().trim();
+    const targets = this.epAdminCommTargetIds();
+    const lines = this.epAdminCommLines();
+    if (!title) { this.pushToast('Inserisci titolo.', 'error'); return; }
+    if (sendNow && targets.length === 0) { this.pushToast('Seleziona almeno un tecnico destinatario.', 'error'); return; }
+    if (sendNow && lines.length === 0 && !this.epAdminCommBody().trim()) {
+      if (!window.confirm('Stai inviando una comunicazione senza righe materiale e senza testo note. Continuare?')) return;
+    }
+    if (sendNow) {
+      const missing = lines.filter((l) => l.requiredQuantity > 0 && !l.inventoryItemId);
+      if (missing.length > 0) {
+        if (!window.confirm(
+          `ATTENZIONE: ${missing.length} righe NON hanno un articolo di magazzino associato.\n` +
+          `I tecnici NON potranno scaricarle da magazzino. Vuoi inviare comunque?`)) return;
+      }
+    }
+    const status: PortalCommunicationRecord['status'] = sendNow ? 'inviata' : 'bozza';
+    const editingId = this.epAdminCommEditingId();
+    if (editingId) {
+      const existing = this.data.portalCommunications().find((c) => c.id === editingId);
+      if (existing) {
+        this.data.updatePortalCommunication({
+          ...existing,
+          title,
+          priority: this.epAdminCommPriority(),
+          body: this.epAdminCommBody(),
+          linkedQuoteId: this.epAdminCommLinkedQuoteId(),
+          linkedAppointmentId: this.epAdminCommLinkedApptId(),
+          targetTechnicianIds: targets,
+          lines,
+          status,
+        });
+        this.pushToast(sendNow ? 'Comunicazione inviata ai tecnici.' : 'Bozza aggiornata.', 'success');
+        this.epAdminCloseCommEditor();
+        return;
+      }
+    }
+    this.data.addPortalCommunication({
+      createdBy: 'Titolare',
+      title,
+      priority: this.epAdminCommPriority(),
+      body: this.epAdminCommBody(),
+      linkedQuoteId: this.epAdminCommLinkedQuoteId(),
+      linkedAppointmentId: this.epAdminCommLinkedApptId(),
+      targetTechnicianIds: targets,
+      status,
+      lines,
+    });
+    this.pushToast(sendNow ? 'Comunicazione creata e inviata ai tecnici.' : 'Bozza salvata.', 'success');
+    this.epAdminCloseCommEditor();
+  }
+
+  /** Apre comunicazione esistente in modifica. */
+  protected epAdminOpenExistingComm(commId: string): void {
+    const c = this.data.portalCommunications().find((x) => x.id === commId);
+    if (!c) return;
+    this.epAdminCommEditingId.set(c.id);
+    this.epAdminCommTitle.set(c.title);
+    this.epAdminCommPriority.set(c.priority);
+    this.epAdminCommBody.set(c.body);
+    this.epAdminCommLinkedQuoteId.set(c.linkedQuoteId);
+    this.epAdminCommLinkedApptId.set(c.linkedAppointmentId);
+    this.epAdminCommTargetIds.set([...c.targetTechnicianIds]);
+    this.epAdminCommLines.set(c.lines.map((l) => ({ ...l })));
+    this.epAdminCommEditorOpen.set(true);
+  }
+
+  /** Comunicazione selezionata lato admin (pannello laterale dettaglio). */
+  protected readonly epAdminSelectedCommId = signal<string | null>(null);
+  protected readonly epAdminSelectedComm = computed(() => {
+    const id = this.epAdminSelectedCommId();
+    if (!id) return null;
+    return this.data.portalCommunications().find((c) => c.id === id) ?? null;
+  });
+  protected epAdminSelectComm(id: string): void {
+    this.epAdminSelectedCommId.set(id === this.epAdminSelectedCommId() ? null : id);
+  }
+  /** Etichetta "letti da:" per admin (lista nomi + orari). */
+  protected epAdminReadersLabel(c: PortalCommunicationRecord): string {
+    if (!c.readBy.length) return '—';
+    const names = c.readBy.map((r) => {
+      const op = this.data.cashOperators().find((o) => o.id === r.operatorId);
+      const name = op?.name ?? 'Tecnico';
+      const day = new Date(r.at).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return `${name} (${day})`;
+    });
+    return names.join(', ');
+  }
+  /** Nomi tecnici da lista id (destinatari, UI). */
+  protected epAdminTechNames(ids: string[]): string {
+    const names = ids
+      .map((id) => this.data.cashOperators().find((o) => o.id === id)?.name)
+      .filter(Boolean) as string[];
+    return names.length ? names.join(', ') : '—';
+  }
+
+  /** Calcola le iniziali di un nome (es. "Marco Rossi" → "MR") */
+  protected initialsOf(name: string): string {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '??';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  /** Helper etichette stato DDT (spostato da template per evitare "as any") */
+  protected epDdtStatusLabel(status: WarehouseDdtRecord['status']): string {
+    switch (status) {
+      case 'bozza': return 'Bozza';
+      case 'emesso': return 'Emesso';
+      case 'consegnato': return 'Consegnato';
+      default: return String(status ?? 'Bozza');
+    }
+  }
+
+  /** Helper etichette tipo servizio */
+  protected epServiceTypeLabel(type: PendingServiceRecord['type']): string {
+    switch (type) {
+      case 'installazione': return 'Installazione';
+      case 'officina': return 'Officina';
+      case 'sopralluogo': return 'Sopralluogo';
+      case 'ritiro': return 'Ritiro';
+      case 'altro': return 'Altro';
+      default: return String(type ?? 'Altro');
+    }
+  }
+
+  /** Helper etichette stato servizio */
+  protected epServiceStatusLabel(status: PendingServiceRecord['status']): string {
+    switch (status) {
+      case 'inviato': return 'Inviato';
+      case 'pagato': return 'Pagato';
+      case 'annullato': return 'Annullato';
+      default: return String(status ?? 'Inviato');
+    }
+  }
+
+  /** Helper etichette urgenza ordine */
+  protected epOrderUrgencyLabel(urgency: WarehouseOrderRecord['urgency']): string {
+    switch (urgency) {
+      case 'bassa': return 'Bassa';
+      case 'media': return 'Media';
+      case 'alta': return 'Alta';
+      default: return String(urgency ?? 'Media');
+    }
+  }
+
+  /** Helper etichette tipo ordine */
+  protected epOrderTypeLabel(orderType: WarehouseOrderRecord['orderType']): string {
+    switch (orderType) {
+      case 'richiesta-cliente': return 'Richiesta cliente';
+      case 'riordino': return 'Riordino';
+      case 'uso-interno': return 'Uso interno';
+      case 'altro': return 'Altro';
+      default: return String(orderType ?? 'Altro');
+    }
+  }
+
+  /** Helper etichette stato ordine */
+  protected epOrderStatusLabel(status: WarehouseOrderRecord['status']): string {
+    switch (status) {
+      case 'pending': return 'In attesa';
+      case 'seen': return 'Visto';
+      case 'approved': return 'Approvato';
+      case 'received': return 'Arrivato';
+      case 'cancelled': return 'Cancellato';
+      default: return String(status ?? 'In attesa');
+    }
+  }
+
+  /** Cast valore input a numero (helper usabile da template, dove Number globale non è accessibile) */
+  protected epToNum(v: unknown): number {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  // --- Modulo MAGAZZINO: ricerca + dettaglio + prelievo installazione ---------
+  protected readonly epWarehouseSearch = signal<string>('');
+  protected readonly epSelectedInventoryItem = signal<InventoryItemRecord | null>(null);
+
+  /** Elenco articoli filtrati per ricerca testuale (nome, sku, categoria, fornitore) */
+  protected readonly epFilteredInventoryItems = computed(() => {
+    const q = this.epWarehouseSearch().trim().toLowerCase();
+    const items = this.allInventoryItems();
+    if (!q) return items;
+    return items.filter((it) => {
+      const haystack = `${it.name ?? ''} ${it.sku ?? ''} ${it.category ?? ''} ${it.supplier ?? ''}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  });
+
+  protected readonly epPrelievoClienteSearch = signal<string>('');
+
+  /** Clienti suggeriti durante il prelievo (ricerca nome) */
+  protected readonly epPrelievoClientiFiltrati = computed(() => {
+    const q = this.epPrelievoClienteSearch().trim().toLowerCase();
+    if (!q) return [];
+    return this.allClients()
+      .filter((c) => (c.name || '').toLowerCase().includes(q))
+      .slice(0, 20);
+  });
+
+  protected readonly epPrelievoForm = this.formBuilder.nonNullable.group({
+    quantity: [1, [Validators.required, Validators.min(1)]],
+    clientSearch: [''],
+    clientId: [''],
+    note: [''],
+  });
+  protected readonly epPrelievoLastConfirmMessage = signal<string>('');
+
+  /** Associa un cliente al prelievo corrente (clic sulla pill) */
+  protected epPrelievoSelectClient(client: ClientRecord): void {
+    this.epPrelievoForm.patchValue({ clientSearch: client.name, clientId: client.id });
+    this.epPrelievoClienteSearch.set(client.name);
+  }
+
+  /** Ripristina il form di prelievo */
+  protected epResetPrelievoForm(): void {
+    this.epPrelievoForm.reset({ quantity: 1, clientSearch: '', clientId: '', note: '' });
+    this.epPrelievoClienteSearch.set('');
+  }
+
+  /** Helper: sincronizza input search cliente Prelievo (signal + form reactive, evita warning ngModel+formControlName) */
+  protected epPrelievoClientSearchInput(target: EventTarget | null): void {
+    const val = (target as HTMLInputElement).value ?? '';
+    this.epPrelievoClienteSearch.set(val);
+    this.epPrelievoForm.get('clientSearch')?.setValue(val, { emitEvent: false });
+  }
+
+  /** Helper: sincronizza input search cliente DDT (signal + form reactive) */
+  protected epDdtClientSearchInput(target: EventTarget | null): void {
+    const val = (target as HTMLInputElement).value ?? '';
+    this.epDdtClienteSearch.set(val);
+    this.epDdtForm.get('clientSearch')?.setValue(val, { emitEvent: false });
+  }
+
+  /** Helper: sincronizza input search cliente Servizi (signal + form reactive) */
+  protected epServiceClientSearchInput(target: EventTarget | null): void {
+    const val = (target as HTMLInputElement).value ?? '';
+    this.epServiceClienteSearch.set(val);
+    this.epServiceForm.get('clientSearch')?.setValue(val, { emitEvent: false });
+  }
+
+  /** Helper: sincronizza input search cliente Ordini (signal + form reactive) */
+  protected epOrderClientSearchInput(target: EventTarget | null): void {
+    const val = (target as HTMLInputElement).value ?? '';
+    this.epOrderClienteSearch.set(val);
+    this.epOrderForm.get('clientSearch')?.setValue(val, { emitEvent: false });
+  }
+
+  /**
+   * Conferma il prelievo di materiale per installazione:
+   *  - registra scarico FIFO dal magazzino
+   *  - scrive movimento con causale cliente + note
+   */
+  protected epSubmitPrelievo(item: InventoryItemRecord): void {
+    if (this.epPrelievoForm.invalid) return;
+    // ✅ Check JIT sessione (revoca immediata tempo zero)
+    const me = this.epSessionOperator();
+    if (!me || !this.data.isEpPortalSessionValid(me.id)) {
+      this.epLogout();
+      this.pushToast('Sessione scaduta o accesso revocato.', 'error');
+      return;
+    }
+    const op = me;
+
+    const payload = this.epPrelievoForm.getRawValue();
+    const qty = Math.max(1, Number(payload.quantity) || 1);
+    const client = this.allClients().find((c) => c.id === payload.clientId);
+    const reasonParts = ['Prelievo portale dipendenti'];
+    if (client) reasonParts.push(`per ${client.name}`);
+    if (payload.note) reasonParts.push(payload.note);
+    const docRef = client ? `PREL-${client.id.slice(-6)}` : 'PREL-DIP';
+
+    this.data.consumeInventoryFifoByItemId({
+      inventoryItemId: item.id,
+      quantity: qty,
+      reason: reasonParts.join(' · '),
+      documentNumber: docRef,
+      operator: op.name,
+      sourceModule: 'magazzino',
+    });
+
+    const labelClient = client ? `a ${client.name}` : '';
+    this.epPrelievoLastConfirmMessage.set(
+      `✅ Prelievo confermato · ${qty} × ${item.name} ${labelClient}`,
+    );
+    this.epResetPrelievoForm();
+    this.epSelectedInventoryItem.set(null);
+    setTimeout(() => this.epPrelievoLastConfirmMessage.set(''), 3500);
+  }
+
+  // --- Modulo DDT (Documento di Trasporto) -----------------------------------
+  protected readonly epDdtEditorVisible = signal<boolean>(false);
+  protected readonly epDdtClienteSearch = signal<string>('');
+  protected readonly epPrintableDdt = signal<any>(null);
+  protected readonly epCompanyProfile = this.data.companyProfile;
+
+  /** Helper: crea un FormGroup vuoto per una riga DDT */
+  private epMakeDdtLine(): FormGroup {
+    return this.formBuilder.nonNullable.group({
+      search: [''],
+      inventoryItemId: [''],
+      description: [''],
+      quantity: [1, [Validators.required, Validators.min(1)]],
+      note: [''],
+    });
+  }
+
+  protected readonly epDdtLines: FormArray = this.formBuilder.array([this.epMakeDdtLine()]);
+  /** Helper TS per tipizzare come FormGroup[] ogni riga del FormArray DDT (evita cast in template) */
+  protected get epDdtLineGroups(): FormGroup[] {
+    return this.epDdtLines.controls as FormGroup[];
+  }
+  protected readonly epDdtForm = this.formBuilder.nonNullable.group({
+    clientSearch: [''],
+    clientId: [''],
+    vehicle: [''],
+    destination: [''],
+    note: [''],
+    alsoDeduct: [true],
+    lines: this.epDdtLines,
+  });
+
+  protected epDdtClientiFiltrati = computed(() => {
+    const q = this.epDdtClienteSearch().trim().toLowerCase();
+    if (!q) return [];
+    return this.allClients()
+      .filter((c) => (c.name || '').toLowerCase().includes(q))
+      .slice(0, 20);
+  });
+
+  protected epDdtSelectClient(c: ClientRecord): void {
+    this.epDdtForm.patchValue({ clientSearch: c.name, clientId: c.id });
+    this.epDdtClienteSearch.set(c.name);
+  }
+
+  protected epDdtAddLine(): void {
+    this.epDdtLines.push(this.epMakeDdtLine());
+  }
+
+  protected epDdtRemoveLine(i: number): void {
+    if (this.epDdtLines.length <= 1) return;
+    this.epDdtLines.removeAt(i);
+  }
+
+  protected epDdtLineSuggestions(i: number): InventoryItemRecord[] {
+    const ctrl = this.epDdtLines.at(i) as FormGroup;
+    const q = String(ctrl.get('search')?.value ?? '').trim().toLowerCase();
+    if (!q) return [];
+    return this.allInventoryItems()
+      .filter((it) => {
+        const hay = `${it.name ?? ''} ${it.sku ?? ''} ${it.category ?? ''}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 10);
+  }
+
+  protected epDdtSelectItem(i: number, it: InventoryItemRecord): void {
+    const ctrl = this.epDdtLines.at(i) as FormGroup;
+    ctrl.patchValue({ inventoryItemId: it.id, description: it.name, search: it.name });
+  }
+
+  /** Apre l'editor del DDT (resetta il form) */
+  protected epOpenDdtEditor(): void {
+    // Resetta form in modo safe (non passa 'lines' che è un FormArray e non va incluso nelle primitive)
+    const line = this.epMakeDdtLine();
+    this.epDdtForm.setValue({
+      clientSearch: '',
+      clientId: '',
+      vehicle: '',
+      destination: '',
+      note: '',
+      alsoDeduct: true,
+      lines: [line.getRawValue()],
+    });
+    while (this.epDdtLines.length) this.epDdtLines.removeAt(0);
+    this.epDdtLines.push(line);
+    this.epDdtClienteSearch.set('');
+    this.epDdtEditorVisible.set(true);
+  }
+
+  protected epCloseDdtEditor(): void {
+    this.epDdtEditorVisible.set(false);
+  }
+
+  /**
+   * Salva o emette il DDT.
+   * @param emitAndPrint true = emetti (assegna numero) + avvia stampa + scarico opzionale
+   */
+  protected epSubmitDdt(emitAndPrint: boolean): void {
+    // ✅ Check JIT sessione (revoca immediata tempo zero)
+    const me = this.epSessionOperator();
+    if (!me || !this.data.isEpPortalSessionValid(me.id)) {
+      this.epLogout();
+      this.pushToast('Sessione scaduta o accesso revocato.', 'error');
+      return;
+    }
+    const op = me;
+    const raw = this.epDdtForm.getRawValue();
+    const client = this.allClients().find((c) => c.id === raw.clientId);
+
+    const lines = (raw.lines as any[])
+      .filter((row) => Number(row.quantity) >= 1 && (row.inventoryItemId || row.description))
+      .map((row) => {
+        const linked = this.allInventoryItems().find((it) => it.id === row.inventoryItemId);
+        return {
+          id: `ddt-ln-${crypto.randomUUID()}`,
+          inventoryItemId: row.inventoryItemId || null,
+          itemSnapshot: row.description || linked?.name || 'Articolo',
+          quantity: Math.max(1, Number(row.quantity) || 1),
+          note: row.note || '',
+        };
+      });
+
+    if (lines.length === 0) {
+      this.pushToast('Aggiungi almeno una riga prodotto valida al DDT.', 'error');
+      return;
+    }
+    if (emitAndPrint && !client) {
+      this.pushToast('Per emettere un DDT seleziona il cliente.', 'error');
+      return;
+    }
+
+    const base = {
+      createdByOperatorId: op.id,
+      createdByOperatorName: op.name,
+      clientId: client?.id ?? null,
+      clientSnapshot: client?.name ?? 'Cliente generico',
+      vehicle: raw.vehicle ?? '',
+      destination: raw.destination ?? '',
+      note: raw.note ?? '',
+      lines,
+    };
+
+    if (emitAndPrint) {
+      // 1. crea come già emesso (assegna numero progressivo)
+      const record = this.data.addWarehouseDdt(base as Parameters<typeof this.data.addWarehouseDdt>[0]);
+      const emitted = this.data.updateWarehouseDdtStatus(record.id, 'emesso');
+
+      // 2. scarico contestuale da magazzino se attivo
+      if (raw.alsoDeduct && emitted) {
+        for (const l of lines) {
+          if (l.inventoryItemId) {
+            this.data.consumeInventoryFifoByItemId({
+              inventoryItemId: l.inventoryItemId,
+              quantity: l.quantity,
+              reason: `Scarico DDT ${emitted.number || ''}`,
+              documentNumber: emitted.number || '',
+              operator: op.name,
+              sourceModule: 'magazzino',
+            });
+          }
+        }
+      }
+
+      this.epCloseDdtEditor();
+      if (emitted) this.epPrintDdt(emitted);
+      this.pushToast('DDT emesso e stampato.', 'success');
+    } else {
+      // salva solo la bozza
+      this.data.addWarehouseDdt(base as Parameters<typeof this.data.addWarehouseDdt>[0]);
+      this.epCloseDdtEditor();
+      this.pushToast('Bozza DDT salvata.', 'success');
+    }
+  }
+
+  /** I miei DDT creati (eventualmente filtra per operatore) - ordinati per data decrescente */
+  protected readonly epMieiDdt = computed(() => {
+    const all = this.data.warehouseDdts();
+    const op = this.epActiveOperator();
+    return all
+      .filter((d) => (op ? d.createdByOperatorId === op.id : true))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+
+  protected epDdtSetStatus(ddt: any, next: 'bozza' | 'emesso' | 'consegnato'): void {
+    this.data.updateWarehouseDdtStatus(ddt.id, next);
+  }
+
+  protected epFormatDate(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('it-IT');
+    } catch {
+      return '—';
+    }
+  }
+
+  protected epFormatDateTime(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
+    } catch {
+      return '—';
+    }
+  }
+
+  // ✅ Helper EP v2: formato data caricamento riga (template-safe, non usa "new Date")
+  protected epFormatLoadedDate(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleString('it-IT', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '—';
+    }
+  }
+
+  // ✅ Helper EP v2: imposta priorità da evento select template
+  protected epAdminSetPriorityFromInput(v: string): void {
+    const p: PortalCommunicationRecord['priority'] =
+      v === 'alta' || v === 'media' || v === 'bassa' ? v : 'media';
+    this.epAdminCommPriority.set(p);
+  }
+
+  /** Prepara un DDT per la stampa e avvia window.print() con piccolo delay */
+  protected epPrintDdt(ddt: any): void {
+    this.epPrintableDdt.set(ddt);
+    setTimeout(() => {
+      if (typeof window !== 'undefined') window.print();
+    }, 250);
+  }
+
+  // --- Modulo SERVIZI da inviare in CASSA ------------------------------------
+  protected readonly epServiceEditorVisible = signal<boolean>(false);
+  protected readonly epServiceClienteSearch = signal<string>('');
+  protected readonly epServiceLastConfirmMessage = signal<string>('');
+
+  protected readonly epServiceForm = this.formBuilder.nonNullable.group({
+    type: ['installazione', Validators.required],
+    serviceDate: ['', Validators.required],
+    clientSearch: [''],
+    clientId: ['', Validators.required],
+    description: ['', [Validators.required, Validators.minLength(3)]],
+    priceUnit: [0, [Validators.required, Validators.min(0)]],
+    quantity: [1, [Validators.required, Validators.min(1)]],
+  });
+
+  protected readonly epServiceClientiFiltrati = computed(() => {
+    const q = this.epServiceClienteSearch().trim().toLowerCase();
+    if (!q) return [];
+    return this.allClients()
+      .filter((c) => (c.name || '').toLowerCase().includes(q))
+      .slice(0, 20);
+  });
+
+  protected epServiceSelectClient(c: ClientRecord): void {
+    this.epServiceForm.patchValue({ clientSearch: c.name, clientId: c.id });
+    this.epServiceClienteSearch.set(c.name);
+  }
+
+  protected readonly epServiceTotal = computed(() => {
+    const r = this.epServiceForm.getRawValue();
+    return (Number(r.priceUnit) || 0) * (Number(r.quantity) || 0);
+  });
+
+  /** Registra il servizio e lo invia in cassa come pending service */
+  protected epSubmitService(): void {
+    if (this.epServiceForm.invalid) return;
+    // ✅ Check JIT sessione (revoca immediata tempo zero)
+    const me = this.epSessionOperator();
+    if (!me || !this.data.isEpPortalSessionValid(me.id)) {
+      this.epLogout();
+      this.pushToast('Sessione scaduta o accesso revocato.', 'error');
+      return;
+    }
+    const op = me;
+    const raw = this.epServiceForm.getRawValue();
+    const client = this.allClients().find((c) => c.id === raw.clientId);
+    if (!client) {
+      this.pushToast('Seleziona un cliente esistente per inviare il servizio in cassa.', 'error');
+      return;
+    }
+    const qty = Math.max(1, Number(raw.quantity) || 1);
+    const price = Math.max(0, Number(raw.priceUnit) || 0);
+    const total = qty * price;
+    // Normalizza serviceDate
+    const svcDate = raw.serviceDate
+      ? (() => {
+        try { return new Date(raw.serviceDate).toISOString(); } catch { return new Date().toISOString(); }
+      })()
+      : new Date().toISOString();
+
+    this.data.addPendingService({
+      createdByOperatorId: op.id,
+      createdByOperatorName: op.name,
+      serviceDate: svcDate,
+      clientId: client.id,
+      clientSnapshot: client.name,
+      type: raw.type as any,
+      description: raw.description,
+      priceUnit: price,
+      quantity: qty,
+      totalAmount: total,
+    });
+
+    this.epServiceLastConfirmMessage.set(
+      `✅ Servizio inviato in cassa · ${client.name} · € ${total.toFixed(2)}`,
+    );
+    this.epServiceEditorVisible.set(false);
+    this.epServiceForm.reset({
+      type: 'installazione',
+      serviceDate: '',
+      clientSearch: '',
+      clientId: '',
+      description: '',
+      priceUnit: 0,
+      quantity: 1,
+    });
+    this.epServiceClienteSearch.set('');
+    setTimeout(() => this.epServiceLastConfirmMessage.set(''), 4000);
+  }
+
+  /** Storico dei miei servizi inviati */
+  protected readonly epMieiServizi = computed(() => {
+    const all = this.data.pendingServices();
+    const op = this.epActiveOperator();
+    return all
+      .filter((s) => (op ? s.createdByOperatorId === op.id : true))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+
+  // --- Modulo ORDINI da Portale Dipendenti (gestiti poi da sezione Magazzino)
+  protected readonly epOrderEditorVisible = signal<boolean>(false);
+  protected readonly epOrderClienteSearch = signal<string>('');
+  protected readonly epOrderLastConfirmMessage = signal<string>('');
+
+  private epMakeOrderLine(): FormGroup {
+    return this.formBuilder.nonNullable.group({
+      search: [''],
+      inventoryItemId: [''],
+      description: ['', [Validators.required, Validators.minLength(2)]],
+      quantity: [1, [Validators.required, Validators.min(1)]],
+      expectedUnitPrice: [0 as number | null],
+      note: [''],
+    });
+  }
+
+  protected readonly epOrderLines: FormArray = this.formBuilder.array([this.epMakeOrderLine()]);
+  /** Helper TS per tipizzare come FormGroup[] ogni riga del FormArray Ordini (evita cast in template) */
+  protected get epOrderLineGroups(): FormGroup[] {
+    return this.epOrderLines.controls as FormGroup[];
+  }
+  protected readonly epOrderForm = this.formBuilder.nonNullable.group({
+    orderType: ['richiesta-cliente', Validators.required],
+    urgency: ['media', Validators.required],
+    clientSearch: [''],
+    clientId: [''],
+    note: [''],
+    expectedDeliveryDate: [''],
+    lines: this.epOrderLines,
+  });
+
+  protected readonly epOrderClientiFiltrati = computed(() => {
+    const q = this.epOrderClienteSearch().trim().toLowerCase();
+    if (!q) return [];
+    return this.allClients()
+      .filter((c) => (c.name || '').toLowerCase().includes(q))
+      .slice(0, 20);
+  });
+
+  protected epOrderSelectClient(c: ClientRecord): void {
+    this.epOrderForm.patchValue({ clientSearch: c.name, clientId: c.id });
+    this.epOrderClienteSearch.set(c.name);
+  }
+
+  protected epOrderAddLine(): void {
+    this.epOrderLines.push(this.epMakeOrderLine());
+  }
+
+  protected epOrderRemoveLine(i: number): void {
+    if (this.epOrderLines.length <= 1) return;
+    this.epOrderLines.removeAt(i);
+  }
+
+  protected epOrderLineSuggestions(i: number): InventoryItemRecord[] {
+    const ctrl = this.epOrderLines.at(i) as FormGroup;
+    const q = String(ctrl.get('search')?.value ?? '').trim().toLowerCase();
+    if (!q) return [];
+    return this.allInventoryItems()
+      .filter((it) => {
+        const hay = `${it.name ?? ''} ${it.sku ?? ''} ${it.category ?? ''}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 10);
+  }
+
+  protected epOrderSelectItem(i: number, it: InventoryItemRecord): void {
+    const ctrl = this.epOrderLines.at(i) as FormGroup;
+    ctrl.patchValue({
+      inventoryItemId: it.id,
+      description: it.name,
+      search: it.name,
+    });
+  }
+
+  /** Sincronizza il campo libero "search" con "description" per la riga ordine i (evita required description vuota in inserimento manuale) */
+  protected epOrderLineSyncDescription(i: number): void {
+    const ctrl = this.epOrderLines.at(i) as FormGroup;
+    const searchVal = String(ctrl.get('search')?.value ?? '').trim();
+    if (searchVal !== ctrl.get('description')?.value) {
+      ctrl.get('description')?.setValue(searchVal, { emitEvent: false });
+    }
+  }
+
+  /**
+   * Invia un nuovo ordine al gestionale.
+   * Le righe senza inventoryItemId passano come "descrizione libera".
+   */
+  protected epSubmitOrder(): void {
+    if (this.epOrderForm.invalid) return;
+    // ✅ Check JIT sessione (revoca immediata tempo zero)
+    const me = this.epSessionOperator();
+    if (!me || !this.data.isEpPortalSessionValid(me.id)) {
+      this.epLogout();
+      this.pushToast('Sessione scaduta o accesso revocato.', 'error');
+      return;
+    }
+    const op = me;
+    const raw = this.epOrderForm.getRawValue();
+    const client = this.allClients().find((c) => c.id === raw.clientId);
+    const lines = (raw.lines as any[])
+      .filter((row) => Number(row.quantity) >= 1 && row.description.trim().length >= 2)
+      .map((row) => ({
+        id: `ord-ln-${crypto.randomUUID()}`,
+        inventoryItemId: row.inventoryItemId || null,
+        description: row.description,
+        quantity: Math.max(1, Number(row.quantity) || 1),
+        expectedUnitPrice: Number(row.expectedUnitPrice) || null,
+        note: row.note || '',
+      }));
+
+    if (lines.length === 0) {
+      this.pushToast('Aggiungi almeno una riga articolo valida all\'ordine.', 'error');
+      return;
+    }
+
+    const orderType = raw.orderType as any;
+    const needsClient = orderType === 'richiesta-cliente';
+    if (needsClient && !client) {
+      this.pushToast('Tipo "richiesta cliente": seleziona un cliente.', 'error');
+      return;
+    }
+
+    const created = this.data.addWarehouseOrder({
+      createdByOperatorId: op.id,
+      createdByOperatorName: op.name,
+      orderType,
+      clientId: client?.id ?? null,
+      clientSnapshot: client?.name ?? '',
+      urgency: raw.urgency as any,
+      note: raw.note ?? '',
+      expectedDeliveryDate: raw.expectedDeliveryDate || null,
+      lines,
+    });
+
+    this.epOrderLastConfirmMessage.set(`✅ Ordine ${created.number} inviato al gestionale`);
+    this.epOrderEditorVisible.set(false);
+    // reset form
+    this.epOrderForm.reset({
+      orderType: 'richiesta-cliente',
+      urgency: 'media',
+      clientSearch: '',
+      clientId: '',
+      note: '',
+      expectedDeliveryDate: '',
+    });
+    while (this.epOrderLines.length) this.epOrderLines.removeAt(0);
+    this.epOrderLines.push(this.epMakeOrderLine());
+    this.epOrderClienteSearch.set('');
+    setTimeout(() => this.epOrderLastConfirmMessage.set(''), 4000);
+  }
+
+  /** I miei ordini creati */
+  protected readonly epMieiOrdini = computed(() => {
+    const all = this.data.warehouseOrders();
+    const op = this.epActiveOperator();
+    return all
+      .filter((o) => (op ? o.createdByOperatorId === op.id : true))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  });
+
+  // --- Modulo "Apri portale sul telefono": IP + QR + clipboard ----------------
+  /**
+   * Prova a ricavare un IP locale di default. In ambiente browser non si può accedere
+   * alla LAN via JS per motivi di sicurezza; lascia vuoto e lascia che l'utente lo inserisca.
+   */
+  protected readonly epLanIp = signal<string>('192.168.1.50');
+  protected readonly epLanPort = signal<number>(4200);
+  protected readonly epMobileLastMessage = signal<string>('');
+
+  /** Valida l'IP e compone l'URL completo */
+  protected readonly epLanUrl = computed(() => {
+    const ip = this.epLanIp().trim();
+    const port = Number(this.epLanPort()) || 0;
+    const ipv4 = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$/.test(ip);
+    if (!ipv4 || port <= 0) return '';
+    return `http://${ip}:${port}/portale-dipendenti`;
+  });
+
+  /** Sorgente immagine del QR code (api.qrserver.com - esterno) */
+  protected readonly epQrSrc = computed(() => {
+    const url = this.epLanUrl();
+    if (!url) return '';
+    const qs = encodeURIComponent(url);
+    return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${qs}`;
+  });
+
+  /** Copia testo negli appunti e mostra messaggio di feedback */
+  protected epCopyToClipboard(text: string, userMessage: string): void {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      this.epMobileLastMessage.set('⚠️ Clipboard non disponibile su questo browser');
+      return;
+    }
+    navigator.clipboard.writeText(text).then(
+      () => this.epMobileLastMessage.set(userMessage || 'Copiato'),
+      () => this.epMobileLastMessage.set('⚠️ Impossibile copiare negli appunti'),
+    );
+    setTimeout(() => this.epMobileLastMessage.set(''), 3500);
+  }
+
+  // ============ PORTALE DIPENDENTI: retroazione nelle sezioni principali (cassa + magazzino) ============
+  // --- Task 6: Servizi pendenti da incassare nella /cassa
+  protected readonly epCassaPendingServices = computed(() =>
+    this.data
+      .pendingServices()
+      .filter((svc) => svc.status === 'inviato')
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)),
+  );
+  protected epPendingServiceClientLabel(svc: PendingServiceRecord): string {
+    if (svc.clientSnapshot) return svc.clientSnapshot;
+    if (svc.clientId) {
+      const c = this.allClients().find((x) => x.id === svc.clientId);
+      if (c) return c.name;
+    }
+    return 'Cliente generico';
+  }
+  protected epPendingServiceToCart(svc: PendingServiceRecord): void {
+    const price = Number(svc.priceUnit) || 0;
+    const qty = Number(svc.quantity) || 1;
+    if (price <= 0) {
+      this.pushToast('Prezzo servizio non valido per la cassa', 'error');
+      return;
+    }
+    // Seleziona cliente in cassa
+    if (svc.clientId) {
+      this.cashCustomerMode.set('existing');
+      this.selectedCashClientId.set(svc.clientId);
+    } else {
+      this.cashCustomerMode.set('walk-in');
+      this.selectedCashClientId.set(null);
+    }
+    this.cashSalesMode.set('servizi');
+    const label = this.epServiceTypeLabel(svc.type);
+    const description = svc.description ? ` (${svc.description})` : '';
+    const lineName = `${label} · Portale dipendenti${description}`;
+    const total = +(price * qty).toFixed(2);
+    this.cashCart.update((items) => [
+      ...items,
+      {
+        id: `cash-line-ep-${crypto.randomUUID()}`,
+        productId: `ep-svc-${svc.id}`,
+        name: lineName,
+        quantity: qty,
+        unitPrice: price,
+        originalUnitPrice: price,
+        total,
+        pricingMode: 'fisso',
+        operatorName: svc.createdByOperatorName || this.cashCurrentOperator(),
+        excludeFromReceipt: false,
+      },
+    ]);
+    this.pushToast(
+      `Servizio aggiunto al carrello · € ${total.toFixed(2).replace('.', ',')}`,
+      'success',
+    );
+  }
+
+  // --- Task 7: Ordini portale dipendenti nel /magazzino
+  protected readonly epMagazzinoOrdini = computed(() =>
+    [...this.data.warehouseOrders()].sort((a, b) =>
+      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
+    ),
+  );
+  protected readonly epMagazzinoExpandedOrderId = signal<string | null>(null);
+  protected epOrderNextAction(status: WarehouseOrderRecord['status']): {
+    label: string;
+    next: WarehouseOrderRecord['status'];
+  } | null {
+    switch (status) {
+      case 'pending':
+        return { label: 'Segna come visto', next: 'seen' };
+      case 'seen':
+        return { label: 'Approva ordine', next: 'approved' };
+      case 'approved':
+        return { label: 'Marca ricevuto', next: 'received' };
+      default:
+        return null;
+    }
+  }
+  protected epOrderCanCancel(status: WarehouseOrderRecord['status']): boolean {
+    return status !== 'cancelled' && status !== 'received';
+  }
+  protected epMagazzinoUpdateOrderStatus(
+    order: WarehouseOrderRecord,
+    next: WarehouseOrderRecord['status'],
+  ): void {
+    this.data.updateWarehouseOrderStatus(order.id, next);
+    this.pushToast(`Ordine ${order.number} · ${this.epOrderStatusLabel(next)}`, 'success');
+  }
+  protected epMagazzinoOrderClientLabel(o: WarehouseOrderRecord): string {
+    if (o.orderType === 'uso-interno') return 'Uso interno';
+    if (o.clientSnapshot) return o.clientSnapshot;
+    if (o.clientId) {
+      const c = this.allClients().find((x) => x.id === o.clientId);
+      if (c) return c.name;
+    }
+    return 'Nessun cliente';
+  }
+  protected epMagazzinoOrderLinesTotal(o: WarehouseOrderRecord): number {
+    if (!o.lines?.length) return 0;
+    return +o.lines
+      .reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.expectedUnitPrice) || 0), 0)
+      .toFixed(2);
+  }
+  // ============ FINE PORTALE DIPENDENTI v1 ============
+
   protected readonly cashProductForm = this.formBuilder.nonNullable.group({
     name: ['', Validators.required],
     category: ['Servizi audio', Validators.required],
@@ -5626,7 +7405,7 @@ export class SectionPageComponent {
 
     const navigation = this.router.getCurrentNavigation();
     const state = (navigation?.extras.state ?? null) as
-      | { cashPendingTransactionId?: unknown; cashClientId?: unknown; cashTicketId?: unknown }
+      | { cashPendingTransactionId?: unknown; cashClientId?: unknown; cashTicketId?: unknown; cashQuoteId?: unknown }
       | null;
     if (!state) {
       return;
@@ -5636,6 +7415,7 @@ export class SectionPageComponent {
       typeof state.cashPendingTransactionId === 'string' ? state.cashPendingTransactionId : null;
     const clientId = typeof state.cashClientId === 'string' ? state.cashClientId : null;
     const ticketId = typeof state.cashTicketId === 'string' ? state.cashTicketId : null;
+    const quoteId = typeof state.cashQuoteId === 'string' ? state.cashQuoteId : null;
 
     if (pendingTransactionId) {
       this.loadPendingCashTransaction(pendingTransactionId);
@@ -5644,6 +7424,13 @@ export class SectionPageComponent {
 
     if (ticketId) {
       this.loadTicketToCash(ticketId);
+      return;
+    }
+
+    if (quoteId) {
+      // ✅ Handoff diretto da dettaglio preventivo: carica righe, cliente, link
+      this.cashSalesMode.set('preventivi');
+      this.loadQuoteToCash(quoteId);
       return;
     }
 
@@ -6571,6 +8358,12 @@ export class SectionPageComponent {
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
       shiftCycleStartDate: this.toIsoDate(new Date()),
       defaultWeeklyShift: { lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' },
+      // ✅ EP v2 campi portale (default)
+      epPortalEnabled: false,
+      epPortalUsername: null,
+      epPortalPasswordHash: null,
+      epPortalAccessRevokedAt: null,
+      epPortalLastLoginAt: null,
     });
 
     if (!this.cashOperators().length || this.cashCurrentOperator() === 'Banco') {
@@ -10011,7 +11804,179 @@ export class SectionPageComponent {
   }
 
   protected setCashDocumentType(type: CashTransactionRecord['documentType']): void {
+    // ✅ Se passi a FATTURA e mancano i dati identificativi, apri il pop-up prima di switchare
+    if (type === 'fattura' && this.cashNeedsInvoiceData()) {
+      this.openCashInvoiceDataModal('fattura');
+      return;
+    }
     this.cashDocumentType.set(type);
+  }
+
+  // ⚖️ Verifica se mancano i dati fiscali per emettere fattura valida
+  protected cashNeedsInvoiceData(): boolean {
+    if (this.cashCustomerMode() === 'existing' && this.selectedCashClient()) {
+      const client = this.selectedCashClient()!;
+      const bp = client.privacyProfile?.billingProfile;
+      if (!bp) return true;
+      if (bp.kind === 'azienda') {
+        // P.IVA + almeno un canale di invio (SDI o PEC)
+        return !(bp.taxId && (bp.sdiCode || bp.pec));
+      }
+      // Privato: CF o almeno indirizzo completo
+      return !(bp.taxId || (bp.billingAddress && client.city !== 'Non indicata'));
+    }
+    // Walk-in o cliente non selezionato: serve sempre
+    return true;
+  }
+
+  // ✅ Apre il pop-up dati fattura (pre-compila con dati già in possesso)
+  protected openCashInvoiceDataModal(captureFor: CashTransactionRecord['documentType']): void {
+    const selected = this.selectedCashClient();
+    const modeWalkIn = this.cashCustomerMode() === 'walk-in';
+
+    // Preleva dati esistenti (cliente esistente o walk-in)
+    const existingName = modeWalkIn ? this.cashCustomerName() : selected?.name ?? '';
+    const existingPhone = modeWalkIn ? this.cashCustomerPhone() : selected?.phone ?? '';
+    const existingCity = modeWalkIn ? this.cashCustomerCity() : selected?.city ?? '';
+    const existingEmail = modeWalkIn ? this.cashCustomerEmail() : selected?.email ?? '';
+    const bp = selected?.privacyProfile?.billingProfile ?? null;
+
+    const isCompany = bp?.kind === 'azienda' || false;
+
+    this.cashInvIsCompany.set(isCompany);
+    this.cashInvName.set(existingName === 'Cliente di passaggio' ? '' : existingName);
+    this.cashInvPhone.set(existingPhone && existingPhone !== 'Non indicato' ? existingPhone : '');
+    this.cashInvCity.set(existingCity && existingCity !== 'Non indicata' ? existingCity : '');
+    this.cashInvEmail.set(existingEmail && !existingEmail.endsWith('@cash.local') ? existingEmail : '');
+    this.cashInvTaxId.set(bp?.taxId ?? '');
+    this.cashInvSdiCode.set(bp?.sdiCode ?? '');
+    this.cashInvPec.set(bp?.pec ?? '');
+    this.cashInvBillingAddress.set(bp?.billingAddress ?? '');
+    this.cashInvCapturedType.set(captureFor);
+    this.cashInvoiceDataModalOpen.set(true);
+  }
+
+  protected closeCashInvoiceDataModal(): void {
+    this.cashInvoiceDataModalOpen.set(false);
+    this.cashInvCapturedType.set(null);
+    // Reset campi
+    this.cashInvIsCompany.set(false);
+    this.cashInvName.set('');
+    this.cashInvPhone.set('');
+    this.cashInvCity.set('');
+    this.cashInvEmail.set('');
+    this.cashInvTaxId.set('');
+    this.cashInvSdiCode.set('');
+    this.cashInvPec.set('');
+    this.cashInvBillingAddress.set('');
+  }
+
+  // ✅ Salva i dati, crea/aggiorna l'anagrafica e switcha a FATTURA (o tipo catturato)
+  protected saveCashInvoiceDataAndSwitch(): void {
+    const name = this.cashInvName().trim();
+    const taxId = this.cashInvTaxId().trim();
+    const billingAddress = this.cashInvBillingAddress().trim();
+    const email = this.cashInvEmail().trim();
+    const pec = this.cashInvPec().trim();
+    const sdiCode = this.cashInvSdiCode().trim();
+
+    if (!name) {
+      this.pushToast('Inserisci nome o ragione sociale.', 'error');
+      return;
+    }
+    if (!taxId) {
+      this.pushToast('Inserisci P.IVA o C.F. per la fattura.', 'error');
+      return;
+    }
+    if (!billingAddress) {
+      this.pushToast('Inserisci indirizzo di fatturazione.', 'error');
+      return;
+    }
+    if (!email && !pec && !sdiCode) {
+      this.pushToast('Inserisci almeno un canale di invio: email, PEC o SDI.', 'error');
+      return;
+    }
+
+    const billingProfile: ClientBillingProfile = {
+      kind: this.cashInvIsCompany() ? 'azienda' : 'privato',
+      taxId,
+      sdiCode,
+      pec,
+      billingAddress,
+    };
+
+    const selected = this.selectedCashClient();
+    const isExisting = this.cashCustomerMode() === 'existing' && !!selected;
+
+    if (isExisting) {
+      // ✅ Aggiorna il profilo di fatturazione del cliente esistente
+      const updated: ClientRecord = {
+        ...selected!,
+        phone: this.cashInvPhone().trim() || selected!.phone,
+        email: email || selected!.email,
+        city: this.cashInvCity().trim() || selected!.city,
+        privacyProfile: {
+          ...selected!.privacyProfile,
+          billingProfile,
+        },
+      };
+      this.data.updateClient(updated);
+      this.selectCashClient(selected!.id);
+      this.pushToast('Dati fattura aggiornati in anagrafica.', 'success');
+    } else {
+      // ✅ Crea un nuovo cliente o aggiornalo se trovato per nome
+      const existingMatch = this.allClients().find(
+        (c) => c.name.trim().toLowerCase() === name.toLowerCase(),
+      );
+      if (existingMatch) {
+        const updated: ClientRecord = {
+          ...existingMatch,
+          phone: this.cashInvPhone().trim() || existingMatch.phone,
+          email: email || existingMatch.email,
+          city: this.cashInvCity().trim() || existingMatch.city,
+          privacyProfile: {
+            ...existingMatch.privacyProfile,
+            billingProfile,
+          },
+        };
+        this.data.updateClient(updated);
+        this.selectCashClient(existingMatch.id);
+        this.pushToast('Cliente trovato: dati fattura aggiunti.', 'success');
+      } else {
+        const fallbackEmail = email ||
+          `${name.toLowerCase().replace(/[^a-z0-9]+/g, '.')}.${Date.now()}@cash.local`;
+        const created = this.data.addClient({
+          name,
+          phone: this.cashInvPhone().trim() || 'Non indicato',
+          email: fallbackEmail,
+          city: this.cashInvCity().trim() || 'Non indicata',
+          address: billingAddress,
+          segment: this.cashInvIsCompany() ? 'Azienda' : 'Cliente banco',
+          preferredContact: email ? 'email' : 'whatsapp',
+          notes: 'Cliente creato da modale dati fattura.',
+          favoriteBrands: '',
+          status: 'occasionale',
+          privacyProfile: this.buildCashPrivacyProfile({
+            dispatchChannel: 'firma',
+            noticeAcknowledged: true,
+            emailMarketing: false,
+            whatsappMarketing: false,
+            fidelityProfiling: false,
+            billingProfile,
+          }),
+        });
+        if (created) {
+          this.selectCashClient(created.id);
+          this.pushToast('Cliente creato e dati fattura salvati.', 'success');
+        }
+      }
+    }
+
+    const captured = this.cashInvCapturedType();
+    this.closeCashInvoiceDataModal();
+    if (captured) {
+      this.cashDocumentType.set(captured);
+    }
   }
 
   protected updateCashDiscountValue(event: Event): void {
@@ -10977,6 +12942,21 @@ export class SectionPageComponent {
       notes: '',
     });
     this.quotePaymentModalOpen.set(true);
+  }
+
+  // ✅ Handoff diretto: Naviga in /cassa con TUTTI gli importi del preventivo già caricati
+  //    (righe articolo, cliente collegato, linkedQuoteId, modalità "preventivi")
+  protected navigateQuoteToCash(quoteId: string): void {
+    const quote = this.allQuotes().find((item) => item.id === quoteId);
+    if (!quote) {
+      this.pushToast('Preventivo non trovato.', 'error');
+      return;
+    }
+    this.closeQuoteDetailModal();
+    this.closeQuotePaymentModal();
+    void this.router.navigate(['/cassa'], {
+      state: { cashQuoteId: quote.id },
+    });
   }
 
   protected closeQuotePaymentModal(): void {

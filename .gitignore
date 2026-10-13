@@ -47,3 +47,6 @@ Thumbs.db
 # Trae IDE
 .trae/
 .trae*
+
+# Stato condiviso per sincronizzazione LAN (generato automaticamente)
+.audiomax-state.json

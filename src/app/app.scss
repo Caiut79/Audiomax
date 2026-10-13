@@ -9,13 +9,15 @@
   grid-template-columns: 15.75rem minmax(0, 1fr);
   min-height: 100dvh;
   overflow: visible;
-  transition: grid-template-columns 0.3s ease;
+  // ✅ Transizione più lunga + cubic-bezier per apertura orizzontale morbida (senza scalini)
+  transition: grid-template-columns 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 
   &.sidebar-collapsed {
     grid-template-columns: 5rem minmax(0, 1fr);
 
-    // Nasconde i testi con animazione morbida
-    // (invece di display:none per non perdere la transizione).
+    // Nasconde i testi con delay differenziale:
+    // in CHIUSURA (entrata in collapsed) i testi spariscono SUBITO,
+    // in APERTURA (uscita da collapsed) ricompaiono DOPO che la larghezza è quasi completa.
     .brand-name,
     .nav-text,
     .nav-group-label span:last-child,
@@ -24,15 +26,25 @@
       max-width: 0;
       visibility: hidden;
       pointer-events: none;
+      // Delay 0 in chiusura: testi scompaiono prima che la sidebar si stringa
+      transition-delay: 0s, 0s, 0s;
     }
 
     .nav-item {
       justify-content: center;
-      padding: 0.7rem 0;
+      // ✅ Padding verticale IDENTICO alla modalità expanded per evitare shift verticali
+      padding: 0.6rem 0;
+      // Rimuove il gap con animazione sincronizzata alla larghezza
+      gap: 0;
     }
 
     .nav-icon-wrap {
       margin: 0;
+    }
+
+    // ✅ Resetta margini laterali, mantiene margin-bottom IDENTICO all'expanded (0.28rem)
+    .nav-home {
+      margin: 0 0 0.28rem;
     }
 
     .nav-group {
@@ -41,7 +53,8 @@
 
     .nav-group-label {
       justify-content: center;
-      padding: 0.6rem 0 0.3rem;
+      // ✅ Padding verticale IDENTICO alla modalità expanded (0.5rem top / 0.24rem bottom)
+      padding: 0.5rem 0 0.24rem;
     }
 
     .nav-group-icon {
@@ -74,6 +87,20 @@
 
   .app-shell.sidebar-collapsed {
     grid-template-columns: 5.35rem minmax(0, 1fr);
+
+    // ✅ Allineamento padding verticale IDENTICO alla modalità expanded @1280px+
+    .nav-item {
+      padding: 0.62rem 0;
+      gap: 0;
+    }
+
+    .nav-group-label {
+      padding: 0.55rem 0 0.32rem;
+    }
+
+    .nav-home {
+      margin: 0 0 0.28rem;
+    }
   }
 
   .workspace-body {
@@ -232,6 +259,10 @@
   border-bottom: 1px solid var(--sidebar-border);
   flex-shrink: 0;
   min-height: 3.5rem;
+  // ✅ Transizione padding e justify-content sincronizzata alla larghezza sidebar
+  transition:
+    padding 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    justify-content 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .brand {
@@ -295,6 +326,8 @@
 
 .nav-home {
   margin: 0 0.6rem 0.28rem;
+  // ✅ Transizione margin sincronizzata al collapse/expand
+  transition: margin 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .nav-group {
@@ -302,6 +335,8 @@
   flex-direction: column;
   gap: 0;
   padding: 0.08rem 0.6rem 0.32rem;
+  // ✅ Transizione padding sincronizzata
+  transition: padding 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .nav-group-label {
@@ -315,6 +350,11 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
+  // ✅ Transizione padding e justify-content sincronizzata alla larghezza sidebar
+  transition:
+    padding 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    justify-content 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    gap 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 
   span:last-child {
     white-space: nowrap;
@@ -346,7 +386,15 @@
   font-size: 0.92rem;
   font-weight: 650;
   white-space: nowrap;
-  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  // ✅ Aggiunte padding e gap alle transizioni con stessa durata/curva della grid
+  //    (stesse proprietà hanno override dentro .sidebar-collapsed, quindi si animano senza scalino)
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    padding 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    gap 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    justify-content 0.38s cubic-bezier(0.22, 1, 0.36, 1);
   min-height: 2.75rem;
   position: relative;
 
@@ -417,14 +465,20 @@
 }
 
 // ─── Elementi testo transizionabili in fase di collapse/expand
+// ✅ Delay differenziali sincronizzati con la larghezza della sidebar:
+//    - In CHIUSURA (collapse): testi spariscono SUBITO (delay 0s) per non vedere il wrap su più righe
+//    - In APERTURA (expand): testi ricompaiono DOPO ~0.18s (quando la larghezza è quasi completa)
 .brand-name,
 .nav-text,
 .status-label,
 .nav-group-label span:last-child {
+  opacity: 1;
+  max-width: 20rem;
+  visibility: visible;
   transition:
-    opacity 0.22s ease,
-    max-width 0.3s ease,
-    visibility 0.15s ease;
+    opacity 0.22s ease 0.18s,
+    max-width 0.32s cubic-bezier(0.22, 1, 0.36, 1) 0.1s,
+    visibility 0s linear 0.18s;
 }
 
 // ─── Sidebar Footer ───
@@ -437,6 +491,10 @@
   border-top: 1px solid var(--sidebar-border);
   flex-shrink: 0;
   min-height: 2.8rem;
+  // ✅ Transizione padding e justify-content sincronizzata alla larghezza sidebar
+  transition:
+    padding 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    justify-content 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .sidebar-status {
@@ -447,6 +505,8 @@
   color: var(--text-soft);
   overflow: hidden;
   min-width: 0;
+  // ✅ Transizione justify-content sincronizzata
+  transition: justify-content 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .status-dot {

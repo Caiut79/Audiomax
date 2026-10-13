@@ -8,6 +8,8 @@ export type CrmSectionId =
   | 'preventivi'
   | 'clienti'
   | 'dipendenti'
+  | 'employee-portal'
+  | 'portal-comms-admin'
   | 'tecnico'
   | 'ecommerce'
   | 'impostazioni'
@@ -156,19 +158,56 @@ export const crmSections: CrmSection[] = [
   },
   {
     id: 'dipendenti',
+    route: 'dipendenti',
+    label: 'Anagrafica Dipendenti',
+    icon: '👥',
+    summary: 'Gestione operatori, ruoli, visibilità e turni standard.',
+    description:
+      'Amministra gli operatori del negozio (dipendenti, tecnici, amministrazione) con ruolo, contratto, orari e stato attivo/nascosto.',
+    highlights: [
+      'Anagrafica e ruoli',
+      'Attiva / nascondi operatori in cassa',
+      'Turni standard e settimanali',
+    ],
+    metricLabel: 'Operatori attivi',
+    metricValue: '9',
+  },
+  {
+    id: 'employee-portal',
     route: 'portale-dipendenti',
     label: 'Portale dipendenti',
     icon: '🧑‍🔧',
-    summary: 'Area operativa per task, materiali e segnalazioni.',
+    summary: 'Area mobile per dipendenti: magazzino, DDT, servizi in cassa, ordini.',
     description:
-      'Offre al personale un accesso rapido a task assegnati, richieste materiale e segnalazioni operative.',
+      'Offre al personale un accesso rapido e mobile-first per consultare il magazzino, creare DDT di trasporto, registrare servizi di officina e inviare ordini di materiale.',
     highlights: [
-      'Elenco attività assegnate',
-      'Richieste materiali e segnalazioni',
-      'Accesso diretto da mobile per il team',
+      'Consulta e preleva dal magazzino',
+      'Genera DDT per installazioni',
+      'Invia servizi in officina direttamente in cassa',
+      'Richiedi materiale con ordine interno',
+      'Link diretto da smartphone (LAN + QR)',
     ],
-    metricLabel: 'Segnalazioni aperte',
-    metricValue: '11',
+    metricLabel: 'Ordini aperti',
+    metricValue: '0',
+  },
+  {
+    id: 'portal-comms-admin',
+    route: 'comunicazioni-portale',
+    label: 'Comunicazioni Portale',
+    icon: '📢',
+    summary:
+      "Invia comunicazioni e distinte di materiale ai tecnici: verifica chi ha letto, traccia prelievi FIFO dal magazzino.",
+    description:
+      'Crea comunicazioni per uno o più tecnici del portale, collega un preventivo e importa le righe materiale, assegna esplicitamente ogni articolo di magazzino e traccia quando vengono scaricati in tempo reale.',
+    highlights: [
+      'Collegamento a preventivi con auto-import righe materiale',
+      'Associazione esplicita articolo ⇔ riga (nessun fuzzy matching)',
+      'Storico letture e caricamenti per tecnico + data + ora',
+      'Scarico automatico FIFO dal magazzino al click "Carica materiale"',
+      'Reset credenziali e revoca accesso dipendenti "tempo zero"',
+    ],
+    metricLabel: 'Comunicazioni inviate',
+    metricValue: '0',
   },
   {
     id: 'tecnico',

@@ -1985,6 +1985,36 @@
 
   <!-- ═══════════════ CASSA ═══════════════ -->
   @case ('cassa') {
+  <!-- Task 6: Servizi Pendenti · Portale Dipendenti -->
+  @if (epCassaPendingServices().length > 0) {
+  <section class="ep-cash-feed op-card" style="margin: 0.5rem 0 0.75rem; padding: 1.1rem 1.25rem;">
+    <div class="ep-cash-feed-head">
+      <span class="ep-cash-feed-title">💶 Servizi da incassare · Portale dipendenti</span>
+      <span class="badge badge-info">{{ epCassaPendingServices().length }} in attesa</span>
+    </div>
+    <ul class="ep-cash-feed-list">
+      @for (svc of epCassaPendingServices(); track svc.id) {
+      <li class="ep-cash-feed-item">
+        <div class="ep-cash-feed-meta">
+          <span class="ep-cash-feed-client">👤 {{ epPendingServiceClientLabel(svc) }}</span>
+          <span class="ep-pill ep-pill-active ep-pill-sm">{{ epServiceTypeLabel(svc.type) }}</span>
+          <span class="ep-list-meta">📅 {{ epFormatDate(svc.serviceDate) }} · 👷 {{ svc.createdByOperatorName ||
+            'Operatore' }}</span>
+          @if (svc.description) {
+          <p class="ep-cash-feed-desc">{{ svc.description }}</p>
+          }
+        </div>
+        <div class="ep-cash-feed-cta">
+          <span class="ep-amount">€ {{ (svc.priceUnit * svc.quantity).toFixed(2).replace('.',',') }}</span>
+          <button type="button" class="btn-primary-sm" (click)="epPendingServiceToCart(svc)">
+            Carica nel carrello
+          </button>
+        </div>
+      </li>
+      }
+    </ul>
+  </section>
+  }
   <div class="pos-shell">
     <div class="pos-workbench">
       <div class="pos-sidebar op-card pos-panel--customer">
@@ -2985,6 +3015,231 @@
     </div>
   </div>
   }
+
+  @if (cashReportModalOpen()) {
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashReportModal()">
+    <div class="ui-modal cash-report-modal" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head">
+        <div>
+          <span class="detail-subtitle">Report cassa</span>
+          <h2 class="op-card-title">
+            @switch (cashReportModalView()) {
+            @case ('incassi') { Dettaglio incassi }
+            @case ('operatori') { Dettaglio operatori }
+            @case ('categorie') { Dettaglio categorie vendita }
+            @case ('numerazione') { Numerazione documenti }
+            @case ('chiusure') { Storico chiusure }
+            @case ('clienti-top') { Clienti top }
+            }
+          </h2>
+        </div>
+        <button type="button" class="btn-ghost" (click)="closeCashReportModal()">Chiudi</button>
+      </div>
+      <div class="ui-modal-body cash-report-modal-body">
+        @switch (cashReportModalView()) {
+        @case ('incassi') {
+        <div class="cash-report-detail-grid">
+          <div class="closure-summary-grid">
+            <div class="closure-card"><span>Incasso totale</span><strong>€ {{
+                cashPaidTransactionsTotal().toLocaleString('it-IT') }}</strong></div>
+            <div class="closure-card"><span>Operazioni</span><strong>{{ cashTransactionsTotalCount() }}</strong></div>
+            <div class="closure-card"><span>Scontrini</span><strong>{{ cashTodayReceiptCount() }}</strong></div>
+            <div class="closure-card"><span>Fatture</span><strong>{{ cashTodayInvoiceCount() }}</strong></div>
+            <div class="closure-card"><span>Insoluti aperti</span><strong>€ {{
+                cashUnpaidTransactionsTotal().toLocaleString('it-IT') }}</strong></div>
+            <div class="closure-card"><span>Sconti</span><strong>€ {{ cashTodayDiscountTotal().toLocaleString('it-IT')
+                }}</strong></div>
+          </div>
+          <div class="report-methods">
+            <div><span>Contanti</span><strong>€ {{ cashTotalsByMethod().contanti.toLocaleString('it-IT') }}</strong>
+            </div>
+            <div><span>POS</span><strong>€ {{ cashTotalsByMethod().pos.toLocaleString('it-IT') }}</strong></div>
+            <div><span>Bonifico</span><strong>€ {{ cashTotalsByMethod().bonifico.toLocaleString('it-IT') }}</strong>
+            </div>
+            <div><span>Misto</span><strong>€ {{ cashTotalsByMethod().misto.toLocaleString('it-IT') }}</strong></div>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-ghost" (click)="openCashReceiptsFromReport()">Apri documenti
+              emessi</button>
+          </div>
+        </div>
+        }
+        @case ('operatori') {
+        <div class="report-methods">
+          @for (entry of cashByOperator(); track entry.operator) {
+          <div><span>{{ entry.operator }}</span><strong>€ {{ entry.total.toLocaleString('it-IT') }} · {{ entry.count }}
+              voci</strong></div>
+          }
+        </div>
+        }
+        @case ('categorie') {
+        <div class="report-methods">
+          @for (item of cashCategoryBreakdown(); track item.category) {
+          <div><span>{{ item.category }}</span><strong>€ {{ item.total.toLocaleString('it-IT') }} · {{ item.quantity }}
+              articoli/servizi</strong></div>
+          }
+        </div>
+        }
+        @case ('numerazione') {
+        <div class="cash-report-detail-grid">
+          <div class="report-methods">
+            <div><span>{{ cashClosureReceiptRange() }}</span><strong>{{ cashTodayReceiptCount() }} scontrini</strong>
+            </div>
+            @if (cashClosureInvoiceRange()) {
+            <div><span>{{ cashClosureInvoiceRange() }}</span><strong>{{ cashTodayInvoiceCount() }} fatture</strong>
+            </div>
+            }
+          </div>
+          <div class="report-methods">
+            <div><span>Prossimo scontrino</span><strong>n. {{ cashFiscalSettings().nextReceiptNumber }}</strong></div>
+            <div><span>Prossima fattura</span><strong>n. {{ cashFiscalSettings().nextInvoiceNumber }}</strong></div>
+            <div><span>Prossima chiusura</span><strong>n. {{ cashFiscalSettings().nextClosureNumber }}</strong></div>
+          </div>
+        </div>
+        }
+        @case ('chiusure') {
+        <div class="cash-shift-modal-grid">
+          <div class="cash-shift-list-panel">
+            <label class="pos-inline-label">
+              <span>Cerca chiusura</span>
+              <input type="search" placeholder="Nome, numero o data" [value]="cashShiftSearch()"
+                (input)="updateCashShiftSearch($event)">
+            </label>
+            <div class="cash-receipts-list">
+              @for (shift of filteredCashShifts(); track shift.id) {
+              <button type="button" class="cash-receipt-row" [class.active]="selectedCashReportShiftId() === shift.id"
+                (click)="selectCashReportShift(shift.id)">
+                <span class="cash-receipt-row-main">
+                  <strong>{{ shift.label }} · Ch. {{ shift.closureNumber }}</strong>
+                  <span>{{ shift.closedAt.slice(0, 10) }} · {{ shift.transactionsCount }} operazioni</span>
+                </span>
+                <span class="cash-receipt-row-side">
+                  <strong>€ {{ shift.paidTotal.toLocaleString('it-IT') }}</strong>
+                  <span>{{ shift.receiptNumbers.length }} sc. · {{ shift.invoiceNumbers.length }} ft.</span>
+                </span>
+              </button>
+              } @empty {
+              <div class="empty-state small">
+                <p>Nessuna chiusura disponibile.</p>
+              </div>
+              }
+            </div>
+          </div>
+
+          <div class="cash-shift-detail-panel">
+            @if (selectedCashReportShift(); as shift) {
+            <div class="cash-receipt-summary">
+              <div>
+                <span class="detail-subtitle">Chiusura selezionata</span>
+                <strong>{{ shift.label }} · n. {{ shift.closureNumber }}</strong>
+              </div>
+              <span class="badge badge-neutral">{{ shift.closedAt.slice(0, 10) }}</span>
+            </div>
+            <div class="closure-summary-grid">
+              <div class="closure-card"><span>Incasso</span><strong>€ {{ shift.paidTotal.toLocaleString('it-IT')
+                  }}</strong></div>
+              <div class="closure-card"><span>Operazioni</span><strong>{{ shift.transactionsCount }}</strong></div>
+              <div class="closure-card"><span>Scontrini</span><strong>{{ shift.receiptNumbers.length }}</strong></div>
+              <div class="closure-card"><span>Fatture</span><strong>{{ shift.invoiceNumbers.length }}</strong></div>
+            </div>
+            <div class="cash-receipt-lines">
+              <span class="detail-subtitle">Documenti della chiusura</span>
+              @for (transaction of selectedCashReportShiftTransactions(); track transaction.id) {
+              <button type="button" class="cash-report-transaction"
+                [class.active]="selectedCashReportTransactionId() === transaction.id"
+                (click)="selectCashReportTransaction(transaction.id)">
+                <span>
+                  <strong>{{ cashReportDocumentLabel(transaction) }} · {{ transaction.customerName }}</strong>
+                  <span>{{ transaction.paymentMethod }} · {{ transaction.createdAt.slice(0, 10) }}</span>
+                </span>
+                <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
+              </button>
+              } @empty {
+              <div class="empty-state small">
+                <p>Nessun documento associato a questa chiusura.</p>
+              </div>
+              }
+            </div>
+            @if (selectedCashReportTransaction(); as transaction) {
+            <div class="cash-receipt-lines">
+              <span class="detail-subtitle">Dettaglio documento</span>
+              @for (line of transaction.lines; track line.id) {
+              <div class="cash-receipt-line">
+                <div>
+                  <strong>{{ line.name }}</strong>
+                  <span>{{ line.quantity }} {{ cashQuantityLabel(line) }} · {{ line.operatorName }}</span>
+                </div>
+                <strong>€ {{ line.total.toLocaleString('it-IT') }}</strong>
+              </div>
+              }
+            </div>
+            }
+            }
+          </div>
+        </div>
+        }
+        @case ('clienti-top') {
+        <div class="cash-shift-modal-grid">
+          <div class="cash-shift-list-panel">
+            <div class="cash-receipts-list">
+              @for (entry of loyalClients(); track entry.client.id) {
+              <button type="button" class="cash-receipt-row"
+                [class.active]="selectedCashTopClientId() === entry.client.id"
+                (click)="selectCashTopClient(entry.client.id)">
+                <span class="cash-receipt-row-main">
+                  <strong>{{ entry.client.name }}</strong>
+                  <span>{{ entry.visits }} acquisti · {{ entry.points }} punti</span>
+                </span>
+                <span class="cash-receipt-row-side">
+                  <strong>€ {{ entry.totalSpent.toLocaleString('it-IT') }}</strong>
+                  <span>{{ entry.client.city }}</span>
+                </span>
+              </button>
+              }
+            </div>
+          </div>
+          <div class="cash-shift-detail-panel">
+            @if (selectedCashTopClient(); as entry) {
+            <div class="cash-receipt-summary">
+              <div>
+                <span class="detail-subtitle">Cliente selezionato</span>
+                <strong>{{ entry.client.name }}</strong>
+              </div>
+              <span class="badge badge-info">{{ entry.points }} punti</span>
+            </div>
+            <div class="closure-summary-grid">
+              <div class="closure-card"><span>Totale speso</span><strong>€ {{ entry.totalSpent.toLocaleString('it-IT')
+                  }}</strong></div>
+              <div class="closure-card"><span>Acquisti</span><strong>{{ entry.visits }}</strong></div>
+              <div class="closure-card"><span>Email</span><strong>{{ entry.client.email || 'n.d.' }}</strong></div>
+              <div class="closure-card"><span>Telefono</span><strong>{{ entry.client.phone || 'n.d.' }}</strong></div>
+            </div>
+            <div class="cash-receipt-lines">
+              <span class="detail-subtitle">Documenti del cliente</span>
+              @for (transaction of selectedCashTopClientTransactions(); track transaction.id) {
+              <div class="cash-receipt-line">
+                <div>
+                  <strong>{{ cashReportDocumentLabel(transaction) }}</strong>
+                  <span>{{ transaction.createdAt.slice(0, 10) }} · {{ transaction.paymentMethod }}</span>
+                </div>
+                <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
+              </div>
+              } @empty {
+              <div class="empty-state small">
+                <p>Nessun documento associato a questo cliente.</p>
+              </div>
+              }
+            </div>
+            }
+          </div>
+        </div>
+        }
+        }
+      </div>
+    </div>
+  </div>
+  }
+
   }
 
   <!-- ═══════════════ SERVIZIO TECNICO ═══════════════ -->
@@ -3441,6 +3696,95 @@
         (click)="setWarehouseView('movimenti')">Storico Movimenti</button>
     </nav>
 
+    <!-- Task 7: Ordini · Portale Dipendenti (sempre visibili nel magazzino) -->
+    <section class="ep-mag-feed op-card" style="margin: 1rem 0; padding: 1.1rem 1.25rem;">
+      <div class="ep-cash-feed-head">
+        <span class="ep-cash-feed-title">🛒 Ordini · Portale dipendenti</span>
+        <span class="badge badge-info">Totali {{ epMagazzinoOrdini().length }} · In attesa {{
+          epMagazzinoOrdini().filter(o => o.status === 'pending').length }}</span>
+      </div>
+      @if (epMagazzinoOrdini().length === 0) {
+      <div class="ep-empty" style="margin-top: 0.5rem;">Nessun ordine ricevuto dal portale dipendenti.</div>
+      }
+      <ul class="ep-mag-feed-list">
+        @for (o of epMagazzinoOrdini(); track o.id) {
+        <li class="ep-mag-feed-item">
+          <div class="ep-mag-feed-head">
+            <div class="ep-mag-feed-head-left">
+              <span class="ep-big-num" style="font-size: 0.95rem;">{{ o.number }}</span>
+              <span class="ep-pill" [class.ep-urgency-high]="o.urgency === 'alta'"
+                [class.ep-urgency-mid]="o.urgency === 'media'" [class.ep-urgency-low]="o.urgency === 'bassa'">{{
+                epOrderUrgencyLabel(o.urgency) }}</span>
+              <span class="ep-pill ep-pill-sm">{{ epOrderTypeLabel(o.orderType) }}</span>
+              <span class="ep-status-pill" [class]="'ep-status-' + o.status">{{ epOrderStatusLabel(o.status) }}</span>
+            </div>
+            <div class="ep-mag-feed-meta">
+              <span>👤 {{ epMagazzinoOrderClientLabel(o) }}</span>
+              <span>📅 {{ epFormatDate(o.createdAt) }}</span>
+              @if (o.expectedDeliveryDate) {
+              <span>🎯 Consegna prevista: {{ epFormatDate(o.expectedDeliveryDate) }}</span>
+              }
+              <span>📦 {{ o.lines.length }} righe · € {{
+                epMagazzinoOrderLinesTotal(o).toFixed(2).replace('.', ',') }}</span>
+            </div>
+          </div>
+          @if (o.note) {
+          <p class="ep-cash-feed-desc" style="margin: 0.35rem 0 0.6rem;">📝 {{ o.note }}</p>
+          }
+          <div class="ep-mag-feed-actions">
+            @if (epOrderNextAction(o.status); as next) {
+            <button type="button" class="btn-primary-sm" (click)="epMagazzinoUpdateOrderStatus(o, next.next)">
+              {{ next.label }}
+            </button>
+            }
+            <button type="button" class="btn-ghost btn-sm-fit"
+              (click)="epMagazzinoExpandedOrderId.set(epMagazzinoExpandedOrderId() === o.id ? null : o.id)">
+              {{ epMagazzinoExpandedOrderId() === o.id ? 'Chiudi dettaglio' : 'Vedi righe' }}
+            </button>
+            @if (epOrderCanCancel(o.status)) {
+            <button type="button" class="chip danger" (click)="epMagazzinoUpdateOrderStatus(o, 'cancelled')">
+              Cancella ordine
+            </button>
+            }
+          </div>
+          @if (epMagazzinoExpandedOrderId() === o.id) {
+          <table class="ep-ddt-table" style="margin-top: 0.9rem;">
+            <thead>
+              <tr>
+                <th style="width: 40px;">#</th>
+                <th>Articolo</th>
+                <th style="width: 100px;">Q.tà</th>
+                <th style="width: 140px;">Prezzo desiderato</th>
+                <th>Note riga</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (l of o.lines; track l.id; let i = $index) {
+              <tr>
+                <td>{{ i + 1 }}</td>
+                <td>
+                  <strong>{{ l.description || 'Articolo' }}</strong>
+                  @if (l.inventoryItemId) {
+                  <br><small style="opacity: 0.7;">Codice articolo: {{ l.inventoryItemId }}</small>
+                  }
+                </td>
+                <td>{{ l.quantity }}</td>
+                <td>€ {{ (l.expectedUnitPrice || 0).toFixed(2).replace('.', ',') }}</td>
+                <td>@if (l.note) { {{ l.note }} } @else { — }</td>
+              </tr>
+              } @empty {
+              <tr>
+                <td colspan="5" class="ep-empty">Nessuna riga articolo nell'ordine.</td>
+              </tr>
+              }
+            </tbody>
+          </table>
+          }
+        </li>
+        }
+      </ul>
+    </section>
+
     @if (warehouseView() === 'ricerca') {
     <div class="warehouse-toolbar">
       <input class="warehouse-search" type="search"
@@ -3583,18 +3927,53 @@
         <p class="text-muted">Seleziona un prodotto dalla tabella per vedere i dettagli.</p>
         }
       </div>
-      <div class="op-card">
+      <div class="op-card warehouse-adjustment-card">
         <h2 class="op-card-title">Rettifiche rapide</h2>
         <form class="op-form" [formGroup]="warehouseAdjustmentForm" (ngSubmit)="applyInventoryAdjustment()">
-          <label><span>Prodotto</span><select formControlName="inventoryItemId">
-              <option value="">Seleziona prodotto</option>@for (item of allInventoryItems(); track item.id) {<option
-                [value]="item.id">{{ item.name }} · {{ item.stock }}</option>}
-            </select></label>
-          <label><span>Quantità reale</span><input type="number" formControlName="actualQuantity"></label>
-          <label><span>Causale</span><input type="text" formControlName="reason"
-              placeholder="Inventario periodico, danno, errore..."></label>
-          <label><span>Operatore</span><input type="text" formControlName="operator"></label>
-          <div class="form-actions"><button type="submit" class="btn-primary">Applica rettifica</button></div>
+          <div class="warehouse-adjustment-rows">
+            <!-- Riga 1: Prodotto (largo) · Giacenza attuale (stretta numerica) · Quantità reale (stretta numerica) -->
+            <div class="warehouse-adjustment-row warehouse-adjustment-row-top">
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
+                <span>Prodotto</span>
+                <select class="form-field-outlined" formControlName="inventoryItemId">
+                  <option value="">Seleziona prodotto</option>
+                  @for (item of allInventoryItems(); track item.id) {<option [value]="item.id">{{ item.name }} · {{
+                    item.stock }}</option>}
+                </select>
+              </label>
+              <div class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
+                <span>Giacenza attuale</span>
+                <input type="text" class="form-readonly form-field-numeric"
+                  [value]="warehouseAdjustmentCurrentStock() !== null ? warehouseAdjustmentCurrentStock() + ' unità' : '—'"
+                  readonly aria-readonly="true">
+              </div>
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
+                <span>Quantità reale</span>
+                <input type="number" class="form-field-outlined form-field-numeric" formControlName="actualQuantity"
+                  min="0">
+              </label>
+            </div>
+
+            <!-- Riga 2: Causale (largo) · Operatore (select elenco) · Pulsanti (destra) -->
+            <div class="warehouse-adjustment-row warehouse-adjustment-row-bottom">
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
+                <span>Causale</span>
+                <input type="text" class="form-field-outlined" formControlName="reason"
+                  placeholder="Inventario periodico, danno, errore...">
+              </label>
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--operator">
+                <span>Operatore</span>
+                <select class="form-field-outlined" formControlName="operator">
+                  @for (name of warehouseAdjustmentOperatorList(); track name) {<option [value]="name">{{ name }}
+                  </option>}
+                </select>
+              </label>
+              <div class="form-actions form-actions-row">
+                <button type="submit" class="btn-primary">Applica rettifica</button>
+                <button type="button" class="btn-ghost" (click)="resetWarehouseAdjustmentForm()">Annulla</button>
+              </div>
+            </div>
+          </div>
         </form>
       </div>
     </div>
@@ -3727,18 +4106,53 @@
           }
         </div>
       </div>
-      <div class="op-card">
+      <div class="op-card warehouse-adjustment-card">
         <h2 class="op-card-title">Registrazione uso interno</h2>
         <form class="op-form" [formGroup]="warehouseAdjustmentForm" (ngSubmit)="applyInventoryAdjustment()">
-          <label><span>Prodotto</span><select formControlName="inventoryItemId">
-              <option value="">Seleziona prodotto</option>@for (item of allInventoryItems(); track item.id) {<option
-                [value]="item.id">{{ item.name }} · {{ item.stock }}</option>}
-            </select></label>
-          <label><span>Quantità reale</span><input type="number" formControlName="actualQuantity"></label>
-          <label><span>Causale</span><input type="text" formControlName="reason"
-              placeholder="Uso interno, rottura, test, inventario..."></label>
-          <label><span>Operatore</span><input type="text" formControlName="operator"></label>
-          <div class="form-actions"><button type="submit" class="btn-primary">Registra uso interno</button></div>
+          <div class="warehouse-adjustment-rows">
+            <!-- Riga 1: Prodotto (largo) · Giacenza attuale (stretta numerica) · Quantità reale (stretta numerica) -->
+            <div class="warehouse-adjustment-row warehouse-adjustment-row-top">
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
+                <span>Prodotto</span>
+                <select class="form-field-outlined" formControlName="inventoryItemId">
+                  <option value="">Seleziona prodotto</option>
+                  @for (item of allInventoryItems(); track item.id) {<option [value]="item.id">{{ item.name }} · {{
+                    item.stock }}</option>}
+                </select>
+              </label>
+              <div class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
+                <span>Giacenza attuale</span>
+                <input type="text" class="form-readonly form-field-numeric"
+                  [value]="warehouseAdjustmentCurrentStock() !== null ? warehouseAdjustmentCurrentStock() + ' unità' : '—'"
+                  readonly aria-readonly="true">
+              </div>
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
+                <span>Quantità reale</span>
+                <input type="number" class="form-field-outlined form-field-numeric" formControlName="actualQuantity"
+                  min="0">
+              </label>
+            </div>
+
+            <!-- Riga 2: Causale (largo) · Operatore (select elenco) · Pulsanti (destra) -->
+            <div class="warehouse-adjustment-row warehouse-adjustment-row-bottom">
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
+                <span>Causale</span>
+                <input type="text" class="form-field-outlined" formControlName="reason"
+                  placeholder="Uso interno, rottura, test, inventario...">
+              </label>
+              <label class="warehouse-adjustment-field warehouse-adjustment-field--operator">
+                <span>Operatore</span>
+                <select class="form-field-outlined" formControlName="operator">
+                  @for (name of warehouseAdjustmentOperatorList(); track name) {<option [value]="name">{{ name }}
+                  </option>}
+                </select>
+              </label>
+              <div class="form-actions form-actions-row">
+                <button type="submit" class="btn-primary">Registra uso interno</button>
+                <button type="button" class="btn-ghost" (click)="resetWarehouseAdjustmentForm()">Annulla</button>
+              </div>
+            </div>
+          </div>
         </form>
       </div>
     </div>
@@ -3921,9 +4335,9 @@
   </div>
 
   @if (warehouseModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false" (click)="closeWarehouseModal()">
-    <div class="ui-modal ui-modal-fullscreen warehouse-modal" (click)="$event.stopPropagation()">
-      <div class="ui-modal-head">
+  <div class="ui-modal-overlay ui-modal-overlay-warehouse" [attr.aria-hidden]="false" (click)="closeWarehouseModal()">
+    <div class="ui-modal ui-modal-warehouse warehouse-modal" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head ui-modal-head-warehouse">
         <div class="appointment-modal-head-copy">
           <span class="detail-subtitle">Magazzino</span>
           <h2 class="op-card-title">@if (warehouseReceiptMode() === 'restock') { Ricarica prodotto esistente } @else {
@@ -3934,392 +4348,387 @@
       </div>
       <form class="warehouse-modal-form ui-modal-body" [formGroup]="warehouseReceiptForm"
         (ngSubmit)="receiveWarehouseStock()">
-        <div class="warehouse-modal-shell">
-          <aside class="warehouse-modal-sidebar" aria-label="Riepilogo carico magazzino">
-            <section class="appointment-sidebar-card appointment-sidebar-card-primary">
-              <span class="detail-subtitle">Riepilogo prodotto</span>
-              <strong>
+        <div class="warehouse-modal-main">
+          @if (shouldShowFormValidation(warehouseReceiptForm)) { <div class="form-error-summary">@if
+            (warehouseReceiptMode() === 'restock') { Completa i dati base della ricarica prima di confermare. } @else
+            { Completa i dati obbligatori del carico prima di registrare il movimento. }</div> }
+
+          <!-- Sezioni riepilogative integrate (ex sidebar magazzino) -->
+          <section class="appointment-main-panel appointment-sidebar-card-primary">
+            <span class="detail-subtitle">Riepilogo prodotto</span>
+            <strong>
+              @if (warehouseReceiptMode() === 'restock') {
+              @if (warehouseReceiptTargetItem(); as targetItem) {
+              {{ targetItem.name }}
+              } @else {
+              {{ warehouseReceiptForm.value.name || 'Prodotto in ricarica' }}
+              }
+              } @else {
+              {{ warehouseReceiptForm.value.name || 'Nuovo prodotto' }}
+              }
+            </strong>
+            <p>{{ warehouseReceiptForm.value.sku || 'Codice da definire' }}</p>
+            <div class="appointment-linked-quote-meta">
+              <span>
                 @if (warehouseReceiptMode() === 'restock') {
                 @if (warehouseReceiptTargetItem(); as targetItem) {
-                {{ targetItem.name }}
+                Barcode attuale: {{ targetItem.barcode || 'N/D' }}
                 } @else {
-                {{ warehouseReceiptForm.value.name || 'Prodotto in ricarica' }}
+                Barcode attuale: N/D
                 }
                 } @else {
-                {{ warehouseReceiptForm.value.name || 'Nuovo prodotto' }}
+                Barcode: {{ warehouseReceiptForm.value.barcode || 'Da inserire' }}
                 }
-              </strong>
-              <p>{{ warehouseReceiptForm.value.sku || 'Codice da definire' }}</p>
-              <div class="appointment-linked-quote-meta">
-                <span>
-                  @if (warehouseReceiptMode() === 'restock') {
-                  @if (warehouseReceiptTargetItem(); as targetItem) {
-                  Barcode attuale: {{ targetItem.barcode || 'N/D' }}
-                  } @else {
-                  Barcode attuale: N/D
-                  }
-                  } @else {
-                  Barcode: {{ warehouseReceiptForm.value.barcode || 'Da inserire' }}
-                  }
-                </span>
-                @if (warehouseReceiptMode() === 'restock') { <span>Barcode variato: {{
-                  warehouseReceiptForm.value.barcode || 'Nessuna variazione' }}</span> }
-                <span>Destinazione: {{ warehouseUsageTypeLabel(warehouseReceiptForm.controls.usageType.value) }}</span>
-                @if (warehouseReceiptMode() !== 'restock' && warehouseReceiptForm.controls.usageType.value ===
-                'uso-negozio') { <span>Gestione: {{ warehouseReceiptForm.controls.registrationMode.value === 'spesa' ?
-                  'Spesa di acquisto' : 'Inventario' }}</span> }
-                <span>Categoria: {{ warehouseReceiptForm.value.category || 'Da selezionare' }}</span>
-                @if (warehouseReceiptMode() !== 'restock') { <span>Unita: {{ warehouseReceiptForm.value.unitOfMeasure ||
-                  'pz' }}</span> }
-              </div>
-            </section>
+              </span>
+              @if (warehouseReceiptMode() === 'restock') { <span>Barcode variato: {{
+                warehouseReceiptForm.value.barcode || 'Nessuna variazione' }}</span> }
+              <span>Destinazione: {{ warehouseUsageTypeLabel(warehouseReceiptForm.controls.usageType.value) }}</span>
+              @if (warehouseReceiptMode() !== 'restock' && warehouseReceiptForm.controls.usageType.value ===
+              'uso-negozio') { <span>Gestione: {{ warehouseReceiptForm.controls.registrationMode.value === 'spesa' ?
+                'Spesa di acquisto' : 'Inventario' }}</span> }
+              <span>Categoria: {{ warehouseReceiptForm.value.category || 'Da selezionare' }}</span>
+              @if (warehouseReceiptMode() !== 'restock') { <span>Unita: {{ warehouseReceiptForm.value.unitOfMeasure ||
+                'pz' }}</span> }
+            </div>
+          </section>
 
-            @if (warehouseReceiptMode() === 'restock') {
-            @if (warehouseReceiptTargetItem(); as targetItem) {
-            <section class="appointment-sidebar-card">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Situazione attuale</span>
-                <strong>Confronto rapido</strong>
+          @if (warehouseReceiptMode() === 'restock') {
+          @if (warehouseReceiptTargetItem(); as targetItem) {
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Situazione attuale</span>
+              <strong>Confronto rapido</strong>
+            </div>
+            <div class="detail-fields">
+              <div class="detail-field"><span>Giacenza</span><strong>{{ targetItem.stock }}</strong></div>
+              <div class="detail-field"><span>Scaffale</span><strong>{{ targetItem.location }}</strong></div>
+              <div class="detail-field"><span>Prezzo attuale</span><strong>€ {{ formatCurrency(targetItem.salePrice)
+                  }}</strong></div>
+              <div class="detail-field"><span>Nuovo prezzo</span><strong>€ {{ (warehouseReceiptForm.value.salePrice ||
+                  0).toLocaleString('it-IT') }}</strong></div>
+            </div>
+            <div class="appointment-linked-quote-meta">
+              <span>Quantità in ricarica: {{ warehouseReceiptForm.value.quantity || 0 }}</span>
+              <span>Fornitore: {{ warehouseReceiptForm.value.supplier || targetItem.supplier || 'Da selezionare'
+                }}</span>
+            </div>
+          </section>
+          } @else {
+          <section class="appointment-main-panel">
+            <div class="detail-note">
+              <span>Ricarica prodotto</span>
+              <p>Sto preparando i dati del prodotto selezionato.</p>
+            </div>
+          </section>
+          }
+          } @else {
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Carico iniziale</span>
+              <strong>Numeri chiave</strong>
+            </div>
+            <div class="appointment-kpi-grid">
+              <div class="appointment-kpi-card">
+                <span>Quantità</span>
+                <strong>{{ warehouseReceiptForm.value.quantity || 0 }}</strong>
               </div>
-              <div class="detail-fields">
-                <div class="detail-field"><span>Giacenza</span><strong>{{ targetItem.stock }}</strong></div>
-                <div class="detail-field"><span>Scaffale</span><strong>{{ targetItem.location }}</strong></div>
-                <div class="detail-field"><span>Prezzo attuale</span><strong>€ {{ formatCurrency(targetItem.salePrice)
-                    }}</strong></div>
-                <div class="detail-field"><span>Nuovo prezzo</span><strong>€ {{ (warehouseReceiptForm.value.salePrice ||
-                    0).toLocaleString('it-IT') }}</strong></div>
+              <div class="appointment-kpi-card">
+                <span>Costo unit.</span>
+                <strong>€ {{ (warehouseReceiptForm.value.unitCost || 0).toLocaleString('it-IT') }}</strong>
               </div>
-              <div class="appointment-linked-quote-meta">
-                <span>Quantità in ricarica: {{ warehouseReceiptForm.value.quantity || 0 }}</span>
-                <span>Fornitore: {{ warehouseReceiptForm.value.supplier || targetItem.supplier || 'Da selezionare'
-                  }}</span>
+              <div class="appointment-kpi-card">
+                <span>Prezzo cassa</span>
+                <strong>€ {{ (warehouseReceiptForm.value.salePrice || 0).toLocaleString('it-IT') }}</strong>
               </div>
-            </section>
-            } @else {
-            <section class="appointment-sidebar-card">
-              <div class="detail-note">
-                <span>Ricarica prodotto</span>
-                <p>Sto preparando i dati del prodotto selezionato.</p>
+              <div class="appointment-kpi-card">
+                <span>Scorta min.</span>
+                <strong>{{ warehouseReceiptForm.value.minStock || 0 }}</strong>
               </div>
-            </section>
-            }
-            } @else {
-            <section class="appointment-sidebar-card">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Carico iniziale</span>
-                <strong>Numeri chiave</strong>
-              </div>
-              <div class="appointment-kpi-grid">
-                <div class="appointment-kpi-card">
-                  <span>Quantità</span>
-                  <strong>{{ warehouseReceiptForm.value.quantity || 0 }}</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Costo unit.</span>
-                  <strong>€ {{ (warehouseReceiptForm.value.unitCost || 0).toLocaleString('it-IT') }}</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Prezzo cassa</span>
-                  <strong>€ {{ (warehouseReceiptForm.value.salePrice || 0).toLocaleString('it-IT') }}</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Scorta min.</span>
-                  <strong>{{ warehouseReceiptForm.value.minStock || 0 }}</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Operatore</span>
-                  <strong>{{ warehouseReceiptForm.value.operator || 'Magazzino' }}</strong>
-                </div>
-              </div>
-            </section>
-
-            <section class="appointment-sidebar-card">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Logistica</span>
-                <strong>Collocazione e fornitore</strong>
-              </div>
-              <div class="appointment-linked-quote-meta">
-                <span>Fornitore: {{ warehouseReceiptForm.value.supplier || 'Da selezionare' }}</span>
-                <span>Scaffale: {{ warehouseReceiptForm.value.shelfCode || 'Da assegnare' }}</span>
-                <span>Lotto: {{ warehouseReceiptForm.value.lotNumber || 'Automatico se vuoto' }}</span>
-              </div>
-            </section>
-
-            @if (warehouseReceiptTargetItem(); as targetItem) {
-            <section class="appointment-sidebar-card">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Prodotto gia presente</span>
-                <strong>{{ targetItem.name }}</strong>
-              </div>
-              <div class="appointment-linked-quote-meta">
-                <span>Giacenza attuale: {{ targetItem.stock }}</span>
-                <span>Ultimo prezzo vendita: € {{ formatCurrency(targetItem.salePrice) }}</span>
-                <span>Barcode attuale: {{ targetItem.barcode || 'N/D' }}</span>
-              </div>
-            </section>
-            }
-            }
-          </aside>
-
-          <div class="warehouse-modal-main">
-            @if (shouldShowFormValidation(warehouseReceiptForm)) { <div class="form-error-summary">@if
-              (warehouseReceiptMode() === 'restock') { Completa i dati base della ricarica prima di confermare. } @else
-              { Completa i dati obbligatori del carico prima di registrare il movimento. }</div> }
-
-            @if (warehouseReceiptMode() === 'restock') {
-            @if (warehouseReceiptTargetItem(); as targetItem) {
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Dati attuali</span>
-                <strong>Prodotto gia presente in magazzino</strong>
-              </div>
-              <div class="detail-fields">
-                <div class="detail-field"><span>Nome prodotto</span><strong>{{ targetItem.name }}</strong></div>
-                <div class="detail-field"><span>Barcode attuale</span><strong>{{ targetItem.barcode || 'Non impostato'
-                    }}</strong></div>
-                <div class="detail-field"><span>Prezzo acquisto attuale</span><strong>€ {{
-                    formatCurrency(targetItem.unitCost) }}</strong></div>
-                <div class="detail-field"><span>Prezzo rivendita attuale</span><strong>€ {{
-                    formatCurrency(targetItem.salePrice) }}</strong></div>
-                <div class="detail-field"><span>Sottoscorta attuale</span><strong>{{ targetItem.minStock }}</strong>
-                </div>
-                <div class="detail-field"><span>Scaffale attuale</span><strong>{{ targetItem.location }}</strong></div>
-              </div>
-            </section>
-
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Nuova ricarica</span>
-                <strong>Compila solo i valori da aggiornare</strong>
-              </div>
-              <div class="form-grid">
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'quantity')"><span>Quantità da ricaricare
-                    *</span><input type="number" min="0" formControlName="quantity" placeholder="0">@if
-                  (hasFieldError(warehouseReceiptForm, 'quantity')) { <small class="field-error">{{
-                    fieldError(warehouseReceiptForm, 'quantity', 'Quantità') }}</small> }</label>
-                <div class="warehouse-barcode-form-field">
-                  <span class="warehouse-barcode-form-label">
-                    <label for="warehouse-restock-barcode">Codice a barre variato</label>
-                    <button type="button" class="btn-tiny btn-ghost warehouse-barcode-form-generate"
-                      (click)="generateAndSetReceiptBarcode()" title="Genera un nuovo codice EAN-13 per questo lotto">
-                      ✦ Genera
-                    </button>
-                  </span>
-                  <input id="warehouse-restock-barcode" type="text" formControlName="barcode"
-                    placeholder="Lascia vuoto se resta lo stesso">
-                </div>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitCost')"><span>Nuovo prezzo acquisto
-                    €</span><input type="number" min="0" step="0.01" formControlName="unitCost"
-                    placeholder="0,00"></label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'salePrice')"><span>Nuovo prezzo rivendita
-                    €</span><input type="number" min="0" step="0.01" formControlName="salePrice"
-                    placeholder="0,00"></label>
-                <label><span>Nuova sottoscorta</span><input type="number" min="0" formControlName="minStock"
-                    placeholder="0"></label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'shelfCode')"><span>Nuovo scaffale
-                    *</span><input type="text" formControlName="shelfCode" placeholder="A-01-03"></label>
-                <div [class.has-error]="hasFieldError(warehouseReceiptForm, 'supplier')">
-                  <label for="warehouse-restock-supplier">Fornitore *</label>
-                  <span class="warehouse-supplier-row">
-                    <select id="warehouse-restock-supplier" formControlName="supplier">
-                      <option value="" disabled>Seleziona fornitore…</option>
-                      @for (supplier of allExpenseSuppliers(); track supplier.id) {
-                      @if (supplier.active) {
-                      <option [value]="supplier.businessName">{{ supplier.businessName }}</option>
-                      }
-                      }
-                    </select>
-                    <button type="button" class="btn-sm" (click)="openSupplierFromWarehouse()">Nuovo</button>
-                  </span>
-                </div>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'receivedDate')"><span>Data ricarica
-                    *</span><input type="date" formControlName="receivedDate"></label>
-              </div>
-            </section>
-
-            <div class="warehouse-modal-footer">
-              <div class="form-actions">
-                <button type="submit" class="btn-primary">Ricarica prodotto</button>
-                <button type="button" class="btn-ghost" (click)="discardWarehouseModal()">Annulla</button>
+              <div class="appointment-kpi-card">
+                <span>Operatore</span>
+                <strong>{{ warehouseReceiptForm.value.operator || 'Magazzino' }}</strong>
               </div>
             </div>
-            } @else {
-            <section class="appointment-main-panel">
-              <div class="detail-note">
-                <span>Ricarica prodotto</span>
-                <p>Sto caricando i dati del prodotto selezionato. Se la schermata non si aggiorna, chiudi e riapri la
-                  ricarica.</p>
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Logistica</span>
+              <strong>Collocazione e fornitore</strong>
+            </div>
+            <div class="appointment-linked-quote-meta">
+              <span>Fornitore: {{ warehouseReceiptForm.value.supplier || 'Da selezionare' }}</span>
+              <span>Scaffale: {{ warehouseReceiptForm.value.shelfCode || 'Da assegnare' }}</span>
+              <span>Lotto: {{ warehouseReceiptForm.value.lotNumber || 'Automatico se vuoto' }}</span>
+            </div>
+          </section>
+
+          @if (warehouseReceiptTargetItem(); as targetItem) {
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Prodotto gia presente</span>
+              <strong>{{ targetItem.name }}</strong>
+            </div>
+            <div class="appointment-linked-quote-meta">
+              <span>Giacenza attuale: {{ targetItem.stock }}</span>
+              <span>Ultimo prezzo vendita: € {{ formatCurrency(targetItem.salePrice) }}</span>
+              <span>Barcode attuale: {{ targetItem.barcode || 'N/D' }}</span>
+            </div>
+          </section>
+          }
+          }
+
+          @if (warehouseReceiptMode() === 'restock') {
+          @if (warehouseReceiptTargetItem(); as targetItem) {
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Dati attuali</span>
+              <strong>Prodotto gia presente in magazzino</strong>
+            </div>
+            <div class="detail-fields">
+              <div class="detail-field"><span>Nome prodotto</span><strong>{{ targetItem.name }}</strong></div>
+              <div class="detail-field"><span>Barcode attuale</span><strong>{{ targetItem.barcode || 'Non impostato'
+                  }}</strong></div>
+              <div class="detail-field"><span>Prezzo acquisto attuale</span><strong>€ {{
+                  formatCurrency(targetItem.unitCost) }}</strong></div>
+              <div class="detail-field"><span>Prezzo rivendita attuale</span><strong>€ {{
+                  formatCurrency(targetItem.salePrice) }}</strong></div>
+              <div class="detail-field"><span>Sottoscorta attuale</span><strong>{{ targetItem.minStock }}</strong>
               </div>
-            </section>
+              <div class="detail-field"><span>Scaffale attuale</span><strong>{{ targetItem.location }}</strong></div>
+            </div>
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Nuova ricarica</span>
+              <strong>Compila solo i valori da aggiornare</strong>
+            </div>
+            <div class="form-grid">
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'quantity')"><span>Quantità da ricaricare
+                  *</span><input type="number" min="0" formControlName="quantity" placeholder="0">@if
+                (hasFieldError(warehouseReceiptForm, 'quantity')) { <small class="field-error">{{
+                  fieldError(warehouseReceiptForm, 'quantity', 'Quantità') }}</small> }</label>
+              <div class="warehouse-barcode-form-field">
+                <span class="warehouse-barcode-form-label">
+                  <label for="warehouse-restock-barcode">Codice a barre variato</label>
+                  <button type="button" class="btn-tiny btn-ghost warehouse-barcode-form-generate"
+                    (click)="generateAndSetReceiptBarcode()" title="Genera un nuovo codice EAN-13 per questo lotto">
+                    ✦ Genera
+                  </button>
+                </span>
+                <input id="warehouse-restock-barcode" type="text" formControlName="barcode"
+                  placeholder="Lascia vuoto se resta lo stesso">
+              </div>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitCost')"><span>Nuovo prezzo acquisto
+                  €</span><input type="number" min="0" step="0.01" formControlName="unitCost"
+                  placeholder="0,00"></label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'salePrice')"><span>Nuovo prezzo rivendita
+                  €</span><input type="number" min="0" step="0.01" formControlName="salePrice"
+                  placeholder="0,00"></label>
+              <label><span>Nuova sottoscorta</span><input type="number" min="0" formControlName="minStock"
+                  placeholder="0"></label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'shelfCode')"><span>Nuovo scaffale
+                  *</span><input type="text" formControlName="shelfCode" placeholder="A-01-03"></label>
+              <div [class.has-error]="hasFieldError(warehouseReceiptForm, 'supplier')">
+                <label for="warehouse-restock-supplier">Fornitore *</label>
+                <span class="warehouse-supplier-row">
+                  <select id="warehouse-restock-supplier" formControlName="supplier">
+                    <option value="" disabled>Seleziona fornitore…</option>
+                    @for (supplier of allExpenseSuppliers(); track supplier.id) {
+                    @if (supplier.active) {
+                    <option [value]="supplier.businessName">{{ supplier.businessName }}</option>
+                    }
+                    }
+                  </select>
+                  <button type="button" class="btn-sm" (click)="openSupplierFromWarehouse()">Nuovo</button>
+                </span>
+              </div>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'receivedDate')"><span>Data ricarica
+                  *</span><input type="date" formControlName="receivedDate"></label>
+            </div>
+          </section>
+
+          <div class="warehouse-modal-footer">
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">Ricarica prodotto</button>
+              <button type="button" class="btn-ghost" (click)="discardWarehouseModal()">Annulla</button>
+            </div>
+          </div>
+          } @else {
+          <section class="appointment-main-panel">
+            <div class="detail-note">
+              <span>Ricarica prodotto</span>
+              <p>Sto caricando i dati del prodotto selezionato. Se la schermata non si aggiorna, chiudi e riapri la
+                ricarica.</p>
+            </div>
+          </section>
+          }
+          } @else {
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Identificazione prodotto</span>
+              <strong>Anagrafica e destinazione del prodotto</strong>
+            </div>
+            <div class="form-grid">
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'sku')"><span>Codice SKU *</span><input
+                  type="text" formControlName="sku" placeholder="Es. AUD-0001">@if
+                (hasFieldError(warehouseReceiptForm, 'sku')) { <small class="field-error">{{
+                  fieldError(warehouseReceiptForm, 'sku', 'Codice prodotto') }}</small> }</label>
+              <div class="warehouse-barcode-form-field">
+                <span class="warehouse-barcode-form-label">
+                  <label for="warehouse-new-barcode">Barcode</label>
+                  <button type="button" class="btn-tiny btn-ghost warehouse-barcode-form-generate"
+                    (click)="generateAndSetReceiptBarcode()" title="Genera un codice EAN-13 valido per questo prodotto">
+                    ✦ Genera
+                  </button>
+                </span>
+                <input id="warehouse-new-barcode" type="text" formControlName="barcode"
+                  placeholder="EAN / UPC / codice a barre">
+              </div>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'name')"><span>Nome prodotto
+                  *</span><input type="text" formControlName="name" placeholder="Nome articolo">@if
+                (hasFieldError(warehouseReceiptForm, 'name')) { <small class="field-error">{{
+                  fieldError(warehouseReceiptForm, 'name', 'Nome prodotto') }}</small> }</label>
+              <label class="wide-field"><span>Descrizione</span><input type="text" formControlName="description"
+                  placeholder="Descrizione estesa della merce"></label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'category')"><span>Categoria *</span>
+                <select formControlName="category">
+                  <option value="" disabled>Seleziona categoria…</option>
+                  @for (category of productCategories(); track category) {<option [value]="category">{{ category }}
+                  </option>}
+                  <option value="__new__">➕ Nuova categoria…</option>
+                </select>
+                @if (hasFieldError(warehouseReceiptForm, 'category')) { <small class="field-error">Categoria
+                  obbligatoria</small> }
+              </label>
+              <label><span>Destinazione prodotto *</span>
+                <select formControlName="usageType" (change)="updateWarehouseUsageType($event)">
+                  <option value="rivendita">Rivendita</option>
+                  <option value="uso-negozio">Uso negozio</option>
+                </select>
+              </label>
+              <label
+                [class.muted-field]="warehouseReceiptForm.controls.usageType.value !== 'uso-negozio'"><span>Registra
+                  come *</span>
+                <select formControlName="registrationMode" (change)="updateWarehouseRegistrationMode($event)"
+                  [disabled]="warehouseReceiptForm.controls.usageType.value !== 'uso-negozio'">
+                  <option value="inventario">Inventario</option>
+                  <option value="spesa">Spesa di acquisto</option>
+                </select>
+              </label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitOfMeasure')"><span>Unità misura
+                  *</span><input type="text" formControlName="unitOfMeasure" placeholder="pz, m, kg...">@if
+                (hasFieldError(warehouseReceiptForm, 'unitOfMeasure')) { <small class="field-error">{{
+                  fieldError(warehouseReceiptForm, 'unitOfMeasure', 'Unità misura') }}</small> }</label>
+            </div>
+            @if (warehouseReceiptForm.controls.usageType.value === 'uso-negozio') {
             }
-            } @else {
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Identificazione prodotto</span>
-                <strong>Anagrafica e destinazione del prodotto</strong>
-              </div>
-              <div class="form-grid">
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'sku')"><span>Codice SKU *</span><input
-                    type="text" formControlName="sku" placeholder="Es. AUD-0001">@if
-                  (hasFieldError(warehouseReceiptForm, 'sku')) { <small class="field-error">{{
-                    fieldError(warehouseReceiptForm, 'sku', 'Codice prodotto') }}</small> }</label>
-                <div class="warehouse-barcode-form-field">
-                  <span class="warehouse-barcode-form-label">
-                    <label for="warehouse-new-barcode">Barcode</label>
-                    <button type="button" class="btn-tiny btn-ghost warehouse-barcode-form-generate"
-                      (click)="generateAndSetReceiptBarcode()"
-                      title="Genera un codice EAN-13 valido per questo prodotto">
-                      ✦ Genera
-                    </button>
-                  </span>
-                  <input id="warehouse-new-barcode" type="text" formControlName="barcode"
-                    placeholder="EAN / UPC / codice a barre">
-                </div>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'name')"><span>Nome prodotto
-                    *</span><input type="text" formControlName="name" placeholder="Nome articolo">@if
-                  (hasFieldError(warehouseReceiptForm, 'name')) { <small class="field-error">{{
-                    fieldError(warehouseReceiptForm, 'name', 'Nome prodotto') }}</small> }</label>
-                <label class="wide-field"><span>Descrizione</span><input type="text" formControlName="description"
-                    placeholder="Descrizione estesa della merce"></label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'category')"><span>Categoria *</span>
-                  <select formControlName="category">
-                    <option value="" disabled>Seleziona categoria…</option>
-                    @for (category of productCategories(); track category) {<option [value]="category">{{ category }}
-                    </option>}
-                    <option value="__new__">➕ Nuova categoria…</option>
-                  </select>
-                  @if (hasFieldError(warehouseReceiptForm, 'category')) { <small class="field-error">Categoria
-                    obbligatoria</small> }
-                </label>
-                <label><span>Destinazione prodotto *</span>
-                  <select formControlName="usageType" (change)="updateWarehouseUsageType($event)">
-                    <option value="rivendita">Rivendita</option>
-                    <option value="uso-negozio">Uso negozio</option>
-                  </select>
-                </label>
-                <label
-                  [class.muted-field]="warehouseReceiptForm.controls.usageType.value !== 'uso-negozio'"><span>Registra
-                    come *</span>
-                  <select formControlName="registrationMode" (change)="updateWarehouseRegistrationMode($event)"
-                    [disabled]="warehouseReceiptForm.controls.usageType.value !== 'uso-negozio'">
-                    <option value="inventario">Inventario</option>
-                    <option value="spesa">Spesa di acquisto</option>
-                  </select>
-                </label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitOfMeasure')"><span>Unità misura
-                    *</span><input type="text" formControlName="unitOfMeasure" placeholder="pz, m, kg...">@if
-                  (hasFieldError(warehouseReceiptForm, 'unitOfMeasure')) { <small class="field-error">{{
-                    fieldError(warehouseReceiptForm, 'unitOfMeasure', 'Unità misura') }}</small> }</label>
-              </div>
-              @if (warehouseReceiptForm.controls.usageType.value === 'uso-negozio') {
+            @if (warehouseReceiptForm.controls.category.value === '__new__') {
+            <div class="form-inline-new">
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'newCategory')">
+                <span>Nome nuova categoria</span>
+                <input type="text" formControlName="newCategory" placeholder="Es. Diffusori Hi-End" autocomplete="off">
+                @if (hasFieldError(warehouseReceiptForm, 'newCategory')) { <small class="field-error">Categoria
+                  obbligatoria</small> }
+              </label>
+              <small class="form-section-hint">Verrà aggiunta e memorizzata al salvataggio.</small>
+            </div>
+            }
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">@if (isWarehouseExpenseMode()) { Spesa di acquisto } @else { Carico e
+                costi }</span>
+              <strong>@if (isWarehouseExpenseMode()) { Quantità acquistate, costo e documento } @else { Quantità,
+                prezzi e documenti }</strong>
+            </div>
+            <div class="form-grid">
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'quantity')"><span>Quantità *</span><input
+                  type="number" min="0" formControlName="quantity" placeholder="0">@if
+                (hasFieldError(warehouseReceiptForm, 'quantity')) { <small class="field-error">{{
+                  fieldError(warehouseReceiptForm, 'quantity', 'Quantità') }}</small> }</label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitCost')"><span>Prezzo acquisto
+                  €</span><input type="number" min="0" step="0.01" formControlName="unitCost"
+                  placeholder="0,00"></label>
+              @if (!isWarehouseExpenseMode()) {
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'salePrice')"><span>Prezzo rivendita
+                  €</span><input type="number" min="0" step="0.01" formControlName="salePrice"
+                  placeholder="0,00"></label>
+              <label><span>Scorta minima</span><input type="number" min="0" formControlName="minStock"
+                  placeholder="0"></label>
               }
-              @if (warehouseReceiptForm.controls.category.value === '__new__') {
-              <div class="form-inline-new">
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'newCategory')">
-                  <span>Nome nuova categoria</span>
-                  <input type="text" formControlName="newCategory" placeholder="Es. Diffusori Hi-End"
-                    autocomplete="off">
-                  @if (hasFieldError(warehouseReceiptForm, 'newCategory')) { <small class="field-error">Categoria
-                    obbligatoria</small> }
-                </label>
-                <small class="form-section-hint">Verrà aggiunta e memorizzata al salvataggio.</small>
-              </div>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'receivedDate')"><span>Data ricevimento
+                  *</span><input type="date" formControlName="receivedDate"></label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'purchaseDocumentNumber')"><span>Documento
+                  acquisto *</span><input type="text" formControlName="purchaseDocumentNumber"
+                  placeholder="DDT/Fattura"></label>
+              @if (!isWarehouseExpenseMode()) {
+              <label><span>Trasporto €</span><input type="number" min="0" step="0.01" formControlName="transportCost"
+                  placeholder="0,00"></label>
+              <label><span>Dogana €</span><input type="number" min="0" step="0.01" formControlName="customsCost"
+                  placeholder="0,00"></label>
+              <label><span>Imballaggio €</span><input type="number" min="0" step="0.01" formControlName="packagingCost"
+                  placeholder="0,00"></label>
               }
-            </section>
+            </div>
+          </section>
 
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">@if (isWarehouseExpenseMode()) { Spesa di acquisto } @else { Carico e
-                  costi }</span>
-                <strong>@if (isWarehouseExpenseMode()) { Quantità acquistate, costo e documento } @else { Quantità,
-                  prezzi e documenti }</strong>
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">@if (isWarehouseExpenseMode()) { Fornitore e registrazione } @else {
+                Logistica e tracciabilità }</span>
+              <strong>@if (isWarehouseExpenseMode()) { Fornitore e dati essenziali della spesa } @else { Fornitore,
+                lotto e collocazione }</strong>
+            </div>
+            <div class="form-grid">
+              <div [class.has-error]="hasFieldError(warehouseReceiptForm, 'supplier')">
+                <label for="warehouse-supplier">Fornitore *</label>
+                <span class="warehouse-supplier-row">
+                  <select id="warehouse-supplier" formControlName="supplier">
+                    <option value="" disabled>Seleziona fornitore…</option>
+                    @for (supplier of allExpenseSuppliers(); track supplier.id) {
+                    @if (supplier.active) {
+                    <option [value]="supplier.businessName">{{ supplier.businessName }}</option>
+                    }
+                    }
+                  </select>
+                  <button type="button" class="btn-sm" (click)="openSupplierFromWarehouse()">Nuovo</button>
+                </span>
               </div>
-              <div class="form-grid">
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'quantity')"><span>Quantità *</span><input
-                    type="number" min="0" formControlName="quantity" placeholder="0">@if
-                  (hasFieldError(warehouseReceiptForm, 'quantity')) { <small class="field-error">{{
-                    fieldError(warehouseReceiptForm, 'quantity', 'Quantità') }}</small> }</label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitCost')"><span>Prezzo acquisto
-                    €</span><input type="number" min="0" step="0.01" formControlName="unitCost"
-                    placeholder="0,00"></label>
-                @if (!isWarehouseExpenseMode()) {
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'salePrice')"><span>Prezzo rivendita
-                    €</span><input type="number" min="0" step="0.01" formControlName="salePrice"
-                    placeholder="0,00"></label>
-                <label><span>Scorta minima</span><input type="number" min="0" formControlName="minStock"
-                    placeholder="0"></label>
-                }
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'receivedDate')"><span>Data ricevimento
-                    *</span><input type="date" formControlName="receivedDate"></label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'purchaseDocumentNumber')"><span>Documento
-                    acquisto *</span><input type="text" formControlName="purchaseDocumentNumber"
-                    placeholder="DDT/Fattura"></label>
-                @if (!isWarehouseExpenseMode()) {
-                <label><span>Trasporto €</span><input type="number" min="0" step="0.01" formControlName="transportCost"
-                    placeholder="0,00"></label>
-                <label><span>Dogana €</span><input type="number" min="0" step="0.01" formControlName="customsCost"
-                    placeholder="0,00"></label>
-                <label><span>Imballaggio €</span><input type="number" min="0" step="0.01"
-                    formControlName="packagingCost" placeholder="0,00"></label>
-                }
-              </div>
-            </section>
+              @if (!isWarehouseExpenseMode()) {
+              <label><span>Numero lotto</span><input type="text" formControlName="lotNumber"
+                  placeholder="Se vuoto generazione automatica"></label>
+              <label><span>Data scadenza</span><input type="date" formControlName="expiryDate"></label>
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'shelfCode')"><span>Codice scaffale
+                  *</span><input type="text" formControlName="shelfCode" placeholder="A-01-03"></label>
+              }
+              <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'operator')"><span>Operatore
+                  *</span><input type="text" formControlName="operator" placeholder="Operatore"></label>
+            </div>
+          </section>
 
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">@if (isWarehouseExpenseMode()) { Fornitore e registrazione } @else {
-                  Logistica e tracciabilità }</span>
-                <strong>@if (isWarehouseExpenseMode()) { Fornitore e dati essenziali della spesa } @else { Fornitore,
-                  lotto e collocazione }</strong>
-              </div>
-              <div class="form-grid">
-                <div [class.has-error]="hasFieldError(warehouseReceiptForm, 'supplier')">
-                  <label for="warehouse-supplier">Fornitore *</label>
-                  <span class="warehouse-supplier-row">
-                    <select id="warehouse-supplier" formControlName="supplier">
-                      <option value="" disabled>Seleziona fornitore…</option>
-                      @for (supplier of allExpenseSuppliers(); track supplier.id) {
-                      @if (supplier.active) {
-                      <option [value]="supplier.businessName">{{ supplier.businessName }}</option>
-                      }
-                      }
-                    </select>
-                    <button type="button" class="btn-sm" (click)="openSupplierFromWarehouse()">Nuovo</button>
-                  </span>
-                </div>
-                @if (!isWarehouseExpenseMode()) {
-                <label><span>Numero lotto</span><input type="text" formControlName="lotNumber"
-                    placeholder="Se vuoto generazione automatica"></label>
-                <label><span>Data scadenza</span><input type="date" formControlName="expiryDate"></label>
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'shelfCode')"><span>Codice scaffale
-                    *</span><input type="text" formControlName="shelfCode" placeholder="A-01-03"></label>
-                }
-                <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'operator')"><span>Operatore
-                    *</span><input type="text" formControlName="operator" placeholder="Operatore"></label>
-              </div>
-            </section>
-
-            <!-- ✅ Fix ISS-08: checkbox UI "Aggiorna anche listino prezzi prodotti di cassa"
+          <!-- ✅ Fix ISS-08: checkbox UI "Aggiorna anche listino prezzi prodotti di cassa"
                          Di default OFF per evitare sovrascritture accidentali. Se attiva, il salvataggio
                          aggiorna anche i prodotti di cassa eventualmente collegati a questo inventario. -->
-            <div class="form-checkbox-row">
-              <label class="form-checkbox">
-                <input type="checkbox" formControlName="syncCashPrices">
-                <span>Aggiorna anche listino prezzi prodotti di cassa</span>
-              </label>
-              <small class="field-hint">Se attivo, tutti i prodotti di cassa collegati a questo articolo verranno
-                aggiornati con i nuovi prezzi. Lascia disattivato per modificare solo l'anagrafica magazzino.</small>
-            </div>
-
-            <div class="warehouse-modal-footer">
-              <div class="form-actions">
-                <button type="submit" class="btn-primary">@if (isWarehouseExpenseMode()) { Registra spesa } @else {
-                  Registra carico }</button>
-                <button type="button" class="btn-ghost" (click)="discardWarehouseModal()">Annulla</button>
-              </div>
-            </div>
-            }
+          <div class="form-checkbox-row">
+            <label class="form-checkbox">
+              <input type="checkbox" formControlName="syncCashPrices">
+              <span>Aggiorna anche listino prezzi prodotti di cassa</span>
+            </label>
+            <small class="field-hint">Se attivo, tutti i prodotti di cassa collegati a questo articolo verranno
+              aggiornati con i nuovi prezzi. Lascia disattivato per modificare solo l'anagrafica magazzino.</small>
           </div>
+
+          <div class="warehouse-modal-footer">
+            <div class="form-actions">
+              <button type="submit" class="btn-primary">@if (isWarehouseExpenseMode()) { Registra spesa } @else {
+                Registra carico }</button>
+              <button type="button" class="btn-ghost" (click)="discardWarehouseModal()">Annulla</button>
+            </div>
+          </div>
+          }
         </div>
       </form>
     </div>
@@ -4511,9 +4920,9 @@
     </div>
   </div>
   @if (serviceModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false" (click)="closeServiceModal()">
-    <div class="ui-modal ui-modal-fullscreen service-modal" (click)="$event.stopPropagation()">
-      <div class="ui-modal-head">
+  <div class="ui-modal-overlay ui-modal-overlay-service" [attr.aria-hidden]="false" (click)="closeServiceModal()">
+    <div class="ui-modal ui-modal-service service-modal" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head ui-modal-head-service">
         <div class="appointment-modal-head-copy">
           <span class="detail-subtitle">Servizi</span>
           <h2 class="op-card-title">@if (editingCashProductId()) { Modifica servizio } @else { Nuovo servizio }</h2>
@@ -4522,149 +4931,147 @@
         <button type="button" class="btn-ghost" (click)="closeServiceModal()">Chiudi</button>
       </div>
       <form class="service-modal-form ui-modal-body" [formGroup]="cashProductForm" (ngSubmit)="addCashProduct()">
-        <div class="service-modal-shell">
-          <aside class="service-modal-sidebar" aria-label="Anteprima servizio catalogo">
-            <section class="appointment-sidebar-card appointment-sidebar-card-primary">
-              <span class="detail-subtitle">Anteprima servizio</span>
-              <strong>{{ cashProductForm.controls.name.value || 'Nuovo servizio' }}</strong>
-              <p>
-                @if (cashProductForm.controls.category.value === '__new__') {
-                {{ cashProductForm.controls.newCategory.value || 'Nuova categoria' }}
-                } @else {
-                {{ cashProductForm.controls.category.value || 'Categoria da definire' }}
-                }
-              </p>
-              <div class="appointment-linked-quote-meta">
-                <span>Tariffazione: {{ pricingModeLabel(cashProductForm.controls.pricingMode.value) }}</span>
-                <span>Listino: € {{ formatCurrency(cashProductForm.controls.price.value) }}</span>
-              </div>
-            </section>
+        <div class="service-modal-main">
+          @if (shouldShowFormValidation(cashProductForm)) {
+          <div class="form-error-summary">Compila nome, categoria e valore del servizio.</div>
+          }
 
-            <section class="appointment-sidebar-card">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Visibilità</span>
-                <strong>Uso operativo</strong>
-              </div>
-              <div class="appointment-kpi-grid">
-                <div class="appointment-kpi-card">
-                  <span>Cassa rapida</span>
-                  <strong>@if (cashProductForm.controls.shortcut.value) { Si } @else { No }</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Prezzo</span>
-                  <strong>€ {{ formatCurrency(cashProductForm.controls.price.value) }}</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Categoria</span>
-                  <strong>{{ cashProductForm.controls.category.value === '__new__' ? 'Nuova' : 'Esistente' }}</strong>
-                </div>
-                <div class="appointment-kpi-card">
-                  <span>Preventivi</span>
-                  <strong>Disponibile</strong>
-                </div>
-              </div>
-            </section>
-
-            <section class="appointment-sidebar-card">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Categorie attive</span>
-                <strong>{{ cashCategories().length }} disponibili</strong>
-              </div>
-              <div class="services-modal-category-list">
-                @for (category of cashCategories(); track category) {
-                <span class="services-chip" [class.active]="cashProductForm.controls.category.value === category">{{
-                  category }}</span>
-                }
-              </div>
-            </section>
-          </aside>
-
-          <div class="service-modal-main">
-            @if (shouldShowFormValidation(cashProductForm)) {
-            <div class="form-error-summary">Compila nome, categoria e valore del servizio.</div>
-            }
-
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Identità del servizio</span>
-                <strong>Nome commerciale e categoria</strong>
-              </div>
-              <div class="appointment-form-grid">
-                <label class="appointment-field appointment-field-wide"
-                  [class.has-error]="hasFieldError(cashProductForm, 'name')">
-                  <span>Nome servizio *</span>
-                  <input type="text" formControlName="name" placeholder="Es. Installazione impianto stereo completo">
-                  @if (hasFieldError(cashProductForm, 'name')) {
-                  <small class="field-error">{{ fieldError(cashProductForm, 'name', 'Nome servizio') }}</small>
-                  }
-                </label>
-                <label class="appointment-field">
-                  <span>Categoria *</span>
-                  <select formControlName="category">
-                    @for (category of cashCategories(); track category) {
-                    <option [value]="category">{{ category }}</option>
-                    }
-                    <option value="__new__">Nuova categoria...</option>
-                  </select>
-                </label>
-              </div>
-
+          <!-- Colonna sinistra (ex-sidebar) integrata nel form a colonna singola per uniformare
+               layout con nuovo prodotto/altri inserimenti (nessun aside, tutto dentro il main). -->
+          <section class="appointment-main-panel appointment-sidebar-card-primary">
+            <span class="detail-subtitle">Anteprima servizio</span>
+            <strong>{{ cashProductForm.controls.name.value || 'Nuovo servizio' }}</strong>
+            <p>
               @if (cashProductForm.controls.category.value === '__new__') {
-              <div class="appointment-form-grid">
-                <label class="appointment-field appointment-field-wide"
-                  [class.has-error]="hasFieldError(cashProductForm, 'newCategory')">
-                  <span>Nome nuova categoria *</span>
-                  <input type="text" formControlName="newCategory" placeholder="Es. Tarature premium">
-                  @if (hasFieldError(cashProductForm, 'newCategory')) {
-                  <small class="field-error">Categoria obbligatoria</small>
-                  }
-                </label>
-              </div>
+              {{ cashProductForm.controls.newCategory.value || 'Nuova categoria' }}
+              } @else {
+              {{ cashProductForm.controls.category.value || 'Categoria da definire' }}
               }
-            </section>
+            </p>
+            <div class="appointment-linked-quote-meta">
+              <span>Tariffazione: {{ pricingModeLabel(cashProductForm.controls.pricingMode.value) }}</span>
+              <span>Listino: € {{ formatCurrency(cashProductForm.controls.price.value) }}</span>
+            </div>
+          </section>
 
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Tariffazione</span>
-                <strong>Come viene calcolato il servizio</strong>
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Visibilità</span>
+              <strong>Uso operativo</strong>
+            </div>
+            <div class="appointment-kpi-grid">
+              <div class="appointment-kpi-card">
+                <span>Cassa rapida</span>
+                <strong>@if (cashProductForm.controls.shortcut.value) { Si } @else { No }</strong>
               </div>
-              <div class="appointment-form-grid">
-                <label class="appointment-field">
-                  <span>Modalità di prezzo</span>
-                  <select formControlName="pricingMode">
-                    <option value="fisso">Prezzo fisso</option>
-                    <option value="quantita">Quantità</option>
-                    <option value="ora">Prezzo all'ora</option>
-                    <option value="mezzora">Prezzo a mezz'ora</option>
-                    <option value="quarto">Prezzo a quarto d'ora</option>
-                  </select>
-                </label>
-                <label class="appointment-field" [class.has-error]="hasFieldError(cashProductForm, 'price')">
-                  <span>Valore € *</span>
-                  <input type="number" min="0" step="0.01" formControlName="price" placeholder="0,00">
-                  @if (hasFieldError(cashProductForm, 'price')) {
-                  <small class="field-error">{{ fieldError(cashProductForm, 'price', 'Valore') }}</small>
+              <div class="appointment-kpi-card">
+                <span>Prezzo</span>
+                <strong>€ {{ formatCurrency(cashProductForm.controls.price.value) }}</strong>
+              </div>
+              <div class="appointment-kpi-card">
+                <span>Categoria</span>
+                <strong>{{ cashProductForm.controls.category.value === '__new__' ? 'Nuova' : 'Esistente' }}</strong>
+              </div>
+              <div class="appointment-kpi-card">
+                <span>Preventivi</span>
+                <strong>Disponibile</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Categorie attive</span>
+              <strong>{{ cashCategories().length }} disponibili</strong>
+            </div>
+            <div class="services-modal-category-list">
+              @for (category of cashCategories(); track category) {
+              <span class="services-chip" [class.active]="cashProductForm.controls.category.value === category">{{
+                category }}</span>
+              }
+            </div>
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Identità del servizio</span>
+              <strong>Nome commerciale e categoria</strong>
+            </div>
+            <div class="appointment-form-grid">
+              <label class="appointment-field appointment-field-wide"
+                [class.has-error]="hasFieldError(cashProductForm, 'name')">
+                <span>Nome servizio *</span>
+                <input type="text" formControlName="name" placeholder="Es. Installazione impianto stereo completo">
+                @if (hasFieldError(cashProductForm, 'name')) {
+                <small class="field-error">{{ fieldError(cashProductForm, 'name', 'Nome servizio') }}</small>
+                }
+              </label>
+              <label class="appointment-field">
+                <span>Categoria *</span>
+                <select formControlName="category">
+                  @for (category of cashCategories(); track category) {
+                  <option [value]="category">{{ category }}</option>
                   }
-                </label>
-              </div>
-            </section>
+                  <option value="__new__">Nuova categoria...</option>
+                </select>
+              </label>
+            </div>
 
-            <section class="appointment-main-panel">
-              <div class="appointment-panel-head">
-                <span class="detail-subtitle">Visibilità in cassa</span>
-                <strong>Accesso rapido e allineamento listino</strong>
-              </div>
-              <div class="appointment-form-grid">
-                <label class="appointment-field">
-                  <span>Scorciatoia cassa</span>
-                  <select formControlName="shortcut">
-                    <option [ngValue]="true">Si, mostrami in vista rapida</option>
-                    <option [ngValue]="false">No, solo nel catalogo</option>
-                  </select>
-                </label>
-              </div>
-            </section>
-          </div>
+            @if (cashProductForm.controls.category.value === '__new__') {
+            <div class="appointment-form-grid">
+              <label class="appointment-field appointment-field-wide"
+                [class.has-error]="hasFieldError(cashProductForm, 'newCategory')">
+                <span>Nome nuova categoria *</span>
+                <input type="text" formControlName="newCategory" placeholder="Es. Tarature premium">
+                @if (hasFieldError(cashProductForm, 'newCategory')) {
+                <small class="field-error">Categoria obbligatoria</small>
+                }
+              </label>
+            </div>
+            }
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Tariffazione</span>
+              <strong>Come viene calcolato il servizio</strong>
+            </div>
+            <div class="appointment-form-grid">
+              <label class="appointment-field">
+                <span>Modalità di prezzo</span>
+                <select formControlName="pricingMode">
+                  <option value="fisso">Prezzo fisso</option>
+                  <option value="quantita">Quantità</option>
+                  <option value="ora">Prezzo all'ora</option>
+                  <option value="mezzora">Prezzo a mezz'ora</option>
+                  <option value="quarto">Prezzo a quarto d'ora</option>
+                </select>
+              </label>
+              <label class="appointment-field" [class.has-error]="hasFieldError(cashProductForm, 'price')">
+                <span>Valore € *</span>
+                <input type="number" min="0" step="0.01" formControlName="price" placeholder="0,00">
+                @if (hasFieldError(cashProductForm, 'price')) {
+                <small class="field-error">{{ fieldError(cashProductForm, 'price', 'Valore') }}</small>
+                }
+              </label>
+            </div>
+          </section>
+
+          <section class="appointment-main-panel">
+            <div class="appointment-panel-head">
+              <span class="detail-subtitle">Visibilità in cassa</span>
+              <strong>Accesso rapido e allineamento listino</strong>
+            </div>
+            <div class="appointment-form-grid">
+              <label class="appointment-field">
+                <span>Scorciatoia cassa</span>
+                <select formControlName="shortcut">
+                  <option [ngValue]="true">Si, mostrami in vista rapida</option>
+                  <option [ngValue]="false">No, solo nel catalogo</option>
+                </select>
+              </label>
+            </div>
+          </section>
         </div>
 
         <input type="hidden" formControlName="linkedInventoryItemId">
@@ -5746,6 +6153,1681 @@
     }
   </div>
   }
+
+  <!-- ═══════════════ ANAGRAFICA DIPENDENTI ═══════════════ -->
+  @case ('dipendenti') {
+  <div class="employees-page">
+    <div class="op-card">
+      <h2 class="op-card-title">
+        👥 Operatori / Dipendenti
+        <span class="op-card-title-right">
+          <label class="toggle-chip">
+            <input type="checkbox" [checked]="showHiddenOperators()"
+              (change)="toggleShowHiddenOperators($any($event.target).checked)">
+            Mostra nascosti
+          </label>
+          <button type="button" class="btn-sm btn-primary-sm" (click)="openCreateEmployeeModal()">+ Nuovo</button>
+        </span>
+      </h2>
+      <div class="operators-fast-list">
+        @for (operator of operatorsListVisible(); track operator.id) {
+        <div class="op-fast-row" [class.op-fast-hidden]="!operator.active">
+          <div class="op-fast-info">
+            <div class="op-fast-name">
+              {{ operator.name }}
+              <span class="badge" [class.badge-success]="operator.active" [class.badge-warning]="!operator.active">
+                @if (operator.active) { Attivo } @else { Nascosto }
+              </span>
+              @if (operator.role) {
+              <span class="badge badge-secondary">{{ employeeRoleLabel(operator.role) }}</span>
+              }
+              @if (operator.contractHoursWeekly) {
+              <span class="badge badge-ghost">{{ operator.contractHoursWeekly }}h/sett</span>
+              }
+              <!-- ✅ STATO ACCESSO PORTELE DIPENDENTI -->
+              <span class="badge" [class.badge-success]="epPortalStatusBadge(operator).tone === 'ok'"
+                [class.badge-warning]="epPortalStatusBadge(operator).tone === 'warn'"
+                [class.badge-danger]="epPortalStatusBadge(operator).tone === 'err'"
+                [class.badge-ghost]="epPortalStatusBadge(operator).tone === 'dim'">
+                {{ epPortalStatusBadge(operator).label }}
+              </span>
+            </div>
+            @if (operator.role === 'tecnico') {
+            <div class="ep-portal-row-extra">
+              <label class="toggle-chip">
+                <input type="checkbox" [checked]="operator.epPortalEnabled"
+                  [disabled]="!!operator.epPortalAccessRevokedAt"
+                  (change)="epTogglePortalEnabled(operator.id, $any($event.target).checked)">
+                🚪 Abilita accesso Portale
+              </label>
+            </div>
+            }
+          </div>
+          <div class="op-fast-actions">
+            <button type="button" class="chip-btn chip-blue" (click)="openEmployeeModal(operator.id, 'turni-standard')">
+              🕒 Turni standard
+            </button>
+            <button type="button" class="chip-btn chip-green"
+              (click)="openEmployeeModal(operator.id, 'turni-settimanali')">
+              📅 Turni sett.
+            </button>
+            <button type="button" class="chip-btn chip-gray" (click)="openEmployeeModal(operator.id, 'anagrafica')">
+              ✏️ Anagrafica
+            </button>
+            @if (operator.role === 'tecnico') {
+            <!-- 🔑 Pulsante portale -->
+            <button type="button" class="chip-btn chip-purple"
+              [disabled]="!operator.epPortalEnabled && !operator.epPortalAccessRevokedAt"
+              (click)="epOpenCredentialsModal(operator.id)">
+              🔐 Portale
+            </button>
+            @if (operator.epPortalEnabled && !operator.epPortalAccessRevokedAt) {
+            <button type="button" class="chip-btn chip-danger" (click)="epRevokePortalAccess(operator.id)">
+              ⚠️ Revoca accesso
+            </button>
+            }
+            @if (operator.epPortalAccessRevokedAt) {
+            <button type="button" class="chip-btn chip-success" (click)="epRestorePortalAccess(operator.id)">
+              🔄 Ripristina
+            </button>
+            }
+            }
+            @if (operator.active) {
+            <button type="button" class="chip-btn chip-warning" (click)="toggleCashOperatorActive(operator.id)">
+              👁️ Nascondi
+            </button>
+            } @else {
+            <button type="button" class="chip-btn chip-success" (click)="toggleCashOperatorActive(operator.id)">
+              👁️‍🗨️ Mostra
+            </button>
+            }
+          </div>
+        </div>
+        } @empty {
+        <div class="op-fast-empty">Nessun operatore — aggiungi il primo con + Nuovo.</div>
+        }
+      </div>
+
+      <!-- MODALE: Creazione/reset credenziali Portale (v2) -->
+      @if (epCredentialsModalOpen()) {
+      <div class="ep-modal-mask" (click)="epCloseCredentialsModal()">
+        <div class="ep-modal-body ep-modal-medium" (click)="$event.stopPropagation()">
+          <div class="ep-detail-head">
+            <div>
+              <h3>🔐 Credenziali Portale Dipendenti</h3>
+              @if (epCredentialsTargetId()) {
+              @for (op of allCashOperators(); track op.id) {
+              @if (op.id === epCredentialsTargetId()) {
+              <p class="ep-list-meta">
+                Operatore: <strong>{{ op.name }}</strong>
+                @if (op.epPortalUsername) { · Ultimo username: {{ op.epPortalUsername }} }
+              </p>
+              }
+              }
+              }
+            </div>
+            <button type="button" class="chip-btn chip-gray ep-chip-small"
+              (click)="epCloseCredentialsModal()">✕</button>
+          </div>
+
+          @if (!epCredentialsShowOnce()) {
+          <!-- Passo 1: Crea/modifica credenziali -->
+          <div class="ep-form">
+            <label class="ep-login-field">
+              <span>Username</span>
+              <input type="text" class="ep-input" [value]="epCredentialsUsername()"
+                (input)="epCredentialsUsername.set($any($event.target).value)" placeholder="nome.cognome">
+            </label>
+            <label class="ep-login-field">
+              <span>Password</span>
+              <input type="text" class="ep-input" [value]="epCredentialsPassword()"
+                (input)="epCredentialsPassword.set($any($event.target).value)"
+                placeholder="Lascia vuoto per mantenere la password attuale">
+            </label>
+            <p class="ep-list-meta" style="margin-top:-8px;font-size:12px;">
+              💡 Se lasci vuoto il campo password, viene <strong>mantenuta</strong> la password attuale.
+              Per cambiarla, inserisci la nuova password o premi "🎲 Genera".
+            </p>
+            <div class="ep-form-actions">
+              <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epGenerateRandomPassword()">
+                🎲 Genera password
+              </button>
+              <button type="button" class="btn-ghost" (click)="epCloseCredentialsModal()">Annulla</button>
+              <button type="button" class="btn-primary" (click)="epSaveCredentialsAndShowOnce()">
+                💾 Salva credenziali
+              </button>
+            </div>
+          </div>
+          } @else {
+          <!-- Passo 2: Mostra password UNA SOLA VOLTA -->
+          <div class="ep-credentials-showonce">
+            <div class="ep-detail-alert">
+              ⚠️ <strong>ATTENZIONE</strong>: Copia la password SUBITO.
+              <br>Non la potrai più visualizzare dopo aver chiuso questa finestra!
+            </div>
+            <div class="ep-credentials-grid">
+              <div>
+                <span class="ep-credentials-label">Username</span>
+                <div class="ep-credentials-value">{{ epCredentialsUsername() }}</div>
+              </div>
+              <div>
+                <span class="ep-credentials-label">Password</span>
+                <div class="ep-credentials-value ep-credentials-pwd">{{ epCredentialsPassword() }}</div>
+              </div>
+            </div>
+            <div class="ep-form-actions">
+              <button type="button" class="btn-primary" (click)="epCopyToClipboard(
+                        'Username: ' + epCredentialsUsername() + '\nPassword: ' + epCredentialsPassword(),
+                        'Credenziali copiate negli appunti 👍')">
+                📋 Copia tutto
+              </button>
+              <button type="button" class="btn-ghost" (click)="epCloseCredentialsModal()">
+                Ho preso nota · Chiudi
+              </button>
+            </div>
+          </div>
+          }
+        </div>
+      </div>
+      }
+
+      <form class="op-form op-form-spaced" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
+        <label><span>Nuovo operatore</span><input type="text" formControlName="name"
+            placeholder="Nome operatore"></label>
+        <label><span>Ruolo</span>
+          <select formControlName="role">
+            <option value="vendita">Vendita</option>
+            <option value="tecnico">Tecnico</option>
+            <option value="amministrazione">Amministrazione</option>
+            <option value="magazzino">Magazzino</option>
+          </select>
+        </label>
+        <label><span>Contratto settimanale</span>
+          <select formControlName="contractHoursWeekly">
+            @for (h of [24,30,32,36,38,40,44,48]; track h) {
+            <option [value]="h">{{ h }} ore</option>
+            }
+          </select>
+        </label>
+        <div class="form-actions"><button type="submit" class="btn-primary">Aggiungi</button></div>
+      </form>
+
+      @if (inactiveCashOperators().length && !showHiddenOperators()) {
+      <div class="detail-note">
+        <span>💡 Dipendenti nascosti ({{ inactiveCashOperators().length }})</span>
+        <p>
+          {{ inactiveCashOperatorNames() }}
+          &nbsp;·&nbsp; attiva "Mostra nascosti" in alto per ripristinarli.
+        </p>
+      </div>
+      }
+    </div>
+  </div>
+  }
+
+  <!-- ═══════════════ PORTALE DIPENDENTI v2 (mobile-first, login obbligatorio) ═══════════════ -->
+  @case ('employee-portal') {
+  <div class="ep-page-shell">
+    <div class="ep-container">
+
+      <!-- ═══ SCHERMATA DI LOGIN (solo se nessuna sessione valida) ═══ -->
+      @if (epIsLoginScreen()) {
+      <section class="ep-login">
+        <div class="ep-login-card">
+          <div class="ep-login-logo">
+            <span class="ep-logo-big">🧑‍🔧</span>
+          </div>
+          <h1 class="ep-login-title">Portale Dipendenti</h1>
+          <p class="ep-login-subtitle">AudioMax · Area riservata tecnici</p>
+
+          <form class="ep-login-form" [formGroup]="epLoginForm" (ngSubmit)="epSubmitLogin()">
+            <label class="ep-login-field">
+              <span>Username</span>
+              <input type="text" class="ep-input" formControlName="username" autocomplete="username"
+                placeholder="nome.cognome" [disabled]="epLoginLoading()">
+            </label>
+            <label class="ep-login-field">
+              <span>Password</span>
+              <input type="password" class="ep-input" formControlName="password" autocomplete="current-password"
+                placeholder="Inserisci la password" [disabled]="epLoginLoading()">
+            </label>
+
+            @if (epLoginError()) {
+            <p class="ep-login-error">⚠️ {{ epLoginError() }}</p>
+            }
+
+            <button type="submit" class="btn-primary ep-login-btn" [disabled]="epLoginLoading()">
+              @if (epLoginLoading()) {
+              <span>Accesso in corso…</span>
+              } @else {
+              <span>Accedi</span>
+              }
+            </button>
+          </form>
+
+          <p class="ep-login-foot">
+            Credenziali dimenticate? Contatta il titolare in negozio.
+          </p>
+        </div>
+      </section>
+      }
+
+      <!-- ═══ SHELL PORTELE (sessione valida) ═══ -->
+      @if (!epIsLoginScreen() && epSessionOperator(); as me) {
+
+      <!-- Header sticky del Portale v3: MENU HAMBURGER ☰ a SX + campana/link/logout DX -->
+      <header class="ep-header">
+        <div class="ep-header-left">
+          <button type="button" class="ep-hamburger-btn" aria-label="Apri menu portale dipendenti"
+            (click)="epNavDrawerOpen.set(true)">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round">
+              <path d="M3 6h18" />
+              <path d="M3 12h18" />
+              <path d="M3 18h18" />
+            </svg>
+          </button>
+          <div class="ep-hello-block">
+            <h1 class="ep-title">Portale dipendenti</h1>
+            <p class="ep-subtitle">Ciao {{ me.name }} · {{ employeeRoleLabel(me.role) }}</p>
+          </div>
+        </div>
+        <div class="ep-header-right">
+          <button type="button" class="chip-btn chip-gray ep-chip-small ep-bell-btn"
+            (click)="epGotoTab('comunicazioni')" [title]="'Comunicazioni (non lette: ' + epBellUnreadCount() + ')'">
+            🔔
+            @if (epBellUnreadCount() > 0) {
+            <span class="ep-bell-badge">{{ epBellUnreadCount() > 99 ? '99+' : epBellUnreadCount() }}</span>
+            }
+          </button>
+          <button type="button" class="chip-btn chip-blue ep-chip-small" title="Apri portale sul telefono"
+            (click)="epOpenMobilePanel = true">
+            📱 Link telefono
+          </button>
+          <button type="button" class="chip-btn chip-warning ep-chip-small" title="Esci dal portale"
+            (click)="epLogout()">
+            🚪 Esci
+          </button>
+        </div>
+      </header>
+
+      <!-- ✅ EP v3: Menu drawer a sinistra (hamburger) — SOLO funzioni portalino, NIENTE gestionale -->
+      @if (epNavDrawerOpen()) {
+      <div class="ep-nav-overlay" (click)="epNavDrawerOpen.set(false)"></div>
+      <aside class="ep-nav-drawer" role="dialog" aria-modal="true" aria-label="Menu Portale Dipendenti">
+        <div class="ep-nav-drawer-head">
+          <div class="ep-nav-brand">
+            <span class="ep-nav-brand-mark">🧑‍🔧</span>
+            <div>
+              <strong>Audiomax</strong>
+              <span>Portale Operatori</span>
+            </div>
+          </div>
+          <button type="button" class="chip-btn chip-gray ep-chip-small" aria-label="Chiudi menu"
+            (click)="epNavDrawerOpen.set(false)">✕</button>
+        </div>
+        <div class="ep-nav-user-chip">
+          <span class="ep-nav-user-avatar">{{ initialsOf(me.name) }}</span>
+          <div>
+            <strong class="ep-nav-user-name">{{ me.name }}</strong>
+            <span class="ep-nav-user-role">{{ employeeRoleLabel(me.role) }}</span>
+          </div>
+        </div>
+        <nav class="ep-nav-list" aria-label="Voci menu portale">
+          <button type="button" class="ep-nav-item"
+            [class.ep-nav-item-active]="!epSelectedCommId() && epActiveTab() === 'magazzino'"
+            (click)="epResetPortalView()">
+            <span class="ep-nav-icon">🏠</span>
+            <span class="ep-nav-text">Home</span>
+            <span class="ep-nav-desc">Vista principale</span>
+          </button>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'agenda'"
+            (click)="epGotoTab('agenda')">
+            <span class="ep-nav-icon">📅</span>
+            <span class="ep-nav-text">Agenda</span>
+            <span class="ep-nav-desc">{{ epMyAgendaAppts().length }} appuntamenti</span>
+          </button>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'comunicazioni'"
+            (click)="epGotoTab('comunicazioni')">
+            <span class="ep-nav-icon">🔔</span>
+            <span class="ep-nav-text">Comunicazioni</span>
+            <span class="ep-nav-desc">
+              @if (epBellUnreadCount() > 0) {
+              <span class="badge badge-danger ep-inline-badge">{{ epBellUnreadCount() }} nuove</span>
+              } @else {
+              Nessuna nuova
+              }
+            </span>
+          </button>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'magazzino'"
+            (click)="epGotoTab('magazzino')">
+            <span class="ep-nav-icon">📦</span>
+            <span class="ep-nav-text">Magazzino</span>
+            <span class="ep-nav-desc">Consulta e preleva</span>
+          </button>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'ddt'"
+            (click)="epGotoTab('ddt')">
+            <span class="ep-nav-icon">🚚</span>
+            <span class="ep-nav-text">DDT</span>
+            <span class="ep-nav-desc">Documenti di trasporto</span>
+          </button>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'servizi'"
+            (click)="epGotoTab('servizi')">
+            <span class="ep-nav-icon">🛠️</span>
+            <span class="ep-nav-text">Servizi</span>
+            <span class="ep-nav-desc">Invia in officina / cassa</span>
+          </button>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'ordini'"
+            (click)="epGotoTab('ordini')">
+            <span class="ep-nav-icon">🛒</span>
+            <span class="ep-nav-text">Ordini</span>
+            <span class="ep-nav-desc">Richiedi materiale</span>
+          </button>
+        </nav>
+        <div class="ep-nav-footer">
+          <button type="button" class="ep-nav-item ep-nav-item-logout" (click)="epLogout(); epNavDrawerOpen.set(false)">
+            <span class="ep-nav-icon">🚪</span>
+            <span class="ep-nav-text">Logout / Esci</span>
+            <span class="ep-nav-desc">Chiudi sessione</span>
+          </button>
+          <p class="ep-nav-copy">© Audiomax · Portale v3</p>
+        </div>
+      </aside>
+      }
+
+      <!-- Tab MAGAZZINO (riportato invariato da v1, check JIT già nel TS) -->
+      @if (epActiveTab() === 'magazzino') {
+      <section class="ep-tab-content">
+        <div class="ep-search-row">
+          <input type="search" class="ep-input ep-search" placeholder="Cerca prodotto (nome, codice, marca, categoria)"
+            [ngModel]="epWarehouseSearch()" (ngModelChange)="epWarehouseSearch.set($event)">
+          <span class="badge badge-ghost">{{ epFilteredInventoryItems().length }} articoli</span>
+        </div>
+
+        @if (epSelectedInventoryItem(); as it) {
+        <div class="ep-detail-card" role="dialog" aria-modal="true">
+          <div class="ep-detail-head">
+            <h3>{{ it.name }}</h3>
+            <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epSelectedInventoryItem.set(null)">
+              ✕ Chiudi
+            </button>
+          </div>
+          <dl class="ep-detail-grid">
+            <div>
+              <dt>Codice / SKU</dt>
+              <dd>{{ it.sku || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Categoria</dt>
+              <dd>{{ it.category || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Fornitore</dt>
+              <dd>{{ it.supplier || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Posizione</dt>
+              <dd>{{ it.location || '—' }}</dd>
+            </div>
+            <div>
+              <dt>Giacenza attuale</dt>
+              <dd class="ep-big-num" [class.ep-num-alert]="it.stock <= it.minStock">
+                {{ it.stock }} <span class="ep-unit">unità</span>
+              </dd>
+            </div>
+            <div>
+              <dt>Soglia minima</dt>
+              <dd>{{ it.minStock }}</dd>
+            </div>
+            <div>
+              <dt>Costo unitario</dt>
+              <dd>€ {{ it.unitCost.toFixed(2) }}</dd>
+            </div>
+            <div>
+              <dt>Stato</dt>
+              <dd>{{ it.status || 'Disponibile' }}</dd>
+            </div>
+          </dl>
+          <form class="ep-form" [formGroup]="epPrelievoForm" (ngSubmit)="epSubmitPrelievo(it)">
+            <div class="ep-form-row">
+              <label>
+                <span>Quantità da prelevare</span>
+                <input type="number" min="1" [max]="it.stock" formControlName="quantity"
+                  class="ep-input ep-numeric-input">
+              </label>
+              <label>
+                <span>Cliente (destinazione installazione)</span>
+                <input type="search" formControlName="clientSearch" class="ep-input"
+                  placeholder="Cerca cliente per nome..." (input)="epPrelievoClientSearchInput($any($event.target))">
+              </label>
+            </div>
+            @if (epPrelievoClientiFiltrati().length) {
+            <div class="ep-pill-row">
+              @for (c of epPrelievoClientiFiltrati().slice(0,6); track c.id) {
+              <button type="button" class="ep-pill"
+                [class.ep-pill-active]="epPrelievoForm.get('clientId')?.value === c.id"
+                (click)="epPrelievoSelectClient(c)">
+                {{ c.name }}
+              </button>
+              }
+            </div>
+            }
+            <label>
+              <span>Note (opzionale)</span>
+              <textarea rows="2" formControlName="note" class="ep-input ep-textarea"
+                placeholder="Es. impianto Classe A, piano terra, ritira con DDT"></textarea>
+            </label>
+            <div class="ep-form-actions">
+              <button type="button" class="btn-ghost" (click)="epResetPrelievoForm()">Annulla</button>
+              <button type="submit" class="btn-primary"
+                [disabled]="epPrelievoForm.invalid || (epPrelievoForm.get('quantity')?.value ?? 0) < 1">
+                Conferma prelievo
+              </button>
+            </div>
+          </form>
+          @if (epPrelievoLastConfirmMessage()) {
+          <div class="ep-toast-success">{{ epPrelievoLastConfirmMessage() }}</div>
+          }
+        </div>
+        }
+
+        <ul class="ep-list">
+          @for (it of epFilteredInventoryItems(); track it.id) {
+          <li class="ep-list-item" (click)="epSelectedInventoryItem.set(it)">
+            <div class="ep-list-main">
+              <span class="ep-list-name">{{ it.name }}</span>
+              <span class="ep-list-meta">
+                @if (it.location) { {{ it.location }} · } {{ it.category || 'Senza categoria' }}
+              </span>
+            </div>
+            <div class="ep-list-stock" [class.ep-stock-low]="it.stock <= it.minStock">
+              {{ it.stock }}
+            </div>
+          </li>
+          } @empty {
+          <li class="ep-empty">Nessun articolo trovato per "{{ epWarehouseSearch() }}".</li>
+          }
+        </ul>
+      </section>
+      }
+
+      <!-- Tab DDT (riportato invariato) -->
+      @if (epActiveTab() === 'ddt') {
+      <section class="ep-tab-content">
+        <div class="ep-tab-head">
+          <h2>DDT / Documenti di trasporto</h2>
+          <button type="button" class="btn-primary-sm" (click)="epOpenDdtEditor()">+ Nuovo DDT</button>
+        </div>
+
+        @if (epDdtEditorVisible()) {
+        <div class="ep-editor-card">
+          <div class="ep-detail-head">
+            <h3>Nuovo DDT</h3>
+            <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epCloseDdtEditor()">✕</button>
+          </div>
+          <form [formGroup]="epDdtForm" (ngSubmit)="epSubmitDdt(false)">
+            <div class="ep-form-row">
+              <label>
+                <span>Cliente *</span>
+                <input type="search" class="ep-input" placeholder="Cerca cliente..."
+                  (input)="epDdtClientSearchInput($any($event.target))" formControlName="clientSearch">
+              </label>
+              <label>
+                <span>Veicolo / Targa</span>
+                <input type="text" class="ep-input" formControlName="vehicle" placeholder="Es. AB123CD / Furgone">
+              </label>
+            </div>
+            @if (epDdtClientiFiltrati().length) {
+            <div class="ep-pill-row">
+              @for (c of epDdtClientiFiltrati().slice(0,8); track c.id) {
+              <button type="button" class="ep-pill" [class.ep-pill-active]="epDdtForm.get('clientId')?.value === c.id"
+                (click)="epDdtSelectClient(c)">
+                {{ c.name }}
+              </button>
+              }
+            </div>
+            }
+            <label>
+              <span>Destinazione</span>
+              <input type="text" class="ep-input" formControlName="destination" placeholder="Indirizzo di consegna">
+            </label>
+            <label>
+              <span>Note</span>
+              <textarea rows="2" class="ep-input ep-textarea" formControlName="note"
+                placeholder="Note generali per il DDT"></textarea>
+            </label>
+
+            <h4 class="ep-subsection-title">Righe prodotto</h4>
+            <div class="ep-ddt-lines">
+              @for (ctrl of epDdtLineGroups; track ctrl; let i = $index) {
+              <div class="ep-ddt-line" [formGroup]="ctrl">
+                <div class="ep-ddt-line-head">
+                  <input type="search" class="ep-input ep-wide" formControlName="search"
+                    placeholder="Cerca articolo nel magazzino...">
+                  <button type="button" class="chip-btn chip-warning ep-chip-small"
+                    (click)="epDdtRemoveLine(i)">🗑️</button>
+                </div>
+                @if (epDdtLineSuggestions(i).length) {
+                <div class="ep-pill-row">
+                  @for (it of epDdtLineSuggestions(i).slice(0,5); track it.id) {
+                  <button type="button" class="ep-pill"
+                    [class.ep-pill-active]="ctrl.get('inventoryItemId')?.value === it.id"
+                    (click)="epDdtSelectItem(i, it)">
+                    {{ it.name }}
+                  </button>
+                  }
+                </div>
+                }
+                <div class="ep-form-row">
+                  <label class="ep-w-50">
+                    <span>Quantità</span>
+                    <input type="number" min="1" formControlName="quantity" class="ep-input ep-numeric-input">
+                  </label>
+                  <label class="ep-w-50">
+                    <span>Note riga</span>
+                    <input type="text" formControlName="note" class="ep-input" placeholder="Opzionale">
+                  </label>
+                </div>
+              </div>
+              }
+            </div>
+            <button type="button" class="btn-ghost ep-block-btn" (click)="epDdtAddLine()">+ Aggiungi riga</button>
+
+            <label class="ep-checkbox-row">
+              <input type="checkbox" formControlName="alsoDeduct">
+              <span>Contemporaneamente registra lo scarico dal magazzino (consigliato)</span>
+            </label>
+
+            <div class="ep-form-actions">
+              <button type="button" class="btn-ghost" (click)="epCloseDdtEditor()">Annulla</button>
+              <button type="submit" class="btn-ghost">Salva bozza</button>
+              <button type="button" class="btn-primary" (click)="epSubmitDdt(true)">Emetti e stampa</button>
+            </div>
+          </form>
+        </div>
+        }
+
+        <ul class="ep-list">
+          @for (ddt of epMieiDdt(); track ddt.id) {
+          <li class="ep-list-item ep-ddt-row">
+            <div class="ep-list-main">
+              <span class="ep-list-name">{{ ddt.number || 'DDT bozza #' + ddt.id.slice(-5) }}</span>
+              <span class="ep-list-meta">
+                {{ ddt.clientSnapshot || 'Senza cliente' }} · {{ ddt.lines.length }} righe ·
+                {{ epFormatDateTime(ddt.createdAt) }}
+              </span>
+            </div>
+            <div class="ep-list-actions">
+              <span class="badge" [class.badge-success]="ddt.status === 'emesso'"
+                [class.badge-secondary]="ddt.status === 'bozza'" [class.badge-info]="ddt.status === 'consegnato'">
+                {{ epDdtStatusLabel(ddt.status) }}
+              </span>
+              @if (ddt.status === 'bozza') {
+              <button type="button" class="chip-btn chip-blue ep-chip-small"
+                (click)="epDdtSetStatus(ddt, 'emesso'); epPrintDdt(ddt)">
+                Emetti
+              </button>
+              }
+              @if (ddt.status === 'emesso') {
+              <button type="button" class="chip-btn chip-success ep-chip-small"
+                (click)="epDdtSetStatus(ddt, 'consegnato')">
+                Marca consegnato
+              </button>
+              }
+              <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epPrintDdt(ddt)">
+                Stampa
+              </button>
+            </div>
+          </li>
+          } @empty {
+          <li class="ep-empty">Nessun DDT creato oggi. Crea il primo con "+ Nuovo DDT".</li>
+          }
+        </ul>
+
+        @if (epPrintableDdt(); as d) {
+        <div class="ep-ddt-print">
+          <h1>DOCUMENTO DI TRASPORTO</h1>
+          <div class="ep-ddt-meta">
+            <div><strong>Numero:</strong> {{ d.number || 'BOZZA' }}</div>
+            <div><strong>Data:</strong> {{ epFormatDate(d.emittedAt ?? d.createdAt) }}</div>
+            <div><strong>Operatore:</strong> {{ d.createdByOperatorName }}</div>
+          </div>
+          <div class="ep-ddt-block">
+            <strong>Mittente:</strong><br>
+            {{ epCompanyProfile().legalName || 'AudioMax' }}<br>
+            {{ epCompanyProfile().vatNumber ? 'P.IVA ' + epCompanyProfile().vatNumber : '' }}
+            @if (epCompanyProfile().address) { <br> {{ epCompanyProfile().address }} }
+          </div>
+          <div class="ep-ddt-block">
+            <strong>Destinatario:</strong><br>
+            {{ d.clientSnapshot || '—' }}<br>
+            {{ d.destination || '—' }}
+            @if (d.vehicle) { <br> <strong>Veicolo:</strong> {{ d.vehicle }} }
+          </div>
+          <table class="ep-ddt-table">
+            <thead>
+              <tr>
+                <th>Cod.</th>
+                <th>Descrizione</th>
+                <th>Q.tà</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (line of d.lines; track line.id) {
+              <tr>
+                <td>{{ line.inventoryItemId || '—' }}</td>
+                <td>{{ line.itemSnapshot }}</td>
+                <td>{{ line.quantity }}</td>
+                <td>{{ line.note || '—' }}</td>
+              </tr>
+              }
+            </tbody>
+          </table>
+          @if (d.note) { <p><strong>Note:</strong> {{ d.note }}</p> }
+          <div class="ep-ddt-signatures">
+            <div>Firma operatore<br><br>_______________________</div>
+            <div>Firma ricevente<br><br>_______________________</div>
+          </div>
+        </div>
+        }
+      </section>
+      }
+
+      <!-- Tab SERVIZI (riportato invariato) -->
+      @if (epActiveTab() === 'servizi') {
+      <section class="ep-tab-content">
+        <div class="ep-tab-head">
+          <h2>Servizi da inviare in Cassa</h2>
+          <button type="button" class="btn-primary-sm" (click)="epServiceEditorVisible.set(true)">+ Nuovo
+            servizio</button>
+        </div>
+
+        @if (epServiceEditorVisible()) {
+        <form class="ep-editor-card" [formGroup]="epServiceForm" (ngSubmit)="epSubmitService()">
+          <div class="ep-detail-head">
+            <h3>Nuovo servizio</h3>
+            <button type="button" class="chip-btn chip-gray ep-chip-small"
+              (click)="epServiceEditorVisible.set(false)">✕</button>
+          </div>
+          <div class="ep-form-row">
+            <label>
+              <span>Tipo servizio *</span>
+              <select class="ep-input" formControlName="type">
+                <option value="installazione">Manodopera installazione</option>
+                <option value="officina">Manodopera officina</option>
+                <option value="sopralluogo">Sopralluogo / preventiva</option>
+                <option value="ritiro">Ritiro apparecchiatura</option>
+                <option value="altro">Altro</option>
+              </select>
+            </label>
+            <label>
+              <span>Data/ora effettuazione *</span>
+              <input type="datetime-local" class="ep-input" formControlName="serviceDate">
+            </label>
+          </div>
+          <label>
+            <span>Cliente *</span>
+            <input type="search" class="ep-input" placeholder="Cerca cliente..."
+              (input)="epServiceClientSearchInput($any($event.target))" formControlName="clientSearch">
+          </label>
+          @if (epServiceClientiFiltrati().length) {
+          <div class="ep-pill-row">
+            @for (c of epServiceClientiFiltrati().slice(0,8); track c.id) {
+            <button type="button" class="ep-pill" [class.ep-pill-active]="epServiceForm.get('clientId')?.value === c.id"
+              (click)="epServiceSelectClient(c)">
+              {{ c.name }}
+            </button>
+            }
+          </div>
+          }
+          <label>
+            <span>Descrizione * (minimo 3 caratteri)</span>
+            <textarea rows="2" class="ep-input ep-textarea" formControlName="description"
+              placeholder="Es. Installazione 4 casse + subwoofer su Fiat Ducato"></textarea>
+          </label>
+          <div class="ep-form-row">
+            <label>
+              <span>Prezzo unitario € *</span>
+              <input type="number" min="0" step="0.01" class="ep-input ep-numeric-input" formControlName="priceUnit">
+            </label>
+            <label>
+              <span>Quantità</span>
+              <input type="number" min="1" class="ep-input ep-numeric-input" formControlName="quantity">
+            </label>
+          </div>
+          <div class="ep-total-row">Totale: <strong>€ {{ epServiceTotal() }}</strong></div>
+          <div class="ep-form-actions">
+            <button type="button" class="btn-ghost" (click)="epServiceEditorVisible.set(false)">Annulla</button>
+            <button type="submit" class="btn-primary" [disabled]="epServiceForm.invalid">Invia in Cassa</button>
+          </div>
+          @if (epServiceLastConfirmMessage()) {
+          <div class="ep-toast-success">{{ epServiceLastConfirmMessage() }}</div>
+          }
+        </form>
+        }
+
+        <ul class="ep-list">
+          @for (svc of epMieiServizi(); track svc.id) {
+          <li class="ep-list-item ep-service-row">
+            <div class="ep-list-main">
+              <span class="ep-list-name">{{ epServiceTypeLabel(svc.type) }} · {{ svc.clientSnapshot }}</span>
+              <span class="ep-list-meta">
+                {{ svc.description }} · {{ epFormatDateTime(svc.serviceDate) }} · {{ svc.quantity }} × € {{
+                svc.priceUnit.toFixed(2) }}
+              </span>
+            </div>
+            <div class="ep-list-actions">
+              <span class="ep-amount">€ {{ svc.totalAmount.toFixed(2) }}</span>
+              <span class="badge" [class.badge-success]="svc.status === 'pagato'"
+                [class.badge-info]="svc.status === 'inviato'" [class.badge-warning]="svc.status === 'annullato'">
+                {{ epServiceStatusLabel(svc.status) }}
+              </span>
+            </div>
+          </li>
+          } @empty {
+          <li class="ep-empty">Nessun servizio ancora. Invia il primo con "+ Nuovo servizio".</li>
+          }
+        </ul>
+      </section>
+      }
+
+      <!-- Tab ORDINI (riportato invariato) -->
+      @if (epActiveTab() === 'ordini') {
+      <section class="ep-tab-content">
+        <div class="ep-tab-head">
+          <h2>Ordini da Portale</h2>
+          <button type="button" class="btn-primary-sm" (click)="epOrderEditorVisible.set(true)">+ Nuovo ordine</button>
+        </div>
+
+        @if (epOrderEditorVisible()) {
+        <form class="ep-editor-card" [formGroup]="epOrderForm" (ngSubmit)="epSubmitOrder()">
+          <div class="ep-detail-head">
+            <h3>Nuovo ordine</h3>
+            <button type="button" class="chip-btn chip-gray ep-chip-small"
+              (click)="epOrderEditorVisible.set(false)">✕</button>
+          </div>
+          <div class="ep-form-row">
+            <label>
+              <span>Tipo ordine *</span>
+              <select class="ep-input" formControlName="orderType">
+                <option value="richiesta-cliente">Richiesta materiale per cliente</option>
+                <option value="riordino">Riordino esaurimenti magazzino</option>
+                <option value="uso-interno">Materiale uso interno</option>
+                <option value="altro">Altro</option>
+              </select>
+            </label>
+            <label>
+              <span>Urgenza *</span>
+              <select class="ep-input" formControlName="urgency">
+                <option value="bassa">Bassa</option>
+                <option value="media">Media</option>
+                <option value="alta">Alta</option>
+              </select>
+            </label>
+          </div>
+          @if (epOrderForm.get('orderType')?.value === 'richiesta-cliente') {
+          <label>
+            <span>Cliente</span>
+            <input type="search" class="ep-input" placeholder="Cerca cliente..."
+              (input)="epOrderClientSearchInput($any($event.target))" formControlName="clientSearch">
+            @if (epOrderClientiFiltrati().length) {
+            <div class="ep-pill-row">
+              @for (c of epOrderClientiFiltrati().slice(0,8); track c.id) {
+              <button type="button" class="ep-pill" [class.ep-pill-active]="epOrderForm.get('clientId')?.value === c.id"
+                (click)="epOrderSelectClient(c)">
+                {{ c.name }}
+              </button>
+              }
+            </div>
+            }
+          </label>
+          }
+
+          <h4 class="ep-subsection-title">Righe articolo</h4>
+          <div class="ep-ddt-lines">
+            @for (ctrl of epOrderLineGroups; track ctrl; let i = $index) {
+            <div class="ep-ddt-line" [formGroup]="ctrl">
+              <div class="ep-ddt-line-head">
+                <input type="search" class="ep-input ep-wide" formControlName="search"
+                  (input)="epOrderLineSyncDescription(i)"
+                  placeholder="Cerca articolo (opzionale: descrivi liberamente)">
+                <button type="button" class="chip-btn chip-warning ep-chip-small"
+                  (click)="epOrderRemoveLine(i)">🗑️</button>
+              </div>
+              @if (epOrderLineSuggestions(i).length) {
+              <div class="ep-pill-row">
+                @for (it of epOrderLineSuggestions(i).slice(0,5); track it.id) {
+                <button type="button" class="ep-pill"
+                  [class.ep-pill-active]="ctrl.get('inventoryItemId')?.value === it.id"
+                  (click)="epOrderSelectItem(i, it)">
+                  {{ it.name }}
+                </button>
+                }
+              </div>
+              }
+              <div class="ep-form-row">
+                <label class="ep-w-40">
+                  <span>Quantità *</span>
+                  <input type="number" min="1" formControlName="quantity" class="ep-input ep-numeric-input">
+                </label>
+                <label class="ep-w-30">
+                  <span>Prezzo desiderato</span>
+                  <input type="number" min="0" step="0.01" formControlName="expectedUnitPrice"
+                    class="ep-input ep-numeric-input">
+                </label>
+                <label class="ep-w-30">
+                  <span>Nota riga</span>
+                  <input type="text" formControlName="note" class="ep-input" placeholder="Opzionale">
+                </label>
+              </div>
+            </div>
+            }
+          </div>
+          <button type="button" class="btn-ghost ep-block-btn" (click)="epOrderAddLine()">+ Aggiungi riga</button>
+
+          <div class="ep-form-row">
+            <label>
+              <span>Data consegna prevista</span>
+              <input type="date" class="ep-input" formControlName="expectedDeliveryDate">
+            </label>
+          </div>
+          <label>
+            <span>Note ordine</span>
+            <textarea rows="3" class="ep-input ep-textarea" formControlName="note"
+              placeholder="Spiegazioni aggiuntive (riferimenti cliente, colori, modifiche particolari...)"></textarea>
+          </label>
+          <div class="ep-form-actions">
+            <button type="button" class="btn-ghost" (click)="epOrderEditorVisible.set(false)">Annulla</button>
+            <button type="submit" class="btn-primary" [attr.disabled]="epOrderForm.invalid ? '' : null">Invia
+              ordine</button>
+          </div>
+          @if (epOrderLastConfirmMessage()) {
+          <div class="ep-toast-success">{{ epOrderLastConfirmMessage() }}</div>
+          }
+        </form>
+        }
+
+        <ul class="ep-list">
+          @for (o of epMieiOrdini(); track o.id) {
+          <li class="ep-list-item ep-order-row">
+            <div class="ep-list-main">
+              <span class="ep-list-name">
+                {{ o.number }}
+                <span class="badge badge-ghost" [class.ep-urgency-low]="o.urgency === 'bassa'"
+                  [class.ep-urgency-mid]="o.urgency === 'media'" [class.ep-urgency-high]="o.urgency === 'alta'">
+                  Urgenza: {{ epOrderUrgencyLabel(o.urgency) }}
+                </span>
+              </span>
+              <span class="ep-list-meta">
+                {{ epOrderTypeLabel(o.orderType) }}
+                @if (o.clientSnapshot) { · {{ o.clientSnapshot }} } · {{ o.lines.length }} righe · {{
+                epFormatDate(o.createdAt) }}
+              </span>
+            </div>
+            <div class="ep-list-actions">
+              <span class="badge" [class.badge-warning]="o.status === 'pending'"
+                [class.badge-info]="o.status === 'seen'" [class.badge-secondary]="o.status === 'approved'"
+                [class.badge-success]="o.status === 'received'" [class.badge-ghost]="o.status === 'cancelled'">
+                {{ epOrderStatusLabel(o.status) }}
+              </span>
+            </div>
+          </li>
+          } @empty {
+          <li class="ep-empty">Nessun ordine creato. Crea il primo ordine per richiedere materiale.</li>
+          }
+        </ul>
+      </section>
+      }
+
+      <!-- ═══ NUOVO Tab 📅 AGENDA ═══ -->
+      @if (epActiveTab() === 'agenda') {
+      <section class="ep-tab-content">
+        <div class="ep-tab-head">
+          <h2>📅 La mia agenda</h2>
+          <span class="badge badge-ghost">
+            {{ epMyAgendaAppts().length }} appuntamenti futuri
+          </span>
+        </div>
+
+        @if (epMyAgendaGroups().length === 0) {
+        <div class="ep-empty ep-empty-large">
+          📭 Nessun appuntamento in agenda per i prossimi giorni.
+        </div>
+        }
+
+        @for (group of epMyAgendaGroups(); track group.label) {
+        <h3 class="ep-agenda-group-title">{{ group.label }}</h3>
+        <ul class="ep-list">
+          @for (a of group.items; track a.id) {
+          <li class="ep-list-item ep-agenda-card" [class.ep-agenda-card-open]="epEditingQuoteApptId() === a.id">
+            <div class="ep-list-main">
+              <div class="ep-agenda-time">
+                <strong>{{ epAppointmentTimeRange(a).start }}</strong>
+                <span>→ {{ epAppointmentTimeRange(a).end }}</span>
+              </div>
+              <div class="ep-list-meta">
+                <span class="ep-agenda-type">{{ epAppointmentTypeLabel(a.appointmentType) }}</span>
+                <span class="ep-agenda-sep">·</span>
+                <span>{{ epAppointmentLocationLabel(a.locationType) }}</span>
+                <span class="ep-agenda-sep">·</span>
+                <span class="ep-agenda-customer">{{ a.customerName }}</span>
+              </div>
+              @if (a.address) {
+              <div class="ep-list-meta ep-agenda-addr">📍 {{ a.address }}</div>
+              }
+              <div class="ep-list-meta">
+                @if (a.linkedQuoteId) {
+                <span class="ep-agenda-quote">🔗 {{ a.linkedQuoteId }}</span>
+                @if (epQuoteForAppointment(a); as q) {
+                <span class="ep-agenda-sep">·</span>
+                <span class="ep-agenda-value">€ {{ q.value.toLocaleString('it-IT', { minimumFractionDigits: 2,
+                  maximumFractionDigits: 2 }) }}</span>
+                }
+                }
+                <span class="badge" [class.badge-warning]="a.status === 'programmato'"
+                  [class.badge-info]="a.status === 'in-corso'" [class.badge-success]="a.status === 'chiuso'">
+                  {{ epAppointmentStatusLabel(a.status) }}
+                </span>
+              </div>
+              @if (a.linkedQuoteId) {
+              <div class="ep-agenda-actions">
+                <button type="button" class="chip-btn chip-blue ep-chip-small"
+                  [disabled]="epEditingQuoteApptId() === a.id" (click)="epOpenQuoteEditor(a)">
+                  🛠️ Modifica righe installazione
+                </button>
+              </div>
+              }
+            </div>
+
+            <!-- ✅ Editor righe preventivo per installazione (toggle per appuntamento) -->
+            @if (epEditingQuoteApptId() === a.id) {
+            <div class="ep-quote-editor">
+              <div class="ep-quote-editor-head">
+                <strong>🧾 Righe del preventivo</strong>
+                <span class="ep-list-meta">Modifica quantità, prezzi, aggiungi o rimuovi voci</span>
+              </div>
+
+              @if (epQuoteLineDraft().length === 0) {
+              <div class="ep-empty">Il preventivo non ha righe. Aggiungine una qui sotto.</div>
+              }
+
+              <ul class="ep-quote-lines">
+                @for (line of epQuoteLineDraft(); track line.id) {
+                <li class="ep-quote-line">
+                  <div class="ep-quote-line-top">
+                    <select class="ep-input ep-quote-kind" [value]="line.kind"
+                      (change)="epUpdateDraftLine(line.id, 'kind', $any($event.target).value)">
+                      <option value="materiale">📦 Materiale</option>
+                      <option value="servizio">🛠️ Servizio</option>
+                      <option value="altro">📌 Altro</option>
+                    </select>
+                    <button type="button" class="chip-btn chip-warning ep-chip-small" title="Rimuovi riga"
+                      (click)="epRemoveDraftLine(line.id)">🗑️</button>
+                  </div>
+                  <input type="text" class="ep-input ep-quote-desc" placeholder="Descrizione (es. Spina elettrica)"
+                    [value]="line.description"
+                    (input)="epUpdateDraftLine(line.id, 'description', $any($event.target).value)" />
+                  <div class="ep-quote-line-row">
+                    <label class="ep-quote-field">
+                      <span>Q.tà</span>
+                      <input type="number" min="0" step="1" class="ep-input" [value]="line.quantity"
+                        (input)="epUpdateDraftLine(line.id, 'quantity', $any($event.target).value)" />
+                    </label>
+                    <label class="ep-quote-field">
+                      <span>Prezzo unit. €</span>
+                      <input type="number" min="0" step="0.01" class="ep-input" [value]="line.unitPrice"
+                        (input)="epUpdateDraftLine(line.id, 'unitPrice', $any($event.target).value)" />
+                    </label>
+                    <label class="ep-quote-field">
+                      <span>IVA %</span>
+                      <input type="number" min="0" step="1" class="ep-input" [value]="line.vatRate"
+                        (input)="epUpdateDraftLine(line.id, 'vatRate', $any($event.target).value)" />
+                    </label>
+                    <div class="ep-quote-total-line">
+                      <span>Totale</span>
+                      <strong>€ {{ quoteLineTotal(line).toLocaleString('it-IT', { minimumFractionDigits: 2,
+                        maximumFractionDigits: 2 }) }}</strong>
+                    </div>
+                  </div>
+                </li>
+                }
+              </ul>
+
+              <div class="ep-quote-add">
+                <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epAddDraftLine('materiale')">
+                  + Materiale
+                </button>
+                <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epAddDraftLine('servizio')">
+                  + Servizio
+                </button>
+                <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epAddDraftLine('altro')">
+                  + Altro
+                </button>
+              </div>
+
+              <div class="ep-quote-total-bar">
+                <span>Totale preventivo</span>
+                <strong>€ {{ epDraftTotal().toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2
+                  }) }}</strong>
+              </div>
+
+              <div class="ep-quote-actions">
+                <button type="button" class="btn-ghost" (click)="epCloseQuoteEditor()">Annulla</button>
+                <button type="button" class="btn-primary" (click)="epSaveQuoteLines()">💾 Salva modifiche</button>
+              </div>
+            </div>
+            }
+          </li>
+          }
+        </ul>
+        }
+      </section>
+      }
+
+      <!-- ═══ NUOVO Tab 🔔 COMUNICAZIONI ═══ -->
+      @if (epActiveTab() === 'comunicazioni') {
+      <section class="ep-tab-content">
+        <div class="ep-tab-head">
+          <h2>🔔 Comunicazioni</h2>
+          <span class="badge badge-ghost">{{ epMyCommunications().length }} totali</span>
+        </div>
+
+        <!-- Nessuna comunicazione selezionata: lista -->
+        @if (!epSelectedCommId()) {
+        <ul class="ep-list">
+          @for (c of epMyCommunications(); track c.id) {
+          <li class="ep-list-item ep-comm-card"
+            [class.ep-comm-unread]="c.status === 'inviata' && !c.readBy.some(r => r.operatorId === $any(me).id)"
+            (click)="epOpenCommAndMarkRead(c.id)">
+            <div class="ep-list-main">
+              <span class="ep-list-name">
+                {{ c.title }}
+                <span class="badge" [class.badge-danger]="epPriorityTone(c.priority) === 'err'"
+                  [class.badge-warning]="epPriorityTone(c.priority) === 'warn'"
+                  [class.badge-ghost]="epPriorityTone(c.priority) === 'dim'">
+                  Priorità {{ epPriorityLabel(c.priority) }}
+                </span>
+              </span>
+              <span class="ep-list-meta">
+                {{ epFormatDateTime(c.createdAt) }}
+                @if (c.linkedQuoteId) { · 🔗 {{ c.linkedQuoteId }} }
+                @if (c.linkedAppointmentId) { · 📅 {{ c.linkedAppointmentId }} }
+                ·
+                <span class="badge" [class.badge-success]="epCommStatusTone(c.status) === 'ok'"
+                  [class.badge-warning]="epCommStatusTone(c.status) === 'warn'"
+                  [class.badge-info]="epCommStatusTone(c.status) === 'info'"
+                  [class.badge-ghost]="epCommStatusTone(c.status) === 'dim'">
+                  {{ epCommStatusLabel(c.status) }}
+                </span>
+              </span>
+              @if (c.body) {
+              <p class="ep-comm-preview">{{ c.body.slice(0, 120) }}{{ c.body.length > 120 ? '…' : '' }}</p>
+              }
+              @if (c.lines.length > 0) {
+              <div class="ep-list-meta ep-comm-lines-summary">
+                🧰 {{ c.lines.length }} righe materiale ·
+                {{ c.lines.filter(l => l.loadedQuantity >= l.requiredQuantity && l.requiredQuantity > 0).length }}
+                / {{ c.lines.filter(l => l.requiredQuantity > 0).length }} caricate
+              </div>
+              }
+            </div>
+          </li>
+          } @empty {
+          <li class="ep-empty ep-empty-large">
+            📭 Nessuna comunicazione ricevuta.
+          </li>
+          }
+        </ul>
+        }
+
+        <!-- Dettaglio comunicazione -->
+        @if (epSelectedComm(); as c) {
+        <div class="ep-editor-card ep-comm-detail">
+          <div class="ep-detail-head">
+            <div>
+              <h3>{{ c.title }}</h3>
+              <p class="ep-list-meta">
+                {{ epFormatDateTime(c.createdAt) }}
+                <span class="badge" [class.badge-danger]="epPriorityTone(c.priority) === 'err'"
+                  [class.badge-warning]="epPriorityTone(c.priority) === 'warn'"
+                  [class.badge-ghost]="epPriorityTone(c.priority) === 'dim'">
+                  Priorità {{ epPriorityLabel(c.priority) }}
+                </span>
+                <span class="badge" [class.badge-success]="epCommStatusTone(c.status) === 'ok'"
+                  [class.badge-warning]="epCommStatusTone(c.status) === 'warn'"
+                  [class.badge-info]="epCommStatusTone(c.status) === 'info'"
+                  [class.badge-ghost]="epCommStatusTone(c.status) === 'dim'">
+                  {{ epCommStatusLabel(c.status) }}
+                </span>
+              </p>
+            </div>
+            <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epCloseCommDetail()">✕</button>
+          </div>
+
+          <div class="ep-comm-body-links">
+            @if (c.linkedQuoteId) {
+            <span class="ep-comm-link">
+              🔗 <strong>Preventivo:</strong> {{ c.linkedQuoteId }}
+              @if (epQuoteById(c.linkedQuoteId); as q) {
+              <span class="ep-list-meta"> · {{ q.customerName }} · € {{ q.value.toFixed(2) }}</span>
+              }
+            </span>
+            }
+            @if (c.linkedAppointmentId) {
+            <span class="ep-comm-link">📅 Appuntamento: {{ c.linkedAppointmentId }}</span>
+            }
+            @if (epReadAtForMe(c)) {
+            <span class="ep-comm-link">✅ Letta il {{ epReadAtForMe(c) }}</span>
+            }
+          </div>
+
+          @if (c.body) {
+          <div class="ep-comm-body">
+            <p>{{ c.body }}</p>
+          </div>
+          }
+
+          @if (c.lines.length > 0) {
+          <h4 class="ep-subsection-title">🧰 Righe materiale da caricare</h4>
+          <ul class="ep-comm-lines-list">
+            @for (line of c.lines; track line.id) {
+            <li class="ep-comm-line"
+              [class.ep-comm-line-loaded]="line.loadedQuantity >= line.requiredQuantity && line.requiredQuantity > 0"
+              [class.ep-comm-line-ready]="!line.inventoryItemId && line.requiredQuantity > 0">
+              <div class="ep-comm-line-left">
+                <div class="ep-comm-line-title">{{ line.description }}</div>
+                <div class="ep-list-meta">
+                  <span>
+                    📦 Articolo: {{ epInventoryItemById(line.inventoryItemId)?.name || '⚠️ NON ASSOCIATO' }}
+                  </span>
+                  <span class="ep-comm-line-sep">·</span>
+                  <span>
+                    Qty: <strong>{{ line.loadedQuantity }}</strong>
+                    / {{ line.requiredQuantity }}
+                  </span>
+                </div>
+                @if (line.loadedQuantity > 0) {
+                <div class="ep-list-meta ep-comm-line-loaded-meta">
+                  ✅ Caricato il {{ epFormatLoadedDate(line.loadedAt) }}
+                  @if (line.warehouseMovementId) {
+                  <span class="ep-comm-line-sep">·</span>
+                  <span>Mov. {{ line.warehouseMovementId }}</span>
+                  }
+                </div>
+                }
+              </div>
+              <div class="ep-comm-line-right">
+                @if (line.loadedQuantity >= line.requiredQuantity && line.requiredQuantity > 0) {
+                <span class="badge badge-success">✅ Già caricata</span>
+                } @else if (!line.inventoryItemId) {
+                <span class="badge badge-ghost">⚠️ Non caricabile</span>
+                } @else {
+                <button type="button" class="chip-btn chip-success" (click)="epLoadCommLine(line)">
+                  ✅ Carica materiale
+                </button>
+                }
+              </div>
+            </li>
+            }
+          </ul>
+          }
+
+          <div class="ep-form-actions">
+            <button type="button" class="btn-ghost" (click)="epCloseCommDetail()">Torna alla lista</button>
+            <button type="button" class="btn-primary" [disabled]="c.status === 'completata'"
+              (click)="epMarkCommCompleted(c.id)">
+              ✅ Servizio completato
+            </button>
+          </div>
+        </div>
+        }
+      </section>
+      }
+
+      <!-- Tab bar sticky inferiore (6 tab) -->
+      <nav class="ep-tab-bar">
+        @for (tab of epTabs; track tab.id) {
+        <button type="button" class="ep-tab-btn" [class.ep-tab-active]="epActiveTab() === tab.id"
+          (click)="epActiveTab.set(tab.id)">
+          <span class="ep-tab-icon">{{ tab.icon }}</span>
+          <span class="ep-tab-label">{{ tab.label }}</span>
+        </button>
+        }
+      </nav>
+
+      <!-- Modale "Apri portale sul telefono" (invariato) -->
+      @if (epOpenMobilePanel) {
+      <div class="ep-modal-mask" (click)="epOpenMobilePanel = false">
+        <div class="ep-modal-body" (click)="$event.stopPropagation()">
+          <div class="ep-detail-head">
+            <h3>📱 Apri il Portale sul tuo telefono</h3>
+            <button type="button" class="chip-btn chip-gray ep-chip-small"
+              (click)="epOpenMobilePanel = false">✕</button>
+          </div>
+          <p class="ep-onboarding-desc">
+            Assicurati che il PC e lo smartphone siano sulla <strong>stessa rete Wi-Fi</strong>.
+          </p>
+          <pre class="ep-code-block"><code>npm run start -- --host 0.0.0.0 --port 4200</code>
+<button type="button" class="chip-btn chip-blue ep-chip-small ep-copy-code"
+  (click)="epCopyToClipboard('npm run start -- --host 0.0.0.0 --port 4200', 'Comando copiato')">
+  Copia comando
+</button>
+</pre>
+          <div class="ep-form-row">
+            <label>
+              <span>IP locale del PC</span>
+              <input type="text" class="ep-input" placeholder="es. 192.168.1.50" [ngModel]="epLanIp()"
+                (ngModelChange)="epLanIp.set($event)">
+            </label>
+            <label>
+              <span>Porta</span>
+              <input type="number" min="1" class="ep-input ep-numeric-input" [ngModel]="epLanPort()"
+                (ngModelChange)="epLanPort.set(epToNum($event))">
+            </label>
+          </div>
+          <div class="ep-qr-card">
+            @if (epLanUrl()) {
+            <h4>{{ epLanUrl() }}</h4>
+            <img [src]="epQrSrc()" alt="QR code per accedere al portale" class="ep-qr-img">
+            <div class="ep-form-actions">
+              <button type="button" class="btn-ghost"
+                (click)="epCopyToClipboard(epLanUrl()!, 'URL copiato negli appunti')">
+                Copia URL
+              </button>
+              <a class="btn-primary" [href]="epLanUrl()" target="_blank" rel="noopener">Apri nel browser</a>
+            </div>
+            <p class="ep-last-copy">{{ epMobileLastMessage() || '&nbsp;' }}</p>
+            } @else {
+            <p class="ep-empty">Inserisci IP e porta per generare URL e QR code.</p>
+            }
+          </div>
+        </div>
+      </div>
+      }
+
+      } <!-- fine shell portale (sessione) -->
+    </div>
+  </div>
+  }
+
+
+  <!-- ═══════════════ ADMIN COMUNICAZIONI PORTELE (Titolare) ═══════════════ -->
+  @case ('portal-comms-admin') {
+  <div class="employees-page">
+    <div class="op-card op-card-operativa">
+      <h2 class="op-card-title">
+        📢 Comunicazioni Portale (Area Amministrativa)
+        <span class="op-card-title-right">
+          <button type="button" class="btn-sm btn-primary-sm" (click)="epAdminOpenNewComm()">+ Nuova
+            comunicazione</button>
+        </span>
+      </h2>
+      <p class="detail-note">
+        Crea comunicazioni per i tecnici, collega preventivi e assegna esplicitamente ogni articolo di magazzino da
+        prelevare.
+        I tecnici vedono la comunicazione con la campanella 🔔 nel portale, e il caricamento di ogni riga effettua un
+        <strong>immediato scarico FIFO dal magazzino</strong>.
+      </p>
+
+      <!-- Nessuna comunicazione -->
+      @if (epAdminAllComms().length === 0) {
+      <div class="op-fast-empty ep-empty-large">
+        📭 Nessuna comunicazione ancora. Crea la prima con "+ Nuova comunicazione".
+      </div>
+      }
+
+      <!-- Lista comunicazioni -->
+      @if (epAdminAllComms().length > 0) {
+      <div class="ep-admin-grid">
+        <!-- Colonna sinistra: lista -->
+        <ul class="ep-admin-comm-list">
+          @for (c of epAdminAllComms(); track c.id) {
+          <li class="ep-admin-comm-row" [class.ep-admin-selected]="epAdminSelectedCommId() === c.id"
+            (click)="epAdminSelectComm(c.id)">
+            <div class="ep-admin-comm-main">
+              <div class="ep-admin-comm-title">
+                {{ c.title }}
+                <span class="badge" [class.badge-danger]="epPriorityTone(c.priority) === 'err'"
+                  [class.badge-warning]="epPriorityTone(c.priority) === 'warn'"
+                  [class.badge-ghost]="epPriorityTone(c.priority) === 'dim'">
+                  {{ epPriorityLabel(c.priority) }}
+                </span>
+                <span class="badge" [class.badge-success]="epCommStatusTone(c.status) === 'ok'"
+                  [class.badge-warning]="epCommStatusTone(c.status) === 'warn'"
+                  [class.badge-info]="epCommStatusTone(c.status) === 'info'"
+                  [class.badge-ghost]="epCommStatusTone(c.status) === 'dim'">
+                  {{ epCommStatusLabel(c.status) }}
+                </span>
+              </div>
+              <div class="ep-list-meta">
+                📅 {{ epFormatDateTime(c.createdAt) }}
+                · 🧑‍🔧 {{ epAdminTechNames(c.targetTechnicianIds) }}
+                @if (c.linkedQuoteId) { · 🔗 {{ c.linkedQuoteId }} }
+              </div>
+              @if (c.lines.length > 0) {
+              <div class="ep-list-meta ep-comm-lines-summary">
+                🧰 {{ c.lines.length }} righe ·
+                {{ c.lines.filter(l => l.loadedQuantity >= l.requiredQuantity && l.requiredQuantity > 0).length }}
+                / {{ c.lines.filter(l => l.requiredQuantity > 0).length }} caricate ·
+                ✅ Letta da: {{ epAdminReadersLabel(c) }}
+              </div>
+              }
+            </div>
+            <div class="ep-list-actions">
+              <button type="button" class="chip-btn chip-blue"
+                (click)="epAdminOpenExistingComm(c.id); $event.stopPropagation()">
+                ✏️ Modifica
+              </button>
+            </div>
+          </li>
+          }
+        </ul>
+
+        <!-- Colonna destra: dettaglio -->
+        @if (epAdminSelectedComm(); as c) {
+        <div class="ep-admin-detail ep-editor-card">
+          <div class="ep-detail-head">
+            <div>
+              <h3>{{ c.title }}</h3>
+              <p class="ep-list-meta">
+                📅 {{ epFormatDateTime(c.createdAt) }}
+                <span class="badge" [class.badge-danger]="epPriorityTone(c.priority) === 'err'"
+                  [class.badge-warning]="epPriorityTone(c.priority) === 'warn'"
+                  [class.badge-ghost]="epPriorityTone(c.priority) === 'dim'">
+                  {{ epPriorityLabel(c.priority) }}
+                </span>
+                <span class="badge" [class.badge-success]="epCommStatusTone(c.status) === 'ok'"
+                  [class.badge-warning]="epCommStatusTone(c.status) === 'warn'"
+                  [class.badge-info]="epCommStatusTone(c.status) === 'info'"
+                  [class.badge-ghost]="epCommStatusTone(c.status) === 'dim'">
+                  {{ epCommStatusLabel(c.status) }}
+                </span>
+              </p>
+            </div>
+            <button type="button" class="chip-btn chip-gray ep-chip-small"
+              (click)="epAdminSelectedCommId.set(null)">✕</button>
+          </div>
+          <div class="ep-comm-body-links">
+            <span class="ep-comm-link">🧑‍🔧 Destinatari: <strong>{{ epAdminTechNames(c.targetTechnicianIds)
+                }}</strong></span>
+            @if (c.linkedQuoteId) {
+            <span class="ep-comm-link">
+              🔗 Preventivo: <strong>{{ c.linkedQuoteId }}</strong>
+              @if (epQuoteById(c.linkedQuoteId); as q) {
+              · {{ q.customerName }} · € {{ q.value.toFixed(2) }}
+              }
+            </span>
+            }
+            <span class="ep-comm-link">✅ Letta da: {{ epAdminReadersLabel(c) }}</span>
+          </div>
+          @if (c.body) {
+          <div class="ep-comm-body">
+            <h4 class="ep-subsection-title">Note</h4>
+            <p>{{ c.body }}</p>
+          </div>
+          }
+          @if (c.lines.length > 0) {
+          <h4 class="ep-subsection-title">🧰 Righe materiale</h4>
+          <table class="ep-admin-comm-lines-table">
+            <thead>
+              <tr>
+                <th>Descrizione</th>
+                <th>Articolo di magazzino</th>
+                <th>Qty richiesta</th>
+                <th>Qty caricata</th>
+                <th>Ultimo caricamento</th>
+                <th>Movimento</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (l of c.lines; track l.id) {
+              <tr [class.ep-comm-line-loaded]="l.loadedQuantity >= l.requiredQuantity && l.requiredQuantity > 0"
+                [class.ep-comm-line-ready]="!l.inventoryItemId && l.requiredQuantity > 0">
+                <td>{{ l.description }}</td>
+                <td>
+                  @if (l.inventoryItemId) {
+                  {{ epInventoryItemById(l.inventoryItemId)?.name || 'Articolo non trovato' }}
+                  <div class="ep-list-meta">(id: {{ l.inventoryItemId }})</div>
+                  } @else {
+                  <span class="badge badge-warning">⚠️ NON ASSOCIATO</span>
+                  }
+                </td>
+                <td>{{ l.requiredQuantity }}</td>
+                <td><strong>{{ l.loadedQuantity }}</strong></td>
+                <td>
+                  @if (l.loadedAt) {
+                  {{ epFormatLoadedDate(l.loadedAt) }}
+                  <div class="ep-list-meta">da: {{ allCashOperators().find(o => o.id === l.loadedByOperatorId)?.name ||
+                    '—' }}</div>
+                  } @else {
+                  <span class="ep-dim">—</span>
+                  }
+                </td>
+                <td class="ep-mono">{{ l.warehouseMovementId || '—' }}</td>
+              </tr>
+              }
+            </tbody>
+          </table>
+          }
+          <div class="ep-form-actions">
+            <button type="button" class="btn-ghost" (click)="epAdminSelectedCommId.set(null)">Chiudi</button>
+            <button type="button" class="btn-primary" (click)="epAdminOpenExistingComm(c.id)">✏️ Modifica
+              comunicazione</button>
+          </div>
+        </div>
+        } @else {
+        <div class="ep-admin-detail ep-empty ep-empty-large">
+          👈 Seleziona una comunicazione per vedere il dettaglio.
+        </div>
+        }
+      </div>
+      }
+    </div>
+
+    <!-- MODALE: Editor nuova / modifica comunicazione -->
+    @if (epAdminCommEditorOpen()) {
+    <div class="ep-modal-mask" (click)="epAdminCloseCommEditor()">
+      <div class="ep-modal-body ep-modal-large" (click)="$event.stopPropagation()">
+        <div class="ep-detail-head">
+          <div>
+            <h3>{{ epAdminCommEditingId() ? '✏️ Modifica comunicazione' : '📢 Nuova comunicazione' }}</h3>
+            <p class="ep-list-meta">
+              Destinatari: tecnici del Portale Dipendenti.
+            </p>
+          </div>
+          <button type="button" class="chip-btn chip-gray ep-chip-small" (click)="epAdminCloseCommEditor()">✕</button>
+        </div>
+
+        <div class="ep-form">
+          <!-- Riga title + priority -->
+          <div class="ep-form-row">
+            <label class="ep-login-field">
+              <span>Titolo *</span>
+              <input type="text" class="ep-input" [value]="epAdminCommTitle()"
+                (input)="epAdminCommTitle.set($any($event.target).value)"
+                placeholder="Es. Installazione impianto Fiat Ducato">
+            </label>
+            <label>
+              <span>Priorità</span>
+              <select class="ep-input" [value]="epAdminCommPriority()"
+                (change)="epAdminSetPriorityFromInput($any($event.target).value)">
+                <option value="bassa">Bassa</option>
+                <option value="media">Media</option>
+                <option value="alta">ALTA (avviso urgente)</option>
+              </select>
+            </label>
+          </div>
+
+          <!-- Destinatari tecnici -->
+          <div class="ep-field-block">
+            <span class="ep-field-label">🧑‍🔧 Destinatari tecnici * (almeno 1 per inviare)</span>
+            <div class="ep-tech-picker">
+              @if (epAdminTechnicians().length === 0) {
+              <p class="ep-empty ep-dim">
+                Nessun tecnico attivo. Crea un tecnico da
+                <a routerLink="/dipendenti">Anagrafica Dipendenti</a>.
+              </p>
+              }
+              @for (t of epAdminTechnicians(); track t.id) {
+              <label class="ep-tech-chip" [class.ep-tech-chip-active]="epAdminCommTargetIds().includes(t.id)">
+                <input type="checkbox" [checked]="epAdminCommTargetIds().includes(t.id)"
+                  (change)="epAdminToggleTech(t.id)">
+                <span>{{ initialsOf(t.name) }}</span>
+                <div>
+                  <strong>{{ t.name }}</strong>
+                  <span class="ep-list-meta">
+                    {{ t.epPortalEnabled && !t.epPortalAccessRevokedAt ? '✅ Portale attivo' : '⚠️ Portale non attivo' }}
+                  </span>
+                </div>
+              </label>
+              }
+            </div>
+          </div>
+
+          <!-- Linked Quote + Appt -->
+          <div class="ep-form-row">
+            <label class="ep-login-field">
+              <span>🔗 Prevetivo collegato</span>
+              <select class="ep-input" [value]="epAdminCommLinkedQuoteId() || ''"
+                (change)="epAdminOnLinkedQuoteChange($any($event.target).value || null)">
+                <option value="">— Nessuno —</option>
+                @for (q of allQuotes().slice(0, 500); track q.id) {
+                <option [value]="q.id">
+                  {{ q.id }} · {{ q.customerName }} · € {{ q.value.toFixed(2) }} · {{ q.stage }}
+                </option>
+                }
+              </select>
+              <small class="ep-list-meta">
+                Selezionando un preventivo, le righe di tipo "materiale" vengono <strong>auto-importate</strong>
+                (associa poi manualmente ogni articolo di magazzino!).
+              </small>
+            </label>
+            <label class="ep-login-field">
+              <span>📅 Appuntamento (opzionale)</span>
+              <select class="ep-input" [value]="epAdminCommLinkedApptId() || ''"
+                (change)="epAdminCommLinkedApptId.set($any($event.target).value || null)">
+                <option value="">— Nessuno —</option>
+                @for (a of data.appointments().slice(0, 500); track a.id) {
+                <option [value]="a.id">
+                  {{ epFormatDateTime(a.scheduledAt) }} · {{ a.customerName }} · {{ a.technician || '—' }}
+                </option>
+                }
+              </select>
+            </label>
+          </div>
+
+          <!-- Corpo note -->
+          <label>
+            <span>Note / istruzioni per il tecnico</span>
+            <textarea rows="3" class="ep-input ep-textarea" [value]="epAdminCommBody()"
+              (input)="epAdminCommBody.set($any($event.target).value)"
+              placeholder="Es. Ritira DDT prima di partire, ricordati di portare cavi RCA e staffe..."></textarea>
+          </label>
+
+          <!-- Tabella righe -->
+          <div class="ep-field-block">
+            <span class="ep-field-label">🧰 Righe materiale (da scaricare poi da magazzino via app)</span>
+            <table class="ep-admin-comm-lines-table">
+              <thead>
+                <tr>
+                  <th>Descrizione</th>
+                  <th>Articolo di magazzino *</th>
+                  <th>Qty</th>
+                  <th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (l of epAdminCommLines(); track l.id) {
+                <tr [class.ep-line-warning]="l.requiredQuantity > 0 && !l.inventoryItemId"
+                  [class.ep-comm-line-loaded]="l.loadedQuantity > 0">
+                  <td>
+                    <span class="ep-comm-line-title">{{ l.description }}</span>
+                    @if (l.fromQuoteLineId) {
+                    <div class="ep-list-meta">
+                      🔗 da riga preventivo {{ l.fromQuoteLineId }}
+                    </div>
+                    }
+                  </td>
+                  <td>
+                    <!-- Picker esplicito articolo (nessun fuzzy matching) -->
+                    <select class="ep-input" [value]="l.inventoryItemId || ''"
+                      (change)="epAdminSetLineItem(l.id, $any($event.target).value || null)">
+                      <option value="">— Seleziona articolo —</option>
+                      @for (it of data.inventoryItems(); track it.id) {
+                      <option [value]="it.id">
+                        {{ it.name }}
+                        ({{ it.sku || 'no-sku' }} ·
+                        {{ it.category || '—' }} ·
+                        giac: {{ it.stock }})
+                      </option>
+                      }
+                    </select>
+                    @if (l.loadedQuantity > 0) {
+                    <div class="ep-list-meta ep-comm-line-loaded-meta">
+                      Già caricata: {{ l.loadedQuantity }} / {{ l.requiredQuantity }} · movimento: {{
+                      l.warehouseMovementId || '—' }}
+                    </div>
+                    }
+                  </td>
+                  <td>
+                    <input type="number" min="1" class="ep-input ep-numeric-input" [value]="l.requiredQuantity"
+                      [disabled]="l.loadedQuantity > 0"
+                      (change)="epAdminSetLineQty(l.id, epToNum($any($event.target).value))">
+                  </td>
+                  <td>
+                    <button type="button" class="chip-btn chip-warning" [disabled]="l.loadedQuantity > 0"
+                      (click)="epAdminRemoveLine(l.id)">
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+                } @empty {
+                <tr>
+                  <td colspan="4" class="ep-empty ep-dim">
+                    Nessuna riga materiale. Aggiungine una sotto oppure seleziona un preventivo per importarle.
+                  </td>
+                </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Aggiungi riga manuale -->
+          <div class="ep-field-block">
+            <span class="ep-field-label">➕ Aggiungi riga manuale</span>
+            <div class="ep-add-line-row">
+              <input type="text" class="ep-input ep-wide" [value]="epAdminNewLineForm.description"
+                (input)="epAdminNewLineForm.description = $any($event.target).value" placeholder="Es. Cavi RCA 5m">
+              <select class="ep-input" [value]="epAdminNewLineForm.inventoryItemId || ''"
+                (change)="epAdminNewLineForm.inventoryItemId = $any($event.target).value || null">
+                <option value="">— Articolo (opzionale) —</option>
+                @for (it of data.inventoryItems(); track it.id) {
+                <option [value]="it.id">
+                  {{ it.name }} (giac: {{ it.stock }})
+                </option>
+                }
+              </select>
+              <input type="number" min="1" class="ep-input ep-numeric-input"
+                [value]="epAdminNewLineForm.requiredQuantity"
+                (change)="epAdminNewLineForm.requiredQuantity = epToNum($any($event.target).value)">
+              <button type="button" class="btn-primary-sm" (click)="epAdminAddLine()">+ Aggiungi</button>
+            </div>
+          </div>
+
+          <!-- Azioni -->
+          <div class="ep-form-actions">
+            <button type="button" class="btn-ghost" (click)="epAdminCloseCommEditor()">Annulla</button>
+            <button type="button" class="btn-ghost" (click)="epAdminSaveComm(false)">💾 Salva bozza</button>
+            <button type="button" class="btn-primary" (click)="epAdminSaveComm(true)">📤 Invia ai tecnici</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    }
+  </div>
+  }
+
 
   <!-- ═══════════════ IMPOSTAZIONI ═══════════════ -->
   @case ('impostazioni') {
@@ -7004,7 +9086,8 @@
                   <span>:</span>
                   <select (change)="updateDefaultShiftField(dayMeta.key, 'breakToMinute', $any($event.target).value)">
                     @for (m of timeMinutes; track m) { <option [value]="m"
-                      [selected]="m === currentDraft.breakToMinute">{{ m }}</option> }
+                      [selected]="m === currentDraft.breakToMinute">
+                      {{ m }}</option> }
                   </select>
                 </div>
               </div>

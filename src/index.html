@@ -1,13 +1,79 @@
 <!DOCTYPE html>
 <html lang="it">
-  <head>
-    <meta charset="utf-8" />
-    <title>Audiomax</title>
-    <base href="/" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" type="image/x-icon" href="favicon.ico" />
-  </head>
-  <body>
-    <app-root></app-root>
-  </body>
+
+<head>
+  <meta charset="utf-8" />
+  <title>Audiomax</title>
+  <base href="/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  <script>
+    // Polyfill crypto.randomUUID() per contesti non sicuri (HTTP via LAN).
+    // Su HTTP (es. http://192.168.0.7:4201), Safari/iOS blocca crypto.randomUUID
+    // e crypto.subtle. Questo polyfill garantisce che crypto.randomUUID() funzioni
+    // sempre, anche sostituendo l'intero oggetto crypto se necessario.
+    (function () {
+      function makeUUID() {
+        var bytes = new Uint8Array(16);
+        var c = window.crypto;
+        if (c && c.getRandomValues) {
+          c.getRandomValues(bytes);
+        } else {
+          for (var i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+        }
+        bytes[6] = (bytes[6] & 0x0f) | 0x40; // versione 4
+        bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant RFC4122
+        var hex = [];
+        for (var j = 0; j < 16; j++) hex.push(bytes[j].toString(16).padStart(2, '0'));
+        return (
+          hex.slice(0, 4).join('') + '-' + hex.slice(4, 6).join('') + '-' +
+          hex.slice(6, 8).join('') + '-' + hex.slice(8, 10).join('') + '-' +
+          hex.slice(10, 16).join('')
+        );
+      }
+
+      // Se randomUUID esiste gia', non fare nulla
+      try {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') return;
+      } catch (e) { }
+
+      var baseCrypto = window.crypto || {};
+
+      // Tentativo 1: aggiungi randomUUID all'oggetto crypto esistente
+      try {
+        Object.defineProperty(baseCrypto, 'randomUUID', {
+          value: makeUUID,
+          configurable: true,
+          writable: true,
+        });
+        if (typeof window.crypto.randomUUID === 'function') return;
+      } catch (e) { }
+
+      // Tentativo 2: crea un nuovo oggetto crypto che eredita da quello esistente
+      try {
+        var newCrypto = Object.create(baseCrypto);
+        newCrypto.randomUUID = makeUUID;
+        Object.defineProperty(window, 'crypto', {
+          value: newCrypto,
+          configurable: true,
+          writable: true,
+        });
+        if (typeof window.crypto.randomUUID === 'function') return;
+      } catch (e) { }
+
+      // Tentativo 3: sostituisci direttamente window.crypto
+      try {
+        window.crypto = Object.assign({}, baseCrypto, { randomUUID: makeUUID });
+      } catch (e) { }
+
+      // Fallback globale: usato da epRandomUUID() come ultima risorsa
+      window.__epRandomUUID = makeUUID;
+    })();
+  </script>
+</head>
+
+<body>
+  <app-root></app-root>
+</body>
+
 </html>
