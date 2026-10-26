@@ -27,4 +27,19 @@ describe('App', () => {
     expect(compiled.querySelector('.brand-name')?.textContent).toContain('Audiomax');
     expect(compiled.querySelectorAll('.nav-section .nav-item').length).toBe(crmSections.length + 1);
   });
+
+  it('organizza tutte le sezioni una sola volta per flusso operativo', () => {
+    const fixture = TestBed.createComponent(App);
+    const groups = (fixture.componentInstance as any).navGroups as {
+      key: string; sections: { id: string }[];
+    }[];
+    const ids = groups.flatMap((group) => group.sections.map((section) => section.id));
+
+    expect(new Set(ids).size).toBe(crmSections.length);
+    expect(ids.length).toBe(crmSections.length);
+    expect(groups.find((group) => group.key === 'logistics')?.sections.map((section) => section.id))
+      .toEqual(['magazzino', 'ddt']);
+    expect(groups.find((group) => group.key === 'management')?.sections.map((section) => section.id))
+      .toEqual(['dipendenti', 'orari', 'spese', 'report']);
+  });
 });

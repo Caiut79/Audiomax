@@ -21,6 +21,10 @@ export class FormDraftService {
     return this.draftMeta()[key] ?? null;
   }
 
+  peekDraft<T>(key: string): { savedAt: string; value: T } | null {
+    return this.readDraft(key) as { savedAt: string; value: T } | null;
+  }
+
   registerForm(key: string, form: FormGroup, destroyRef: DestroyRef): void {
     const stored = this.readDraft(key);
     this.draftMeta.update((state) => ({

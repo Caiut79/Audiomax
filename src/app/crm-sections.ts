@@ -1,6 +1,7 @@
 export type CrmSectionId =
   | 'agenda'
   | 'magazzino'
+  | 'ddt'
   | 'spese'
   | 'cassa'
   | 'servizi'
@@ -59,6 +60,22 @@ export const crmSections: CrmSection[] = [
     ],
     metricLabel: 'Referenze attive',
     metricValue: '642',
+  },
+  {
+    id: 'ddt',
+    route: 'ddt',
+    label: 'DDT - Documenti di trasporto',
+    icon: '🚚',
+    summary: 'Gestione completa di DDT, consegne, bozze e documenti emessi.',
+    description:
+      'Crea DDT autonomi o da preventivo, controlla consegne parziali, stampa documenti e collega materiali, clienti e magazzino.',
+    highlights: [
+      'DDT da preventivo o manuale',
+      'Consegne parziali e storico tracciato',
+      'Integrazione con clienti, magazzino e ticket tecnici',
+    ],
+    metricLabel: 'DDT del mese',
+    metricValue: '0',
   },
   {
     id: 'spese',

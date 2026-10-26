@@ -39,50 +39,51 @@ export class App {
 
   protected readonly navGroups = [
     {
+      key: 'sales',
       label: 'Vendite',
       icon: 'VE',
-      ids: ['clienti', 'preventivi', 'cassa'],
-      sections: crmSections.filter((s) => ['clienti', 'preventivi', 'cassa'].includes(s.id)),
-    },
-    {
-      label: 'Operativo',
-      icon: 'OP',
-      ids: ['agenda', 'servizi', 'tecnico'],
-      sections: crmSections.filter((s) => ['agenda', 'servizi', 'tecnico'].includes(s.id)),
-    },
-    {
-      label: 'Gestione',
-      icon: 'GE',
-      ids: ['magazzino', 'spese', 'orari', 'dipendenti'],
-      sections: crmSections.filter((s) =>
-        ['magazzino', 'spese', 'orari', 'dipendenti'].includes(s.id),
+      ids: ['clienti', 'preventivi', 'cassa', 'ecommerce'],
+      sections: ['clienti', 'preventivi', 'cassa', 'ecommerce'].flatMap(
+        (id) => crmSections.filter((s) => s.id === id),
       ),
     },
     {
-      label: 'Sistema',
+      key: 'operations',
+      label: 'Interventi',
+      icon: 'OP',
+      ids: ['agenda', 'servizi', 'tecnico'],
+      sections: ['agenda', 'servizi', 'tecnico'].flatMap(
+        (id) => crmSections.filter((s) => s.id === id),
+      ),
+    },
+    {
+      key: 'logistics',
+      label: 'Materiali e consegne',
+      icon: 'MA',
+      ids: ['magazzino', 'ddt'],
+      sections: ['magazzino', 'ddt'].flatMap(
+        (id) => crmSections.filter((s) => s.id === id),
+      ),
+    },
+    {
+      key: 'management',
+      label: 'Azienda',
+      icon: 'GE',
+      ids: ['dipendenti', 'orari', 'spese', 'report'],
+      sections: ['dipendenti', 'orari', 'spese', 'report'].flatMap(
+        (id) => crmSections.filter((s) => s.id === id),
+      ),
+    },
+    {
+      key: 'system',
+      label: 'Portale e sistema',
       icon: 'SY',
-      ids: ['ecommerce', 'impostazioni', 'report'],
-      sections: crmSections.filter((s) =>
-        ['ecommerce', 'impostazioni', 'report'].includes(s.id),
+      ids: ['portal-comms-admin', 'employee-portal', 'impostazioni'],
+      sections: ['portal-comms-admin', 'employee-portal', 'impostazioni'].flatMap(
+        (id) => crmSections.filter((s) => s.id === id),
       ),
     },
   ];
-  protected readonly dashboardNavIcon = 'DB';
-  protected readonly navSectionIcons: Record<string, string> = {
-    clienti: 'CL',
-    preventivi: 'PR',
-    cassa: 'CA',
-    agenda: 'AG',
-    servizi: 'SV',
-    tecnico: 'TE',
-    magazzino: 'MG',
-    spese: 'SP',
-    orari: 'HR',
-    dipendenti: 'DP',
-    ecommerce: 'EC',
-    impostazioni: 'IM',
-    report: 'RP',
-  };
 
   protected readonly topMetrics = computed(() => [
     {

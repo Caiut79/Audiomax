@@ -1,8 +1,31 @@
 <section class="dashboard dashboard-simple">
+  <ng-template #dashboardIcon let-key>
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      @switch (key) {
+      @case ('contatti') {
+        <circle cx="9" cy="7" r="3" /><path d="M3 21v-3a5 5 0 0 1 10 0v3M16 4a3 3 0 0 1 0 6M17 14a4 4 0 0 1 4 4v3" />
+      }
+      @case ('preventivi') {
+        <path d="M14 3H5v18h14V8l-5-5ZM14 3v5h5M8 12h8M8 16h5" />
+      }
+      @case ('agenda') {
+        <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M8 3v4M16 3v4M3 11h18M8 15h2M14 15h2" />
+      }
+      @case ('cassa') {
+        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h4" />
+      }
+      @default {
+        <path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z" />
+      }
+      }
+    </svg>
+  </ng-template>
   <div class="dash-hero dash-hero-compact">
     <div class="dash-hero-main">
       <div class="dash-hero-title">
-        <h1>Panoramica operativa della giornata</h1>
+        <h1>Il lavoro di oggi</h1>
+        <p class="dash-hero-description">Appuntamenti, priorità e attività da seguire.</p>
       </div>
     </div>
     <div class="dash-hero-side">
@@ -68,7 +91,7 @@
   <div class="kpi-row kpi-row-compact">
     @for (metric of overviewMetrics(); track metric.label) {
       <a class="kpi-card" [class.kpi-blue]="metric.tone === 'kpi-blue'" [class.kpi-green]="metric.tone === 'kpi-green'" [class.kpi-orange]="metric.tone === 'kpi-orange'" [class.kpi-purple]="metric.tone === 'kpi-purple'" [routerLink]="metric.route">
-        <span class="kpi-icon">{{ metric.icon }}</span>
+        <span class="kpi-icon"><ng-container [ngTemplateOutlet]="dashboardIcon" [ngTemplateOutletContext]="{ $implicit: metric.icon }" /></span>
         <div class="kpi-body">
           <span class="kpi-value">{{ metric.value }}</span>
           <span class="kpi-label">{{ metric.label }}</span>
@@ -99,9 +122,9 @@
             <button class="btn-ghost btn-sm" (click)="todayCalendarPeriod()">Oggi</button>
             <button class="btn-ghost btn-sm" (click)="nextCalendarPeriod()">›</button>
           </div>
-          <button type="button" class="btn-primary btn-primary-hr"
+          <button type="button" class="btn-ghost"
                   (click)="openMiniHrDashboard(dashboardSelectedDate() || todayIso(), 'ferie')">
-            ⚡ Dip
+            Gestisci presenze
           </button>
           <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Nuovo</button>
           <a class="btn-ghost" routerLink="/agenda">Vai alla sezione</a>
@@ -209,7 +232,6 @@
       <section class="actions-section dash-panel" aria-label="Azioni rapide">
         <div class="dash-panel-head">
           <div>
-            <span class="dash-focus-kicker">Azioni rapide</span>
             <h2 class="section-title">Azioni rapide</h2>
           </div>
           <span class="badge badge-neutral dash-panel-count">{{ quickActions.length }}</span>
@@ -217,7 +239,7 @@
         <div class="actions-grid">
           @for (action of quickActions; track action.label) {
             <a class="action-btn" [class.action-btn-primary]="action === quickActions[0]" [routerLink]="action.route">
-              <span class="action-icon">{{ action.icon }}</span>
+              <span class="action-icon"><ng-container [ngTemplateOutlet]="dashboardIcon" [ngTemplateOutletContext]="{ $implicit: action.icon }" /></span>
               <strong class="action-label">{{ action.label }}</strong>
               <small class="action-caption">{{ action.caption }}</small>
             </a>

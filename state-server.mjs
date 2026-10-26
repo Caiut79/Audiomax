@@ -20,6 +20,43 @@ function sendJson(res, status, data) {
     res.end(JSON.stringify(data));
 }
 
+/**
+ * Merge degli operatori di cassa: preserva i campi epPortal* (credenziali/revoche)
+ * dallo stato esistente se lo stato in arrivo non li contiene.
+ * Questo evita che un dispositivo senza credenziali (es. telefono con stato seed)
+ * sovrascriva le credenziali impostate dal titolare sul PC.
+ */
+function mergeCashOperators(existingOps, incomingOps) {
+    if (!Array.isArray(incomingOps)) return existingOps;
+    if (!Array.isArray(existingOps) || existingOps.length === 0) return incomingOps;
+
+    const existingById = new Map(existingOps.map((o) => [o.id, o]));
+
+    return incomingOps.map((incomingOp) => {
+        const existingOp = existingById.get(incomingOp.id);
+        if (!existingOp) return incomingOp;
+
+        const existingHasPortal =
+            existingOp.epPortalEnabled === true || !!existingOp.epPortalAccessRevokedAt;
+        const incomingHasPortal =
+            incomingOp.epPortalEnabled === true || !!incomingOp.epPortalAccessRevokedAt;
+
+        // Se lo stato esistente ha credenziali/revoche e quello in arrivo no,
+        // preserva i campi epPortal* esistenti.
+        if (existingHasPortal && !incomingHasPortal) {
+            return {
+                ...incomingOp,
+                epPortalEnabled: existingOp.epPortalEnabled,
+                epPortalUsername: existingOp.epPortalUsername,
+                epPortalPasswordHash: existingOp.epPortalPasswordHash,
+                epPortalAccessRevokedAt: existingOp.epPortalAccessRevokedAt,
+                epPortalLastLoginAt: existingOp.epPortalLastLoginAt,
+            };
+        }
+        return incomingOp;
+    });
+}
+
 const server = http.createServer((req, res) => {
     // Gestisce solo /api/state
     if (!req.url || !req.url.startsWith('/api/state')) {
@@ -58,8 +95,25 @@ const server = http.createServer((req, res) => {
         });
         req.on('end', () => {
             try {
-                JSON.parse(body); // Valida JSON
-                fs.writeFileSync(stateFile, body, 'utf-8');
+                const incomingState = JSON.parse(body); // Valida JSON
+
+                // Merge cashOperators per preservare le credenziali del portale
+                if (fs.existsSync(stateFile)) {
+                    try {
+                        const existingRaw = fs.readFileSync(stateFile, 'utf-8');
+                        const existingState = JSON.parse(existingRaw);
+                        if (existingState.cashOperators && incomingState.cashOperators) {
+                            incomingState.cashOperators = mergeCashOperators(
+                                existingState.cashOperators,
+                                incomingState.cashOperators,
+                            );
+                        }
+                    } catch {
+                        // Se il file esistente è corrotto, ignora il merge e usa lo stato in arrivo
+                    }
+                }
+
+                fs.writeFileSync(stateFile, JSON.stringify(incomingState), 'utf-8');
                 sendJson(res, 200, { ok: true });
             } catch {
                 sendJson(res, 400, { error: 'JSON non valido' });

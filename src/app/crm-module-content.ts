@@ -126,6 +126,38 @@ export const crmModuleContent: Record<CrmSectionId, CrmModuleContent> = {
     ],
     integrations: ['Fornitori', 'Servizi', 'Servizio tecnico', 'E-commerce'],
   },
+  ddt: {
+    sectionId: 'ddt',
+    operationalStatus: 'Modulo DDT pronto per bozze, emissione, consegne e collegamenti a preventivi.',
+    owner: 'Logistica + amministrazione',
+    primaryAction: 'Nuovo DDT',
+    secondaryAction: 'Crea da preventivo',
+    metrics: [
+      { label: 'Bozze aperte', value: '0', detail: 'Documenti ancora da completare o verificare' },
+      { label: 'Emessi oggi', value: '0', detail: 'DDT pronti per trasporto o consegna' },
+      { label: 'Consegne parziali', value: '0', detail: 'Preventivi con materiale consegnato in più tranche' },
+    ],
+    workflow: [
+      { label: 'Bozze', value: '0', state: 'neutral' },
+      { label: 'Emessi', value: '0', state: 'ok' },
+      { label: 'Da verificare', value: '0', state: 'warning' },
+    ],
+    queue: [
+      {
+        title: 'Nessun DDT in evidenza',
+        subtitle: 'Le prossime consegne appariranno qui con causale, cliente e stato.',
+        owner: 'Logistica',
+        status: 'Pronto',
+        due: 'Oggi',
+      },
+    ],
+    checklist: [
+      'Verificare causale, destinazione e colli prima dell’emissione',
+      'Usare il collegamento a preventivo per consegne parziali',
+      'Annullare i documenti mantenendo sempre traccia della motivazione',
+    ],
+    integrations: ['Clienti', 'Preventivi', 'Magazzino', 'Servizio tecnico'],
+  },
   spese: {
     sectionId: 'spese',
     operationalStatus: 'Spese organizzate per categoria, fornitore e centro di costo.',

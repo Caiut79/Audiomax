@@ -36,12 +36,15 @@ import {
   WarehousePositionRecord,
   WarehousePurchaseRecord,
   WarehouseDdtLineRecord,
+  WarehouseDdtPartySnapshot,
   WarehouseDdtRecord,
+  WarehouseDdtStatusHistoryEntry,
   PendingServiceRecord,
   WarehouseOrderLineRecord,
   WarehouseOrderRecord,
   PortalCommunicationRecord,
   PortalCommunicationLine,
+  PortalSettings,
   generatePortaleDipendentiCode,
   createClientPrivacyProfile,
   initialAudiomaxState,
@@ -304,8 +307,14 @@ export class AudiomaxDataService {
   private localPersistTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPersistedState: string | null = null;
   private lastPersistedState = '';
-  /** AbortController per cancellare richieste pushToServer sovrapposte o stale */
-  private pushAbortController: AbortController | null = null;
+  /** Flag che indica se una push al server LAN è in corso (evita richieste concorrenti) */
+  private isPushing = false;
+  /** Ultimo stato serializzato in attesa di essere pushato (sostituito dal più recente) */
+  private pendingPushState: string | null = null;
+  /** Promise che si risolve quando il primo caricamento dello stato dal server LAN è completato */
+  private readonly initialServerLoad: Promise<void>;
+  /** True quando il primo caricamento dello stato dal server LAN è completato */
+  readonly serverStateReady = signal<boolean>(false);
   readonly currentUserRole = signal<AppUserRole>('admin');
 
   readonly clients = signal<ClientRecord[]>(initialAudiomaxState.clients);
@@ -373,6 +382,13 @@ export class AudiomaxDataService {
   readonly warehouseOrders = signal<WarehouseOrderRecord[]>(initialAudiomaxState.warehouseOrders);
   // ===== Portale Dipendenti v2: comunicazioni dal titolare ai tecnici =====
   readonly portalCommunications = signal<PortalCommunicationRecord[]>(initialAudiomaxState.portalCommunications);
+  // ===== Impostazioni Portale Dipendenti (configurabili dal CRM) =====
+  readonly portalSettings = signal<PortalSettings>(initialAudiomaxState.portalSettings);
+
+  /** Aggiorna le impostazioni del portale dipendenti */
+  updatePortalSettings(patch: Partial<PortalSettings>): void {
+    this.portalSettings.update((current) => ({ ...current, ...patch }));
+  }
   // ===== Costante SHA-256 salt per hash password portale =====
   readonly EP_PORTAL_PASSWORD_SALT = 'AUDIOMAX_EP_V2_SALT_2026';
   // ===== Durata sessione portale: 2 ore (TTL) =====
@@ -626,11 +642,14 @@ export class AudiomaxDataService {
       this.scheduleLocalPersist(this.serializeSnapshot());
     });
 
-    // Carica lo stato condiviso dal server LAN (per sincronizzare PC ↔ telefono)
-    // e poi reinvia lo stato locale per assicurare che il server sia aggiornato
-    void this.loadFromServer().then(() => {
-      void this.pushToServer(this.serializeSnapshot());
-    });
+    // Carica lo stato condiviso dal server LAN (per sincronizzare PC ↔ telefono).
+    // Salviamo la promise così il login può aspettare che le credenziali siano caricate.
+    // Non facciamo push qui: l'effect di persistenza lo farà automaticamente non appena
+    // serverStateReady diventa true, evitando push duplicate/concorrenti all'avvio.
+    this.initialServerLoad = this.loadFromServer()
+      .finally(() => {
+        this.serverStateReady.set(true);
+      });
 
     if (this.supabase.isConfigured) {
       void this.loadRemoteState().catch((err) => {
@@ -1509,6 +1528,90 @@ export class AudiomaxDataService {
     return consumedTotal;
   }
 
+  returnInventoryStockByItemId(params: {
+    inventoryItemId: string;
+    quantity: number;
+    reason: string;
+    documentNumber: string;
+    operator: string;
+    sourceModule: WarehouseMovementRecord['sourceModule'];
+  }): number {
+    const quantity = Math.max(0, Number(params.quantity) || 0);
+
+    if (!quantity) {
+      return 0;
+    }
+
+    const inventoryItem = this.inventoryItems().find((item) => item.id === params.inventoryItemId);
+
+    if (!inventoryItem) {
+      return 0;
+    }
+
+    const nowIso = new Date().toISOString();
+    const lastLot = this.warehouseLots()
+      .filter((lot) => lot.inventoryItemId === params.inventoryItemId)
+      .sort((left, right) => right.receivedDate.localeCompare(left.receivedDate))[0];
+    const lotId = `lot-${crypto.randomUUID()}`;
+    const lotCode = `RET-${String(this.warehouseLots().filter((lot) => lot.inventoryItemId === params.inventoryItemId).length + 1).padStart(3, '0')}`;
+    const unitCost = lastLot?.unitCost ?? inventoryItem.unitCost;
+    const salePrice = lastLot?.salePrice ?? inventoryItem.salePrice;
+
+    this.warehouseLots.update((items) => [
+      {
+        id: lotId,
+        inventoryItemId: inventoryItem.id,
+        lotCode,
+        barcode: lastLot?.barcode ?? inventoryItem.barcode,
+        supplier: inventoryItem.supplier,
+        receivedDate: nowIso.slice(0, 10),
+        receivedQuantity: quantity,
+        availableQuantity: quantity,
+        reservedQuantity: 0,
+        unitCost,
+        salePrice,
+        expiryDate: null,
+        shelfCode: inventoryItem.location,
+        purchaseDocumentNumber: params.documentNumber,
+      },
+      ...items,
+    ]);
+
+    this.warehouseMovements.update((items) => [
+      {
+        id: `wmov-${crypto.randomUUID()}`,
+        inventoryItemId: inventoryItem.id,
+        lotId,
+        movementType: 'rettifica+/-',
+        quantity,
+        unitCost,
+        totalCost: quantity * unitCost,
+        documentNumber: params.documentNumber,
+        reason: params.reason,
+        operator: params.operator,
+        sourceModule: params.sourceModule,
+        movedAt: nowIso,
+      },
+      ...items,
+    ]);
+
+    this.updateInventoryItem({
+      ...inventoryItem,
+      stock: inventoryItem.stock + quantity,
+    });
+
+    this.appendWarehouseAudit({
+      entityType: 'movement',
+      entityId: lotId,
+      action: 'create',
+      detail: `Rientro magazzino ${quantity} pz documento ${params.documentNumber}`,
+      actor: params.operator,
+      createdAt: nowIso,
+    });
+
+    return quantity;
+  }
+
   adjustInventoryQuantity(params: {
     inventoryItemId: string;
     actualQuantity: number;
@@ -1662,6 +1765,88 @@ export class AudiomaxDataService {
   }
 
   // ============ Portale Dipendenti v1: DDT ============
+  private emptyDdtPartySnapshot(): WarehouseDdtPartySnapshot {
+    return {
+      name: '',
+      address: '',
+      postalCode: '',
+      city: '',
+      province: '',
+      vatNumber: '',
+      taxCode: '',
+    };
+  }
+
+  private buildDefaultSenderSnapshot(): WarehouseDdtPartySnapshot {
+    const company = this.companyProfile();
+    return {
+      name: company.legalName ?? '',
+      address: company.address ?? '',
+      postalCode: company.postalCode ?? '',
+      city: company.city ?? '',
+      province: company.province ?? '',
+      vatNumber: company.vatNumber ?? '',
+      taxCode: company.taxCode ?? '',
+    };
+  }
+
+  private buildWarehouseDdtNumberFallback(
+    referenceDate: string,
+    series = 'A',
+    source: WarehouseDdtRecord[] = this.warehouseDdts(),
+  ): string {
+    const date = new Date(referenceDate || new Date().toISOString());
+    const year = String(date.getFullYear());
+    const normalizedSeries = (series || 'A').trim().toUpperCase() || 'A';
+    let max = 0;
+
+    for (const item of source) {
+      const number = String(item.number || '').trim();
+      if (!number) {
+        continue;
+      }
+
+      const current =
+        number.match(new RegExp(`^DDT-${year}-${normalizedSeries}-(\\d{4})$`)) ??
+        (normalizedSeries === 'A' ? number.match(new RegExp(`^DDT-EP-${year}-(\\d{4})$`)) : null);
+
+      if (!current) {
+        continue;
+      }
+
+      const parsed = Number(current[1] ?? 0);
+      if (Number.isFinite(parsed) && parsed > max) {
+        max = parsed;
+      }
+    }
+
+    return `DDT-${year}-${normalizedSeries}-${String(max + 1).padStart(4, '0')}`;
+  }
+
+  async reserveWarehouseDdtNumber(referenceDate: string, series = 'A'): Promise<string> {
+    const date = new Date(referenceDate || new Date().toISOString());
+    const documentYear = date.getFullYear();
+    const normalizedSeries = (series || 'A').trim().toUpperCase() || 'A';
+    const client = this.supabase.client;
+
+    if (client && this.isRemoteTableEnabled('warehouseDdts')) {
+      try {
+        const { data, error } = await client.rpc('crm_next_ddt_number', {
+          p_document_year: documentYear,
+          p_series: normalizedSeries,
+        });
+
+        if (!error && typeof data === 'string' && data.trim().length > 0) {
+          return data;
+        }
+      } catch {
+        // Fallback locale: mantiene la compatibilità anche senza funzione SQL.
+      }
+    }
+
+    return this.buildWarehouseDdtNumberFallback(referenceDate, normalizedSeries);
+  }
+
   /**
    * Crea un nuovo DDT come bozza. Il numero progressivo viene assegnato
    * nel momento dell'emissione (updateWarehouseDdtStatus → 'emesso').
@@ -1676,15 +1861,52 @@ export class AudiomaxDataService {
       id: `ddt-${crypto.randomUUID()}`,
       number: payload.number ?? '', // numero assegnato in emissione
       createdAt: payload.createdAt ?? new Date().toISOString(),
+      documentDate: payload.documentDate ?? (payload.createdAt ?? new Date().toISOString()).slice(0, 10),
       emittedAt: null,
       deliveredAt: null,
+      annulledAt: null,
+      transportStartAt: payload.transportStartAt ?? null,
       status: 'bozza',
       lines: payload.lines ?? [],
+      clientCode: payload.clientCode ?? '',
+      originType: payload.originType ?? 'manuale',
+      series: payload.series ?? 'A',
+      linkedQuoteId: payload.linkedQuoteId ?? null,
+      linkedQuoteNumber: payload.linkedQuoteNumber ?? null,
+      linkedTicketId: payload.linkedTicketId ?? null,
+      linkedAppointmentId: payload.linkedAppointmentId ?? null,
+      causale: payload.causale ?? 'Vendita',
+      departurePlace: payload.departurePlace ?? '',
+      destinationPlace: payload.destinationPlace ?? payload.destination ?? '',
+      carrierName: payload.carrierName ?? '',
+      transportMethod: payload.transportMethod ?? '',
+      packageCount: payload.packageCount ?? null,
+      packagingType: payload.packagingType ?? '',
+      weight: payload.weight ?? '',
       vehicle: payload.vehicle ?? '',
       destination: payload.destination ?? '',
       note: payload.note ?? '',
+      internalNote: payload.internalNote ?? '',
+      referenceOrder: payload.referenceOrder ?? '',
+      referenceJob: payload.referenceJob ?? '',
+      referenceOther: payload.referenceOther ?? '',
       clientId: payload.clientId ?? null,
       clientSnapshot: payload.clientSnapshot ?? '',
+      senderSnapshot: payload.senderSnapshot ?? this.buildDefaultSenderSnapshot(),
+      recipientSnapshot: payload.recipientSnapshot ?? this.emptyDdtPartySnapshot(),
+      deliverySnapshot: payload.deliverySnapshot ?? this.emptyDdtPartySnapshot(),
+      inventoryMode: payload.inventoryMode ?? (payload.alsoDeduct ? 'scarico' : 'nessuno'),
+      inventoryMovementAppliedAt: payload.inventoryMovementAppliedAt ?? null,
+      inventoryReturnAppliedAt: payload.inventoryReturnAppliedAt ?? null,
+      alsoDeduct: payload.alsoDeduct ?? false,
+      cancellationReason: payload.cancellationReason ?? '',
+      statusHistory: payload.statusHistory ?? [{
+        status: 'bozza',
+        at: payload.createdAt ?? new Date().toISOString(),
+        byOperatorId: payload.createdByOperatorId,
+        byOperatorName: payload.createdByOperatorName,
+        note: 'Creazione documento',
+      }],
       createdByOperatorId: payload.createdByOperatorId,
       createdByOperatorName: payload.createdByOperatorName,
     };
@@ -1700,7 +1922,14 @@ export class AudiomaxDataService {
   updateWarehouseDdtStatus(
     id: string,
     next: WarehouseDdtRecord['status'],
-    opts: { assignNumberIfMissing?: boolean } = { assignNumberIfMissing: true },
+    opts: {
+      assignNumberIfMissing?: boolean;
+      assignedNumber?: string;
+      operatorId?: string;
+      operatorName?: string;
+      note?: string;
+      cancellationReason?: string;
+    } = { assignNumberIfMissing: true },
   ): WarehouseDdtRecord | null {
     let updated: WarehouseDdtRecord | null = null;
     this.warehouseDdts.update((items) =>
@@ -1708,12 +1937,31 @@ export class AudiomaxDataService {
         if (it.id !== id) return it;
         const now = new Date().toISOString();
         let number = it.number;
-        if (next === 'emesso' && opts.assignNumberIfMissing && !number) {
-          number = generatePortaleDipendentiCode('DDT', it.createdAt ?? now, items);
+        if (next === 'emesso' && !number && opts.assignedNumber) {
+          number = opts.assignedNumber;
+        } else if (next === 'emesso' && opts.assignNumberIfMissing && !number) {
+          number = this.buildWarehouseDdtNumberFallback(it.documentDate || it.createdAt || now, it.series ?? 'A', items);
         }
-        const patch: Partial<WarehouseDdtRecord> = { status: next, number };
+        const historyEntry: WarehouseDdtStatusHistoryEntry = {
+          status: next,
+          at: now,
+          byOperatorId: opts.operatorId ?? it.createdByOperatorId,
+          byOperatorName: opts.operatorName ?? it.createdByOperatorName,
+          note:
+            opts.note ??
+            (next === 'annullato'
+              ? opts.cancellationReason || 'Documento annullato'
+              : `Stato aggiornato a ${next}`),
+        };
+        const patch: Partial<WarehouseDdtRecord> = {
+          status: next,
+          number,
+          cancellationReason: next === 'annullato' ? opts.cancellationReason ?? it.cancellationReason ?? '' : it.cancellationReason ?? '',
+          statusHistory: [...(it.statusHistory ?? []), historyEntry],
+        };
         if (next === 'emesso' && !it.emittedAt) patch.emittedAt = now;
         if (next === 'consegnato' && !it.deliveredAt) patch.deliveredAt = now;
+        if (next === 'annullato' && !it.annulledAt) patch.annulledAt = now;
         updated = { ...it, ...patch };
         return updated;
       }),
@@ -1728,13 +1976,28 @@ export class AudiomaxDataService {
     this.queueRemoteSync('warehouse-ddt', record);
   }
 
+  deleteWarehouseDdt(id: string): void {
+    this.warehouseDdts.update((items) => items.filter((item) => item.id !== id));
+    this.queueRemoteDelete('warehouse-ddt', id);
+  }
+
   // ============ Portale Dipendenti v1: Servizi pendenti da incassare ============
   addPendingService(
     payload: Omit<
       PendingServiceRecord,
-      'id' | 'createdAt' | 'status' | 'paidAt' | 'linkedCashTransactionId' | 'totalAmount'
+      | 'id'
+      | 'createdAt'
+      | 'status'
+      | 'paidAt'
+      | 'linkedCashTransactionId'
+      | 'totalAmount'
+      | 'targetCashOperatorId'
+      | 'targetCashOperatorName'
     > & {
       totalAmount?: number;
+      /** Operatore di cassa assegnato (opzionale) */
+      targetCashOperatorId?: string | null;
+      targetCashOperatorName?: string | null;
     },
   ): PendingServiceRecord {
     const total = payload.totalAmount ?? payload.priceUnit * payload.quantity;
@@ -1744,6 +2007,8 @@ export class AudiomaxDataService {
       status: 'inviato',
       paidAt: null,
       linkedCashTransactionId: null,
+      targetCashOperatorId: payload.targetCashOperatorId ?? null,
+      targetCashOperatorName: payload.targetCashOperatorName ?? null,
       totalAmount: total,
       ...payload,
     };
@@ -2136,10 +2401,21 @@ export class AudiomaxDataService {
     plainPassword: string,
   ): Promise<CashOperatorRecord | null> {
     if (!username || !plainPassword) return null;
+    // Aspetta che il caricamento iniziale dello stato dal server LAN sia completato,
+    // così le credenziali impostate dal titolare sono disponibili anche su dispositivi nuovi.
+    await this.initialServerLoad;
     const usernameClean = String(username).trim().toLowerCase();
-    const candidate = this.cashOperators().find(
+    let candidate = this.cashOperators().find(
       (op) => !!op.epPortalUsername && op.epPortalUsername.toLowerCase() === usernameClean,
     );
+    // Fallback: se l'utente non è trovato in locale, ricarica lo stato dal server
+    // (potrebbe essere stato creato/modificato dopo il primo caricamento).
+    if (!candidate && this.isLanSyncEnabled) {
+      await this.loadFromServer();
+      candidate = this.cashOperators().find(
+        (op) => !!op.epPortalUsername && op.epPortalUsername.toLowerCase() === usernameClean,
+      );
+    }
     if (!candidate) return null;
     if (!candidate.epPortalPasswordHash) return null;
     // Check prima i controlli semplici (prima di spendere tempo nell'hash)
@@ -2916,6 +3192,8 @@ export class AudiomaxDataService {
       warehouseOrders: this.warehouseOrders(),
       // ===== Portale Dipendenti v2 =====
       portalCommunications: this.portalCommunications(),
+      // ===== Impostazioni Portale Dipendenti =====
+      portalSettings: this.portalSettings(),
       // ===== NUOVI Task 1: negozio chiusure =====
       storeClosingDaysWeekly: this.storeClosingDaysWeekly(),
       storeExtraOpeningDates: this.storeExtraOpeningDates(),
@@ -2964,7 +3242,12 @@ export class AudiomaxDataService {
       this.restoreCollectionState(this.expenseInstallments, parsedState.expenseInstallments);
       this.restoreCollectionState(this.expenseNotifications, parsedState.expenseNotifications);
       this.restoreCollectionState(this.expenseAuditLog, parsedState.expenseAuditLog);
-      this.restoreCollectionState(this.cashOperators, parsedState.cashOperators);
+      // ===== Merge cashOperators: preserva i campi epPortal* (credenziali/revoche) locali =====
+      // Non sovrascriviamo ciecamente gli operatori locali con quelli remoti: se il locale
+      // ha credenziali attive o una revoca e il remoto no, teniamo i campi epPortal del locale.
+      // Questo evita che un dispositivo con stato seed (senza credenziali) sovrascriva
+      // le credenziali impostate dal titolare sul PC.
+      this.mergeCashOperatorsFromRemote(parsedState.cashOperators);
       this.restoreCollectionState(this.employeeLeaves, parsedState.employeeLeaves);
       this.restoreCollectionState(this.employeeAttendanceRecords, parsedState.employeeAttendanceRecords);
       this.cashOperators.update((items) =>
@@ -2987,7 +3270,25 @@ export class AudiomaxDataService {
       // ===== Portale Dipendenti v1 =====
       this.restoreCollectionState(this.warehouseDdts, parsedState.warehouseDdts);
       this.restoreCollectionState(this.pendingServices, parsedState.pendingServices);
+      // Retrocompatibilità: garantisce i nuovi campi di assegnazione operatore di cassa
+      this.pendingServices.update((items) =>
+        items.map((item) => ({
+          ...item,
+          targetCashOperatorId: item.targetCashOperatorId ?? null,
+          targetCashOperatorName: item.targetCashOperatorName ?? null,
+        })),
+      );
       this.restoreCollectionState(this.warehouseOrders, parsedState.warehouseOrders);
+      // ===== Portale Dipendenti v2: comunicazioni gestionale → tecnici =====
+      // Senza questo ripristino le comunicazioni inviate dal titolare non arrivano mai
+      // al portale del dipendente: restano solo in memoria fino al primo reload.
+      this.restoreCollectionState(this.portalCommunications, parsedState.portalCommunications);
+      // ===== Impostazioni Portale Dipendenti (con fallback ai default per retrocompatibilità) =====
+      this.restoreValueState(this.portalSettings, parsedState.portalSettings);
+      this.portalSettings.update((current) => ({
+        ...initialAudiomaxState.portalSettings,
+        ...(current ?? ({} as PortalSettings)),
+      }));
       // ===== NUOVI Task 1: ripristina impostazioni negozio + fallback defaults per retrocompatibilità =====
       this.restoreCollectionState(this.storeExtraOpeningDates, parsedState.storeExtraOpeningDates);
       this.restoreCollectionState(this.storeBulkClosures, parsedState.storeBulkClosures);
@@ -3038,35 +3339,40 @@ export class AudiomaxDataService {
   /**
    * Invia lo stato corrente al server LAN per condividerlo con altri dispositivi.
    * Chiamato automaticamente dopo la persistenza locale.
+   *
+   * Evita richieste concorrenti: se una push è già in corso, salva l'ultimo stato
+   * in attesa e lo invia subito dopo il completamento della push corrente.
+   * NON usa AbortController perché l'abort di una fetch genera log `net::ERR_ABORTED`
+   * in console a livello di rete (non sopprimibili con try/catch).
    */
   private async pushToServer(serializedState: string): Promise<void> {
     if (!this.isLanSyncEnabled) return;
 
-    // Cancello eventuali richieste precedenti ancora in volo per evitare sovrapposizioni
-    if (this.pushAbortController) {
-      this.pushAbortController.abort();
+    // Se una push è già in corso, tieni da parte l'ultimo stato (sovrascrive il precedente)
+    // e invialo appena la push corrente termina.
+    if (this.isPushing) {
+      this.pendingPushState = serializedState;
+      return;
     }
-    this.pushAbortController = new AbortController();
 
-    // keepalive ha un limite di 64KB per il body: se lo stato è più grande, uso una fetch normale
-    const bodySize = new Blob([serializedState]).size;
-    const canUseKeepalive = bodySize < 64 * 1024;
+    this.isPushing = true;
 
     try {
       await fetch('/api/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: serializedState,
-        // keepalive permette alla richiesta di completarsi anche se la pagina viene ricaricata/chiusa
-        keepalive: canUseKeepalive,
-        signal: this.pushAbortController.signal,
       });
-    } catch (err) {
-      // Ignoro errori di abort (richiesta cancellata da una push più recente)
-      // e errori di rete (server non disponibile): i dati restano salvati in locale
-      if ((err as DOMException)?.name === 'AbortError') return;
+    } catch {
+      // Ignoro errori di rete (server non disponibile): i dati restano salvati in locale
     } finally {
-      this.pushAbortController = null;
+      this.isPushing = false;
+      // Se c'è uno stato in attesa più recente, lo invio subito
+      if (this.pendingPushState) {
+        const nextState = this.pendingPushState;
+        this.pendingPushState = null;
+        void this.pushToServer(nextState);
+      }
     }
   }
 
@@ -3096,8 +3402,12 @@ export class AudiomaxDataService {
       if (didPersist) {
         this.lastPersistedState = persistedState;
       }
-      // Sincronizza lo stato con il server LAN per condividerlo con altri dispositivi
-      void this.pushToServer(persistedState);
+      // Sincronizza lo stato con il server LAN per condividerlo con altri dispositivi.
+      // ⚠️ Non pushare finché non abbiamo caricato lo stato dal server, altrimenti
+      //    sovrascriveremmo i dati condivisi (es. credenziali portale) con lo stato locale vuoto.
+      if (this.serverStateReady()) {
+        void this.pushToServer(persistedState);
+      }
       this.pendingPersistedState = null;
       this.localPersistTimer = null;
     }, this.localPersistDelayMs);
@@ -3113,6 +3423,55 @@ export class AudiomaxDataService {
     if (value !== undefined) {
       target.set(value);
     }
+  }
+
+  /**
+   * Merge degli operatori di cassa dallo stato remoto (LAN o localStorage).
+   * Preserva i campi epPortal* locali (credenziali/revoche) quando lo stato remoto
+   * non li contiene, evitando che un dispositivo senza credenziali sovrascriva
+   * quelle impostate dal titolare.
+   *
+   * Regola: per ogni operatore, se il locale ha epPortalEnabled===true O una revoca
+   * e il remoto non ha nessuno dei due, teniamo i campi epPortal del locale.
+   * Operatori presenti solo in locale vengono mantenuti (append).
+   */
+  private mergeCashOperatorsFromRemote(remoteOperators: CashOperatorRecord[] | undefined): void {
+    if (!remoteOperators?.length) {
+      // Nessun operatore remoto: mantieni lo stato locale invariato
+      return;
+    }
+    const localOperators = this.cashOperators();
+    const localById = new Map(localOperators.map((o) => [o.id, o]));
+    const remoteIds = new Set(remoteOperators.map((o) => o.id));
+
+    const merged: CashOperatorRecord[] = remoteOperators.map((remoteOp) => {
+      const localOp = localById.get(remoteOp.id);
+      if (!localOp) return remoteOp;
+
+      const localHasPortal = localOp.epPortalEnabled === true || !!localOp.epPortalAccessRevokedAt;
+      const remoteHasPortal = remoteOp.epPortalEnabled === true || !!remoteOp.epPortalAccessRevokedAt;
+
+      if (localHasPortal && !remoteHasPortal) {
+        return {
+          ...remoteOp,
+          epPortalEnabled: localOp.epPortalEnabled,
+          epPortalUsername: localOp.epPortalUsername,
+          epPortalPasswordHash: localOp.epPortalPasswordHash,
+          epPortalAccessRevokedAt: localOp.epPortalAccessRevokedAt,
+          epPortalLastLoginAt: localOp.epPortalLastLoginAt,
+        };
+      }
+      return remoteOp;
+    });
+
+    // Aggiungi operatori presenti solo in locale (non nel remoto)
+    for (const localOp of localOperators) {
+      if (!remoteIds.has(localOp.id)) {
+        merged.push(localOp);
+      }
+    }
+
+    this.cashOperators.set(merged);
   }
 
   private migrateLegacyWarehouseCablingState(): void {
@@ -3167,6 +3526,67 @@ export class AudiomaxDataService {
       }
     }
     return merged;
+  }
+
+  /**
+   * Riconosce gli errori di "tabella inesistente" restituiti da Supabase.
+   * PostgREST restituisce `PGRST205` (tabella assente dalla cache dello schema),
+   * mentre PostgreSQL restituisce `42P01` (relation does not exist).
+   * Entrambi vanno trattati come "schema mancante" e NON come errore bloccante,
+   * altrimenti una tabella opzionale assente bloccherebbe l'intera sincronizzazione.
+   */
+  private isMissingTableError(error: { code?: string } | null | undefined): boolean {
+    // 42P01/PGRST205 = tabella mancante; 42703/PGRST204 = colonna mancante (schema da aggiornare)
+    return (
+      error?.code === '42P01' ||
+      error?.code === 'PGRST205' ||
+      error?.code === '42703' ||
+      error?.code === 'PGRST204'
+    );
+  }
+
+  /**
+   * Alcune tabelle opzionali non sono ancora state create su Supabase.
+   * Quando sono disattivate in config evitiamo direttamente le chiamate remote,
+   * così non produciamo 404 in console ma manteniamo il badge "schema richiesto".
+   */
+  private isRemoteTableEnabled(
+    table:
+      | 'cashOperators'
+      | 'warehouseDdts'
+      | 'pendingServices'
+      | 'warehouseOrders'
+      | 'portalCommunications',
+  ): boolean {
+    return supabaseConfig.remoteSyncEnabled[table] !== false;
+  }
+
+  private hasDisabledOptionalRemoteTables(): boolean {
+    return Object.values(supabaseConfig.remoteSyncEnabled).some((enabled) => enabled === false);
+  }
+
+  private isRemoteKindEnabled(
+    kind:
+      | 'client'
+      | 'quote'
+      | 'appointment'
+      | 'inventory'
+      | 'cash-product'
+      | 'cash-transaction'
+      | 'cash-shift'
+      | 'ticket'
+      | 'cash-operator'
+      | 'warehouse-ddt'
+      | 'pending-service'
+      | 'warehouse-order'
+      | 'portal-communication',
+  ): boolean {
+    if (kind === 'cash-operator') return this.isRemoteTableEnabled('cashOperators');
+    if (kind === 'warehouse-ddt') return this.isRemoteTableEnabled('warehouseDdts');
+    if (kind === 'pending-service') return this.isRemoteTableEnabled('pendingServices');
+    if (kind === 'warehouse-order') return this.isRemoteTableEnabled('warehouseOrders');
+    if (kind === 'portal-communication') return this.isRemoteTableEnabled('portalCommunications');
+    return true;
   }
 
   private async loadRemoteState(): Promise<void> {
@@ -3235,39 +3655,58 @@ export class AudiomaxDataService {
           )
           .order('created_at', { ascending: false }),
         // ===== Portale Dipendenti v1 =====
-        client
-          .from(supabaseConfig.tables.warehouseDdts)
-          .select('*')
-          .order('created_at', { ascending: false }),
-        client
-          .from(supabaseConfig.tables.pendingServices)
-          .select('*')
-          .order('created_at', { ascending: false }),
-        client
-          .from(supabaseConfig.tables.warehouseOrders)
-          .select('*')
-          .order('created_at', { ascending: false }),
+        this.isRemoteTableEnabled('warehouseDdts')
+          ? client
+            .from(supabaseConfig.tables.warehouseDdts)
+            .select('*')
+            .order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        this.isRemoteTableEnabled('pendingServices')
+          ? client
+            .from(supabaseConfig.tables.pendingServices)
+            .select('*')
+            .order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        this.isRemoteTableEnabled('warehouseOrders')
+          ? client
+            .from(supabaseConfig.tables.warehouseOrders)
+            .select('*')
+            .order('created_at', { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
-    const firstError =
-      clientsResult.error ??
-      quotesResult.error ??
-      appointmentsResult.error ??
-      inventoryItemsResult.error ??
-      cashProductsResult.error ??
-      cashTransactionsResult.error ??
-      cashShiftsResult.error ??
-      serviceTicketsResult?.error ??
-      // Portale Dipendenti: se la tabella non esiste, trattiamo come
-      // "schema-required" (non è un errore bloccante, dato che vivono in localStorage).
-      (warehouseDdtsResult?.error?.code === '42P01' ? null : warehouseDdtsResult?.error) ??
-      (pendingServicesResult?.error?.code === '42P01' ? null : pendingServicesResult?.error) ??
-      (warehouseOrdersResult?.error?.code === '42P01' ? null : warehouseOrdersResult?.error);
+    // Raccogli gli errori di tutte le query. Gli errori di "tabella mancante"
+    // (PGRST205/42P01) NON sono bloccanti: le tabelle del portale vivono anche in
+    // localStorage e la loro assenza non deve impedire il caricamento delle altre.
+    const allResults = [
+      clientsResult,
+      quotesResult,
+      appointmentsResult,
+      inventoryItemsResult,
+      cashProductsResult,
+      cashTransactionsResult,
+      cashShiftsResult,
+      serviceTicketsResult,
+      warehouseDdtsResult,
+      pendingServicesResult,
+      warehouseOrdersResult,
+    ];
 
-    if (firstError) {
-      this.supabase.connectionState.set(firstError.code === '42P01' ? 'schema-required' : 'error');
+    // Un errore reale (non "tabella mancante") blocca il caricamento.
+    const blockingError = allResults
+      .map((result) => result?.error)
+      .find((error) => error && !this.isMissingTableError(error));
+
+    if (blockingError) {
+      this.supabase.connectionState.set('error');
       return;
     }
+
+    // Se manca una tabella opzionale, lo segnaliamo con 'schema-required' ma
+    // continuiamo a caricare i dati disponibili (comportamento non bloccante).
+    const hasMissingTable =
+      allResults.some((result) => this.isMissingTableError(result?.error)) ||
+      this.hasDisabledOptionalRemoteTables();
 
     const remoteClients = (clientsResult.data ?? []).map((row) => this.mapClientRow(row));
     const remoteQuotes = (quotesResult.data ?? []).map((row) => this.mapQuoteRow(row));
@@ -3307,7 +3746,6 @@ export class AudiomaxDataService {
       !remoteServiceTickets.length
     ) {
       await this.seedRemoteTables();
-      this.supabase.connectionState.set('connected');
       this.isRemoteLoaded.set(true);
       return;
     }
@@ -3356,7 +3794,7 @@ export class AudiomaxDataService {
       this.warehouseOrders.set(this.mergeRemoteWithLocalUpdates(remoteWarehouseOrders, this.warehouseOrders()));
     }
 
-    this.supabase.connectionState.set('connected');
+    this.supabase.connectionState.set(hasMissingTable ? 'schema-required' : 'connected');
     this.isRemoteLoaded.set(true);
   }
 
@@ -3496,41 +3934,52 @@ export class AudiomaxDataService {
             .upsert(snapshot.serviceTickets.map((item) => this.toServiceTicketRow(item)))
           : Promise.resolve({ error: null }),
         // ===== Portale Dipendenti v1 =====
-        snapshot.warehouseDdts.length
+        snapshot.warehouseDdts.length && this.isRemoteTableEnabled('warehouseDdts')
           ? client
             .from(supabaseConfig.tables.warehouseDdts)
             .upsert(snapshot.warehouseDdts.map((item) => this.toWarehouseDdtRow(item)))
           : Promise.resolve({ error: null }),
-        snapshot.pendingServices.length
+        snapshot.pendingServices.length && this.isRemoteTableEnabled('pendingServices')
           ? client
             .from(supabaseConfig.tables.pendingServices)
             .upsert(snapshot.pendingServices.map((item) => this.toPendingServiceRow(item)))
           : Promise.resolve({ error: null }),
-        snapshot.warehouseOrders.length
+        snapshot.warehouseOrders.length && this.isRemoteTableEnabled('warehouseOrders')
           ? client
             .from(supabaseConfig.tables.warehouseOrders)
             .upsert(snapshot.warehouseOrders.map((item) => this.toWarehouseOrderRow(item)))
           : Promise.resolve({ error: null }),
       ]);
 
-    const firstError =
-      clientsResult.error ??
-      quotesResult.error ??
-      appointmentsResult.error ??
-      inventoryItemsResult.error ??
-      cashProductsResult.error ??
-      cashTransactionsResult.error ??
-      cashShiftsResult.error ??
-      serviceTicketsResult.error ??
-      // Portale Dipendenti: se la tabella non esiste (42P01), trattiamo come schema-required e non falliamo.
-      (warehouseDdtsResult?.error?.code === '42P01' ? null : warehouseDdtsResult?.error) ??
-      (pendingServicesResult?.error?.code === '42P01' ? null : pendingServicesResult?.error) ??
-      (warehouseOrdersResult?.error?.code === '42P01' ? null : warehouseOrdersResult?.error);
+    // Raccogli gli errori dei seed. Le tabelle opzionali mancanti (PGRST205/42P01)
+    // non sono bloccanti: le saltiamo e proseguiamo con le altre.
+    const allResults = [
+      clientsResult,
+      quotesResult,
+      appointmentsResult,
+      inventoryItemsResult,
+      cashProductsResult,
+      cashTransactionsResult,
+      cashShiftsResult,
+      serviceTicketsResult,
+      warehouseDdtsResult,
+      pendingServicesResult,
+      warehouseOrdersResult,
+    ] as Array<{ error: { code?: string } | null }>;
 
-    if (firstError) {
-      this.supabase.connectionState.set(firstError.code === '42P01' ? 'schema-required' : 'error');
+    const blockingError = allResults
+      .map((result) => result?.error)
+      .find((error) => error && !this.isMissingTableError(error));
+
+    if (blockingError) {
+      this.supabase.connectionState.set('error');
       return;
     }
+
+    const hasMissingTable =
+      allResults.some((result) => this.isMissingTableError(result?.error)) ||
+      this.hasDisabledOptionalRemoteTables();
+    this.supabase.connectionState.set(hasMissingTable ? 'schema-required' : 'connected');
   }
 
   private async saveRemoteRecord(
@@ -3566,6 +4015,11 @@ export class AudiomaxDataService {
     const client = this.supabase.client;
 
     if (!client) {
+      return;
+    }
+
+    if (!this.isRemoteKindEnabled(kind)) {
+      this.supabase.connectionState.set('schema-required');
       return;
     }
 
@@ -3626,7 +4080,9 @@ export class AudiomaxDataService {
                                 .upsert(this.toPortalCommunicationRow(payload as PortalCommunicationRecord));
 
     if (result.error) {
-      this.supabase.connectionState.set(result.error.code === '42P01' ? 'schema-required' : 'error');
+      this.supabase.connectionState.set(
+        this.isMissingTableError(result.error) ? 'schema-required' : 'error',
+      );
       return;
     }
 
@@ -3653,6 +4109,11 @@ export class AudiomaxDataService {
     const client = this.supabase.client;
 
     if (!client) {
+      return;
+    }
+
+    if (!this.isRemoteKindEnabled(kind)) {
+      this.supabase.connectionState.set('schema-required');
       return;
     }
 
@@ -3688,7 +4149,9 @@ export class AudiomaxDataService {
     const result = await client.from(table).delete().eq('id', id);
 
     if (result.error) {
-      this.supabase.connectionState.set(result.error.code === '42P01' ? 'schema-required' : 'error');
+      this.supabase.connectionState.set(
+        this.isMissingTableError(result.error) ? 'schema-required' : 'error',
+      );
       return;
     }
 
@@ -3839,16 +4302,47 @@ export class AudiomaxDataService {
       id: item.id,
       number: item.number,
       created_at: item.createdAt,
+      document_date: item.documentDate,
       emitted_at: item.emittedAt,
       delivered_at: item.deliveredAt,
+      annulled_at: item.annulledAt ?? null,
+      transport_start_at: item.transportStartAt ?? null,
       created_by_operator_id: item.createdByOperatorId,
       created_by_operator_name: item.createdByOperatorName,
       client_id: item.clientId,
+      client_code: item.clientCode ?? '',
       client_snapshot: item.clientSnapshot,
+      origin_type: item.originType ?? 'manuale',
+      series: item.series ?? 'A',
+      linked_quote_id: item.linkedQuoteId ?? null,
+      linked_quote_number: item.linkedQuoteNumber ?? null,
+      linked_ticket_id: item.linkedTicketId ?? null,
+      linked_appointment_id: item.linkedAppointmentId ?? null,
+      causale: item.causale ?? 'Vendita',
+      departure_place: item.departurePlace ?? '',
+      destination_place: item.destinationPlace ?? '',
+      carrier_name: item.carrierName ?? '',
+      transport_method: item.transportMethod ?? '',
+      package_count: item.packageCount ?? null,
+      packaging_type: item.packagingType ?? '',
+      weight: item.weight ?? '',
       vehicle: item.vehicle,
       destination: item.destination,
       note: item.note,
+      internal_note: item.internalNote ?? '',
+      reference_order: item.referenceOrder ?? '',
+      reference_job: item.referenceJob ?? '',
+      reference_other: item.referenceOther ?? '',
       lines: item.lines,
+      sender_snapshot: item.senderSnapshot ?? this.emptyDdtPartySnapshot(),
+      recipient_snapshot: item.recipientSnapshot ?? this.emptyDdtPartySnapshot(),
+      delivery_snapshot: item.deliverySnapshot ?? this.emptyDdtPartySnapshot(),
+      inventory_mode: item.inventoryMode ?? 'nessuno',
+      inventory_movement_applied_at: item.inventoryMovementAppliedAt ?? null,
+      inventory_return_applied_at: item.inventoryReturnAppliedAt ?? null,
+      also_deduct: item.alsoDeduct ?? false,
+      cancellation_reason: item.cancellationReason ?? '',
+      status_history: item.statusHistory ?? [],
       status: item.status,
     };
   }
@@ -3869,6 +4363,8 @@ export class AudiomaxDataService {
       status: item.status,
       paid_at: item.paidAt,
       linked_cash_transaction_id: item.linkedCashTransactionId,
+      target_cash_operator_id: item.targetCashOperatorId,
+      target_cash_operator_name: item.targetCashOperatorName,
     };
   }
   private toWarehouseOrderRow(item: WarehouseOrderRecord) {
@@ -3934,16 +4430,47 @@ export class AudiomaxDataService {
       id: row.id,
       number: row.number ?? '',
       createdAt: row.created_at,
+      documentDate: row.document_date ?? row.created_at?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
       emittedAt: row.emitted_at ?? null,
       deliveredAt: row.delivered_at ?? null,
+      annulledAt: row.annulled_at ?? null,
+      transportStartAt: row.transport_start_at ?? null,
       createdByOperatorId: row.created_by_operator_id,
       createdByOperatorName: row.created_by_operator_name ?? '',
       clientId: row.client_id ?? null,
+      clientCode: row.client_code ?? '',
       clientSnapshot: row.client_snapshot ?? '',
+      originType: row.origin_type ?? 'manuale',
+      series: row.series ?? 'A',
+      linkedQuoteId: row.linked_quote_id ?? null,
+      linkedQuoteNumber: row.linked_quote_number ?? null,
+      linkedTicketId: row.linked_ticket_id ?? null,
+      linkedAppointmentId: row.linked_appointment_id ?? null,
+      causale: row.causale ?? 'Vendita',
+      departurePlace: row.departure_place ?? '',
+      destinationPlace: row.destination_place ?? row.destination ?? '',
+      carrierName: row.carrier_name ?? '',
+      transportMethod: row.transport_method ?? '',
+      packageCount: row.package_count != null ? Number(row.package_count) : null,
+      packagingType: row.packaging_type ?? '',
+      weight: row.weight ?? '',
       vehicle: row.vehicle ?? '',
       destination: row.destination ?? '',
       note: row.note ?? '',
+      internalNote: row.internal_note ?? '',
+      referenceOrder: row.reference_order ?? '',
+      referenceJob: row.reference_job ?? '',
+      referenceOther: row.reference_other ?? '',
       lines: (row.lines ?? []) as WarehouseDdtLineRecord[],
+      senderSnapshot: (row.sender_snapshot ?? this.emptyDdtPartySnapshot()) as WarehouseDdtPartySnapshot,
+      recipientSnapshot: (row.recipient_snapshot ?? this.emptyDdtPartySnapshot()) as WarehouseDdtPartySnapshot,
+      deliverySnapshot: (row.delivery_snapshot ?? this.emptyDdtPartySnapshot()) as WarehouseDdtPartySnapshot,
+      inventoryMode: row.inventory_mode ?? 'nessuno',
+      inventoryMovementAppliedAt: row.inventory_movement_applied_at ?? null,
+      inventoryReturnAppliedAt: row.inventory_return_applied_at ?? null,
+      alsoDeduct: Boolean(row.also_deduct ?? false),
+      cancellationReason: row.cancellation_reason ?? '',
+      statusHistory: (row.status_history ?? []) as WarehouseDdtStatusHistoryEntry[],
       status: (row.status ?? 'bozza') as WarehouseDdtRecord['status'],
     };
   }
@@ -3964,6 +4491,8 @@ export class AudiomaxDataService {
       status: (row.status ?? 'inviato') as PendingServiceRecord['status'],
       paidAt: row.paid_at ?? null,
       linkedCashTransactionId: row.linked_cash_transaction_id ?? null,
+      targetCashOperatorId: row.target_cash_operator_id ?? null,
+      targetCashOperatorName: row.target_cash_operator_name ?? null,
     };
   }
   private mapWarehouseOrderRow(row: any): WarehouseOrderRecord {

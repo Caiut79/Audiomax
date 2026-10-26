@@ -58,6 +58,9 @@ export interface ClientBillingProfile {
   sdiCode: string;
   pec: string;
   billingAddress: string;
+  billingPostalCode: string;
+  billingProvince: string;
+  billingCountry: string;
 }
 
 export interface ClientPrivacyProfile {
@@ -229,31 +232,91 @@ export interface WarehouseAuditRecord {
   createdAt: string;
 }
 
-/** Documento di trasporto (DDT) creato dal Portale Dipendenti */
+export interface WarehouseDdtPartySnapshot {
+  name: string;
+  address: string;
+  postalCode: string;
+  city: string;
+  province: string;
+  vatNumber: string;
+  taxCode: string;
+}
+
+export interface WarehouseDdtStatusHistoryEntry {
+  status: 'bozza' | 'emesso' | 'consegnato' | 'annullato';
+  at: string;
+  byOperatorId: string;
+  byOperatorName: string;
+  note: string;
+}
+
+export type WarehouseDdtOriginType = 'manuale' | 'preventivo';
+export type WarehouseDdtInventoryMode = 'nessuno' | 'scarico' | 'carico';
+
+/** Documento di trasporto (DDT) creato dal Portale Dipendenti / CRM */
 export interface WarehouseDdtLineRecord {
   id: string;
   inventoryItemId: string | null;
+  itemCode?: string;
   itemSnapshot: string;          // snapshot nome prodotto / descrizione libera
   quantity: number;
+  unitOfMeasure?: string;
   unitCost: number;              // prezzo di riferimento al momento della creazione
   note: string;
+  lotNumber?: string;
+  serialNumber?: string;
+  quoteLineId?: string | null;
+  plannedQuantity?: number | null;
+  alreadyDeliveredQuantity?: number | null;
+  remainingQuantity?: number | null;
 }
 
 export interface WarehouseDdtRecord {
   id: string;
   number: string;                // progressivo: DDT-EP-YYYY-NNNN
   createdAt: string;
+  documentDate: string;
   emittedAt: string | null;
   deliveredAt: string | null;
+  annulledAt?: string | null;
+  transportStartAt?: string | null;
   createdByOperatorId: string;
   createdByOperatorName: string;
   clientId: string | null;
+  clientCode?: string;
   clientSnapshot: string;        // ragione sociale cliente al momento della creazione
+  originType?: WarehouseDdtOriginType;
+  series?: string;
+  linkedQuoteId?: string | null;
+  linkedQuoteNumber?: string | null;
+  linkedTicketId?: string | null;
+  linkedAppointmentId?: string | null;
+  causale?: string;
+  departurePlace?: string;
+  destinationPlace?: string;
+  carrierName?: string;
+  transportMethod?: string;
+  packageCount?: number | null;
+  packagingType?: string;
+  weight?: string;
   vehicle: string;
   destination: string;
   note: string;
+  internalNote?: string;
+  referenceOrder?: string;
+  referenceJob?: string;
+  referenceOther?: string;
   lines: WarehouseDdtLineRecord[];
-  status: 'bozza' | 'emesso' | 'consegnato';
+  senderSnapshot?: WarehouseDdtPartySnapshot;
+  recipientSnapshot?: WarehouseDdtPartySnapshot;
+  deliverySnapshot?: WarehouseDdtPartySnapshot;
+  inventoryMode?: WarehouseDdtInventoryMode;
+  inventoryMovementAppliedAt?: string | null;
+  inventoryReturnAppliedAt?: string | null;
+  alsoDeduct?: boolean;
+  cancellationReason?: string;
+  statusHistory?: WarehouseDdtStatusHistoryEntry[];
+  status: 'bozza' | 'emesso' | 'consegnato' | 'annullato';
 }
 
 /** Servizio pendente inviato dal portale dipendenti alla cassa per l'incasso */
@@ -278,6 +341,9 @@ export interface PendingServiceRecord {
   status: 'inviato' | 'pagato' | 'annullato';
   paidAt: string | null;
   linkedCashTransactionId: string | null;
+  /** Operatore di cassa a cui assegnare il servizio (null = chiunque in cassa) */
+  targetCashOperatorId: string | null;
+  targetCashOperatorName: string | null;
 }
 
 /** Ordine creato dal Portale Dipendenti, gestito poi dal crm principale (magazzino) */
@@ -402,6 +468,7 @@ export interface CashTransactionLine {
   quantity: number;
   unitPrice: number;
   originalUnitPrice: number;
+  vatRate: number;
   discountPercentage?: number;
   total: number;
   pricingMode: CashRegisterProductRecord['pricingMode'];
@@ -543,9 +610,24 @@ export interface CompanyProfileRecord {
   website: string;
   iban: string;
   invoiceFooterNote: string;
+  invoiceTransmission: InvoiceTransmissionSettings;
   logoUrl?: string | null;
   letterheadFont?: string;
   letterheadColor?: string;
+}
+
+export type InvoiceTransmissionProviderCode = 'nessuno' | 'webhook';
+export type InvoiceTransmissionMode = 'xml' | 'api';
+
+export interface InvoiceTransmissionSettings {
+  providerCode: InvoiceTransmissionProviderCode;
+  providerLabel: string;
+  mode: InvoiceTransmissionMode;
+  apiUrl: string;
+  apiKey: string;
+  fallbackToXmlDownload: boolean;
+  taxRegime: string;
+  issuingCountryCode: string;
 }
 
 export interface ServiceTicketMaterialLine {
@@ -698,6 +780,17 @@ export interface ExpenseAuditRecord {
   createdAt: string;
 }
 
+/**
+ * Impostazioni del Portale Dipendenti, configurabili dal CRM.
+ * inventoryWriteMode: cosa può fare il tecnico sugli articoli di magazzino dal portale.
+ *  - 'solo-lettura': può solo consultare e prelevare
+ *  - 'aggiorna': può aggiornare gli articoli esistenti (giacenza, prezzi, dati)
+ *  - 'aggiungi': può anche creare nuovi articoli
+ */
+export interface PortalSettings {
+  inventoryWriteMode: 'solo-lettura' | 'aggiorna' | 'aggiungi';
+}
+
 export interface AudiomaxState {
   clients: ClientRecord[];
   quotes: QuoteRecord[];
@@ -734,6 +827,8 @@ export interface AudiomaxState {
   warehouseOrders: WarehouseOrderRecord[];
   // ===== Portale Dipendenti v2 =====
   portalCommunications: PortalCommunicationRecord[];
+  // Impostazioni del portale dipendenti (permessi articoli, ecc.)
+  portalSettings: PortalSettings;
   // ===== NUOVI Task 1/2/4: negozio chiusure settimanali / aperture straordinarie / chiusure collettive =====
   storeClosingDaysWeekly: Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>;
   storeExtraOpeningDates: Array<{ id: string; date: string; note?: string }>;
@@ -904,6 +999,16 @@ export const initialAudiomaxState: AudiomaxState = {
     website: '',
     iban: '',
     invoiceFooterNote: '',
+    invoiceTransmission: {
+      providerCode: 'nessuno',
+      providerLabel: '',
+      mode: 'xml',
+      apiUrl: '',
+      apiKey: '',
+      fallbackToXmlDownload: true,
+      taxRegime: 'RF01',
+      issuingCountryCode: 'IT',
+    },
     letterheadFont: 'Inter, sans-serif',
     letterheadColor: '#182233',
   },
@@ -1621,6 +1726,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 79,
           originalUnitPrice: 79,
+          vatRate: 22,
           total: 79,
           pricingMode: 'quantità',
           operatorName: 'Banco',
@@ -1633,6 +1739,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 45,
           originalUnitPrice: 45,
+          vatRate: 22,
           total: 45,
           pricingMode: 'quantità',
           operatorName: 'Banco',
@@ -1668,6 +1775,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 35,
           originalUnitPrice: 35,
+          vatRate: 22,
           total: 35,
           pricingMode: 'fisso',
           operatorName: 'Marco',
@@ -1680,6 +1788,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 55,
           originalUnitPrice: 55,
+          vatRate: 22,
           total: 55,
           pricingMode: 'ora',
           operatorName: 'Luca',
@@ -1715,6 +1824,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 79,
           originalUnitPrice: 79,
+          vatRate: 22,
           total: 79,
           pricingMode: 'quantità',
           operatorName: 'Giulia',
@@ -1727,6 +1837,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 45,
           originalUnitPrice: 45,
+          vatRate: 22,
           total: 45,
           pricingMode: 'quantità',
           operatorName: 'Giulia',
@@ -1739,6 +1850,7 @@ export const initialAudiomaxState: AudiomaxState = {
           quantity: 1,
           unitPrice: 56,
           originalUnitPrice: 56,
+          vatRate: 22,
           total: 56,
           pricingMode: 'fisso',
           operatorName: 'Giulia',
@@ -1873,6 +1985,8 @@ export const initialAudiomaxState: AudiomaxState = {
   warehouseOrders: [],
   // ===== Portale Dipendenti v2 =====
   portalCommunications: [],
+  // Impostazioni portale dipendenti: di default i tecnici non possono modificare il magazzino
+  portalSettings: { inventoryWriteMode: 'solo-lettura' },
   // ===== NUOVI Task 1: valori DEFAULT per chiusure negozio =====
   storeClosingDaysWeekly: { lun: false, mar: false, mer: false, gio: false, ven: false, sab: false, dom: true }, // Domenica = chiusa di default
   storeExtraOpeningDates: [],

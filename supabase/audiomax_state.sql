@@ -264,6 +264,179 @@ alter table public.crm_cash_transactions
 alter table public.crm_cash_transactions
   add column if not exists lines jsonb not null default '[]'::jsonb;
 
+create table if not exists public.crm_ep_warehouse_ddts (
+  id text primary key,
+  number text not null default '',
+  created_at timestamptz not null default now(),
+  document_date date not null default current_date,
+  emitted_at timestamptz,
+  delivered_at timestamptz,
+  annulled_at timestamptz,
+  transport_start_at timestamptz,
+  created_by_operator_id text not null,
+  created_by_operator_name text not null default '',
+  client_id text,
+  client_code text not null default '',
+  client_snapshot text not null default '',
+  origin_type text not null default 'manuale' check (origin_type in ('manuale', 'preventivo')),
+  series text not null default 'A',
+  linked_quote_id text,
+  linked_quote_number text,
+  linked_ticket_id text,
+  linked_appointment_id text,
+  causale text not null default 'Vendita',
+  departure_place text not null default '',
+  destination_place text not null default '',
+  carrier_name text not null default '',
+  transport_method text not null default '',
+  package_count integer,
+  packaging_type text not null default '',
+  weight text not null default '',
+  vehicle text not null default '',
+  destination text not null default '',
+  note text not null default '',
+  internal_note text not null default '',
+  reference_order text not null default '',
+  reference_job text not null default '',
+  reference_other text not null default '',
+  sender_snapshot jsonb not null default '{}'::jsonb,
+  recipient_snapshot jsonb not null default '{}'::jsonb,
+  delivery_snapshot jsonb not null default '{}'::jsonb,
+  lines jsonb not null default '[]'::jsonb,
+  inventory_mode text not null default 'nessuno' check (inventory_mode in ('nessuno', 'scarico', 'carico')),
+  inventory_movement_applied_at timestamptz,
+  inventory_return_applied_at timestamptz,
+  also_deduct boolean not null default false,
+  cancellation_reason text not null default '',
+  status_history jsonb not null default '[]'::jsonb,
+  status text not null default 'bozza' check (status in ('bozza', 'emesso', 'consegnato', 'annullato'))
+);
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists document_date date not null default current_date;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists annulled_at timestamptz;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists transport_start_at timestamptz;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists client_code text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists origin_type text not null default 'manuale';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists series text not null default 'A';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists linked_quote_id text;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists linked_quote_number text;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists linked_ticket_id text;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists linked_appointment_id text;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists causale text not null default 'Vendita';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists departure_place text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists destination_place text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists carrier_name text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists transport_method text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists package_count integer;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists packaging_type text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists weight text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists internal_note text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists reference_order text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists reference_job text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists reference_other text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists sender_snapshot jsonb not null default '{}'::jsonb;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists recipient_snapshot jsonb not null default '{}'::jsonb;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists delivery_snapshot jsonb not null default '{}'::jsonb;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists inventory_mode text not null default 'nessuno';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists inventory_movement_applied_at timestamptz;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists inventory_return_applied_at timestamptz;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists also_deduct boolean not null default false;
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists cancellation_reason text not null default '';
+
+alter table public.crm_ep_warehouse_ddts
+  add column if not exists status_history jsonb not null default '[]'::jsonb;
+
+create table if not exists public.crm_ep_ddt_series_counters (
+  document_year integer not null,
+  series text not null,
+  last_value integer not null default 0,
+  primary key (document_year, series)
+);
+
+create or replace function public.crm_next_ddt_number(
+  p_document_year integer,
+  p_series text default 'A'
+)
+returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_series text := upper(trim(coalesce(nullif(p_series, ''), 'A')));
+  v_next integer;
+begin
+  insert into public.crm_ep_ddt_series_counters (document_year, series, last_value)
+  values (p_document_year, v_series, 1)
+  on conflict (document_year, series)
+  do update
+    set last_value = public.crm_ep_ddt_series_counters.last_value + 1
+  returning last_value into v_next;
+
+  return 'DDT-' || p_document_year::text || '-' || v_series || '-' || lpad(v_next::text, 4, '0');
+end;
+$$;
+
+grant execute on function public.crm_next_ddt_number(integer, text) to anon;
+
 alter table public.crm_clients enable row level security;
 alter table public.crm_quotes enable row level security;
 alter table public.crm_appointments enable row level security;
@@ -278,6 +451,7 @@ alter table public.crm_cash_products enable row level security;
 alter table public.crm_cash_transactions enable row level security;
 alter table public.crm_cash_shifts enable row level security;
 alter table public.crm_service_tickets enable row level security;
+alter table public.crm_ep_warehouse_ddts enable row level security;
 
 drop policy if exists "publishable can read clients" on public.crm_clients;
 drop policy if exists "publishable can insert clients" on public.crm_clients;
@@ -365,6 +539,36 @@ with check (true);
 
 create policy "publishable can delete appointments"
 on public.crm_appointments
+for delete
+to anon
+using (true);
+
+drop policy if exists "publishable can read warehouse ddts" on public.crm_ep_warehouse_ddts;
+drop policy if exists "publishable can insert warehouse ddts" on public.crm_ep_warehouse_ddts;
+drop policy if exists "publishable can update warehouse ddts" on public.crm_ep_warehouse_ddts;
+drop policy if exists "publishable can delete warehouse ddts" on public.crm_ep_warehouse_ddts;
+
+create policy "publishable can read warehouse ddts"
+on public.crm_ep_warehouse_ddts
+for select
+to anon
+using (true);
+
+create policy "publishable can insert warehouse ddts"
+on public.crm_ep_warehouse_ddts
+for insert
+to anon
+with check (true);
+
+create policy "publishable can update warehouse ddts"
+on public.crm_ep_warehouse_ddts
+for update
+to anon
+using (true)
+with check (true);
+
+create policy "publishable can delete warehouse ddts"
+on public.crm_ep_warehouse_ddts
 for delete
 to anon
 using (true);
@@ -849,3 +1053,11 @@ create policy "publishable can read notifiche spese" on public.notifiche for sel
 create policy "publishable can insert notifiche spese" on public.notifiche for insert to anon with check (true);
 create policy "publishable can update notifiche spese" on public.notifiche for update to anon using (true) with check (true);
 create policy "publishable can delete notifiche spese" on public.notifiche for delete to anon using (true);
+
+-- Contatori serie DDT: accesso consentito solo alla funzione security definer,
+-- quindi si abilita RLS senza policy (nega ogni accesso diretto via REST anon).
+alter table public.crm_ep_ddt_series_counters enable row level security;
+
+-- Forza il reload della cache schema del server REST (PostgREST):
+-- senza questo, le tabelle/colonne appena create non sono visibili via API.
+notify pgrst, 'reload schema';

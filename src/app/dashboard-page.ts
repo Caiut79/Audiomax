@@ -6,10 +6,11 @@ import { RouterLink } from '@angular/router';
 import { AudiomaxDataService } from './audiomax-data.service';
 import { AppointmentRecord, CashOperatorRecord, EmployeeLeaveRecord } from './crm-runtime-data';
 import { SupabaseService } from './supabase.service';
+import { UiDialogDirective } from './ui-dialog.directive';
 
 @Component({
   selector: 'app-dashboard-page',
-  imports: [CommonModule, RouterLink, ReactiveFormsModule],
+  imports: [CommonModule, RouterLink, ReactiveFormsModule, UiDialogDirective],
   templateUrl: './dashboard-page.html',
   styleUrl: './dashboard-page.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -289,7 +290,7 @@ export class DashboardPageComponent {
       value: `${this.data.clients().length}`,
       detail: 'Schede già attive tra lead e clienti',
       route: '/clienti',
-      icon: '👥',
+      icon: 'contatti',
       tone: 'kpi-blue',
     },
     {
@@ -297,7 +298,7 @@ export class DashboardPageComponent {
       value: `${this.data.quotes().filter(q => q.stage !== 'confermato' && q.stage !== 'ordine').length}`,
       detail: 'Trattative commerciali in corso',
       route: '/preventivi',
-      icon: '📄',
+      icon: 'preventivi',
       tone: 'kpi-orange',
     },
     {
@@ -305,7 +306,7 @@ export class DashboardPageComponent {
       value: `${this.data.plannedAppointments()}`,
       detail: 'Appuntamenti operativi programmati',
       route: '/agenda',
-      icon: '🗓️',
+      icon: 'agenda',
       tone: 'kpi-green',
     },
     {
@@ -313,7 +314,7 @@ export class DashboardPageComponent {
       value: `${this.data.openServiceTickets()}`,
       detail: 'Interventi tecnici ancora da chiudere',
       route: '/servizio-tecnico',
-      icon: '🛠️',
+      icon: 'tecnico',
       tone: 'kpi-purple',
     },
   ]);
@@ -336,31 +337,31 @@ export class DashboardPageComponent {
       label: 'Nuovo contatto',
       route: '/clienti',
       caption: 'Crea rapidamente clienti, lead e aziende',
-      icon: '👥',
+      icon: 'contatti',
     },
     {
       label: 'Prepara preventivo',
       route: '/preventivi',
       caption: "Crea un'offerta e aggiorna la trattativa",
-      icon: '📄',
+      icon: 'preventivi',
     },
     {
       label: 'Pianifica agenda',
       route: '/agenda',
       caption: 'Organizza appuntamenti, uscite e installazioni',
-      icon: '🗓️',
+      icon: 'agenda',
     },
     {
       label: 'Registra incasso',
       route: '/cassa',
       caption: 'Registra il pagamento e controlla gli insoluti',
-      icon: '🧾',
+      icon: 'cassa',
     },
     {
       label: 'Apri ticket tecnico',
       route: '/servizio-tecnico',
       caption: 'Gestisci assistenze, officina e uscite tecniche',
-      icon: '🛠️',
+      icon: 'tecnico',
     },
   ];
   protected readonly lowStockItemsCount = computed(() =>

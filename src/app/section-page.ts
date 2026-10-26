@@ -23,6 +23,8 @@ import { EpScannerService } from './ep-scanner.service';
 import { crmModuleContent } from './crm-module-content';
 import { FormDraftService } from './form-draft.service';
 import { PrivacyDispatchService } from './privacy-dispatch.service';
+import { SupabaseService } from './supabase.service';
+import { UiDialogDirective } from './ui-dialog.directive';
 import {
   AppointmentRecord,
   CashFiscalSettings,
@@ -44,12 +46,15 @@ import {
   PaymentProviderRecord,
   PortalCommunicationLine,
   PortalCommunicationRecord,
+  PortalSettings,
   QuoteLineRecord,
   QuoteRecord,
   ServiceTicketRecord,
   WarehouseLotRecord,
   WarehouseMovementRecord,
   WarehousePurchaseRecord,
+  WarehouseDdtLineRecord,
+  WarehouseDdtPartySnapshot,
   WarehouseDdtRecord,
   PendingServiceRecord,
   WarehouseOrderRecord,
@@ -78,9 +83,45 @@ interface CashDeskSessionDraft {
   mixedElectronicAmount: number;
   mixedElectronicMethod: 'bancomat' | 'carta' | 'bonifico';
   documentType: CashTransactionRecord['documentType'];
-  salesMode: 'servizi' | 'rivendita' | 'preventivi';
+  salesMode: CashSalesMode;
   currentOperator: string;
   cart: CashTransactionLine[];
+}
+
+type CashSalesMode = 'tutti' | 'servizi' | 'rivendita' | 'storico' | 'preventivi';
+
+/** Riga editabile della modale "Carica in magazzino da ordine portale" */
+interface OrderReceiptLineDraft {
+  lineId: string;
+  /** Descrizione originale della richiesta */
+  description: string;
+  /** '' = crea un nuovo prodotto, altrimenti id del prodotto esistente da ricaricare */
+  inventoryItemId: string;
+  /** Nome del nuovo prodotto (se inventoryItemId è vuoto) */
+  newName: string;
+  quantity: number;
+  unitCost: number;
+  salePrice: number;
+  /** Se true la riga viene ignorata nel carico */
+  skip: boolean;
+}
+
+interface CashClientRecentItem {
+  id: string;
+  kind: 'preventivo' | 'vendita' | 'appuntamento' | 'ticket';
+  title: string;
+  meta: string;
+  dateKey: string;
+  tone: 'accent' | 'success' | 'warning' | 'neutral';
+}
+
+interface DdtLocalDraftSummary {
+  savedAt: string;
+  recipientName: string;
+  causale: string;
+  documentDate: string;
+  linkedQuoteNumber: string;
+  lineCount: number;
 }
 
 type EmployeeShiftDayKey = keyof CashOperatorRecord['shiftPatterns'][0];
@@ -92,6 +133,40 @@ type ReportSectionKey =
   | 'amministrazione'
   | 'alert';
 type ReportFilterKey = 'all' | ReportSectionKey;
+type ReportPageKey =
+  | 'dashboard'
+  | 'economici'
+  | 'clienti'
+  | 'preventivi'
+  | 'servizi'
+  | 'documenti'
+  | 'magazzino'
+  | 'altre';
+type ReportPeriodPreset =
+  | 'oggi'
+  | 'ultimi-7'
+  | 'ultimi-30'
+  | 'mese-corrente'
+  | 'mese-precedente'
+  | 'trimestre-corrente'
+  | 'anno-corrente'
+  | 'anno-precedente'
+  | 'custom';
+type ReportDrilldownKind =
+  | 'cash-paid'
+  | 'quotes-all'
+  | 'quotes-stage'
+  | 'expenses'
+  | 'clients-active'
+  | 'tickets'
+  | 'appointments'
+  | 'ddts'
+  | 'warehouse-movements'
+  | 'warehouse-suppliers'
+  | 'clients-top'
+  | 'services-top'
+  | 'services-low'
+  | 'payment-method';
 
 interface EmployeeShiftDraft {
   startHour: string;
@@ -161,6 +236,66 @@ interface ReportStatusTile {
   format: 'currency' | 'number';
 }
 
+interface ReportPeriodOption {
+  value: ReportPeriodPreset;
+  label: string;
+}
+
+interface ReportPeriodRange {
+  label: string;
+  from: string;
+  to: string;
+  previousLabel: string;
+  previousFrom: string;
+  previousTo: string;
+  compareEnabled: boolean;
+}
+
+interface ReportDrilldownRequest {
+  kind: ReportDrilldownKind;
+  title: string;
+  subtitle: string;
+  filter?: string;
+}
+
+interface ReportOverviewCard extends ReportStatusTile {
+  previousValue: number | null;
+  delta: number | null;
+  deltaPercent: number | null;
+  trend: 'up' | 'down' | 'flat' | 'none';
+  periodLabel: string;
+  previousLabel: string;
+  drilldown: ReportDrilldownRequest | null;
+}
+
+interface ReportDrilldownRow {
+  id: string;
+  values: Array<string | number>;
+  actionType?: 'cash' | 'quote' | 'client' | 'ticket' | 'ddt' | 'supplier';
+  actionId?: string;
+  actionLabel?: string;
+}
+
+interface ReportClientActivityRow {
+  client: ClientRecord;
+  revenue: number;
+  quotes: number;
+  appointments: number;
+  tickets: number;
+  ddts: number;
+  activities: number;
+}
+
+interface ReportServiceActivityRow {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  quoteCount: number;
+  salesCount: number;
+  salesTotal: number;
+}
+
 interface ReportSectionDescriptor {
   key: ReportSectionKey;
   kicker: string;
@@ -188,6 +323,44 @@ interface ReportDonutChart {
   segments: ReportDonutSegment[];
   searchableText: string;
   gradient: string;
+}
+
+interface ReportDashboardKpi {
+  key: string;
+  icon: string;
+  label: string;
+  value: number;
+  detail: string;
+  tone: 'info' | 'success' | 'warning' | 'danger' | 'neutral';
+  format: 'currency' | 'number';
+  page: Exclude<ReportPageKey, 'dashboard'>;
+}
+
+interface ReportAreaCard {
+  key: Exclude<ReportPageKey, 'dashboard'>;
+  icon: string;
+  title: string;
+  description: string;
+  metric: string;
+  badge: string;
+}
+
+interface ReportTrendPoint {
+  label: string;
+  value: number;
+  valueLabel: string;
+  x: number;
+  y: number;
+}
+
+interface ReportTrendChart {
+  title: string;
+  subtitle: string;
+  totalLabel: string;
+  maxLabel: string;
+  polyline: string;
+  area: string;
+  points: ReportTrendPoint[];
 }
 
 interface EmployeeCalendarDayCell {
@@ -272,6 +445,21 @@ interface SupplierOrderHistoryEntry {
   linkedExpense: ExpenseRecord | null;
 }
 
+interface WarehouseSupplierSummaryRow {
+  supplier: string;
+  records: number;
+  totalCost: number;
+  lastReceivedDate: string;
+  lastDocumentNumber: string;
+  distinctItems: number;
+}
+
+interface WarehouseValuationRow {
+  item: InventoryItemRecord;
+  quantityAvailable: number;
+  valuationByLot: number;
+}
+
 // ══════════════════════════════════════════════
 // Tabelle esportazione mensile PDF · Ufficio paghe
 // ══════════════════════════════════════════════
@@ -307,7 +495,7 @@ interface PagheNoteRow {
 
 @Component({
   selector: 'app-section-page',
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, RouterLink, UiDialogDirective],
   templateUrl: './section-page.html',
   styleUrl: './section-page.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -319,6 +507,7 @@ export class SectionPageComponent {
   // Reso protected invece di private perché i template accedono a paymentProviders()
   // e a togglePaymentProviderActive / CRUD fornitori dalle impostazioni.
   protected readonly data = inject(AudiomaxDataService);
+  private readonly supabase = inject(SupabaseService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly formDrafts = inject(FormDraftService);
   private readonly privacyDispatch = inject(PrivacyDispatchService);
@@ -360,10 +549,14 @@ export class SectionPageComponent {
   protected readonly allCashTransactions = this.data.cashTransactions;
   protected readonly allCashShifts = this.data.cashShifts;
   protected readonly allServiceTickets = this.data.serviceTickets;
+  protected readonly cashConnectionState = this.supabase.connectionState;
+  protected readonly cashConnectionLabel = this.supabase.connectionLabel;
   protected readonly editingClientId = signal<string | null>(null);
   protected readonly editingQuoteId = signal<string | null>(null);
   protected readonly editingAppointmentId = signal<string | null>(null);
   protected readonly editingInventoryId = signal<string | null>(null);
+  /** Modale di modifica anagrafica prodotto (pulsante "Modifica" nel dettaglio) */
+  protected readonly inventoryEditModalOpen = signal(false);
   protected readonly editingTicketId = signal<string | null>(null);
   protected readonly editingCashProductId = signal<string | null>(null);
   protected readonly serviceMenuOpenId = signal<string | null>(null);
@@ -381,6 +574,23 @@ export class SectionPageComponent {
   protected readonly ddtQuoteId = signal<string | null>(null);
   protected readonly ddtNumber = signal('');
   protected readonly ddtCreatedAt = signal('');
+  protected readonly ddtEditorModalOpen = signal(false);
+  protected readonly ddtDetailModalOpen = signal(false);
+  protected readonly ddtQuotePickerOpen = signal(false);
+  protected readonly ddtDraftsModalOpen = signal(false);
+  protected readonly ddtSendModalOpen = signal(false);
+  protected readonly ddtEditingId = signal<string | null>(null);
+  protected readonly ddtDetailId = signal<string | null>(null);
+  protected readonly ddtSendRecordId = signal<string | null>(null);
+  protected readonly ddtSendPhone = signal('');
+  protected readonly ddtSendEmail = signal('');
+  protected readonly ddtQuoteSearch = signal('');
+  protected readonly ddtSearch = signal('');
+  protected readonly ddtFilterClientId = signal('tutti');
+  protected readonly ddtFilterStatus = signal<'tutti' | WarehouseDdtRecord['status']>('tutti');
+  protected readonly ddtFilterCause = signal('tutte');
+  protected readonly ddtFilterFrom = signal('');
+  protected readonly ddtFilterTo = signal('');
   protected readonly appointmentModalOpen = signal(false);
   protected readonly ticketModalOpen = signal(false);
   protected readonly expenseModalOpen = signal(false);
@@ -478,6 +688,8 @@ export class SectionPageComponent {
   protected readonly clientQuery = signal('');
   protected readonly quoteQuery = signal('');
   protected readonly quoteClientLookup = signal('');
+  // Blocco dati fiscali del preventivo: chiuso di default per ridurre la densità del form
+  protected readonly quoteBillingOpen = signal(false);
   protected readonly ticketClientLookup = signal('');
   protected readonly quoteQuickServiceId = signal('');
   protected readonly quoteQuickProductId = signal('');
@@ -586,8 +798,10 @@ export class SectionPageComponent {
   protected readonly inventoryStatusFilter = signal<'tutti' | InventoryItemRecord['status']>('tutti');
   protected readonly warehouseValuationDate = signal<string>('');
   protected readonly warehouseCategoryFilter = signal('tutte');
+  protected readonly warehouseSupplierQuery = signal('');
+  protected readonly warehouseSupplierDetailName = signal<string | null>(null);
   protected readonly warehouseView = signal<
-    'ricerca' | 'acquisto' | 'consumi' | 'utilizzo' | 'sottoscorta' | 'valore' | 'movimenti'
+    'ricerca' | 'acquisto' | 'consumi' | 'utilizzo' | 'sottoscorta' | 'valore' | 'movimenti' | 'ordini' | 'fornitori'
   >('ricerca');
   protected readonly warehouseMovementTypeFilter = signal<'tutti' | WarehouseMovementRecord['movementType']>(
     'tutti',
@@ -616,7 +830,7 @@ export class SectionPageComponent {
   protected readonly quoteLineFreeTextIds = signal<Set<string>>(new Set());
   protected readonly expensePaymentModeFilter = signal<'tutte' | ExpenseRecord['paymentMode']>('tutte');
   protected readonly expenseSupplierFilter = signal('tutti');
-  protected readonly cashSalesMode = signal<'servizi' | 'rivendita' | 'preventivi'>('servizi');
+  protected readonly cashSalesMode = signal<CashSalesMode>('tutti');
   protected readonly cashCustomerMode = signal<'existing' | 'walk-in'>('walk-in');
   protected readonly cashPaymentMethod = signal<CashTransactionRecord['paymentMethod']>('pos');
   protected readonly cashMixedElectronicMethod = signal<'bancomat' | 'carta' | 'bonifico'>('bancomat');
@@ -631,6 +845,10 @@ export class SectionPageComponent {
   protected readonly cashCustomerEmail = signal('');
   protected readonly cashQueuedSessions = signal<CashDeskSessionDraft[]>([]);
   protected readonly cashClientModalOpen = signal(false);
+  protected readonly cashHistoryModalOpen = signal(false);
+  /** Popup dedicato all'elenco dei clienti messi in attesa alla cassa */
+  protected readonly cashWaitingModalOpen = signal(false);
+  protected readonly cashReceiptPreviewModalOpen = signal(false);
   protected readonly cashNewClientName = signal('');
   protected readonly cashNewClientPhone = signal('');
   protected readonly cashNewClientCity = signal('');
@@ -640,6 +858,9 @@ export class SectionPageComponent {
   protected readonly cashNewClientSdiCode = signal('');
   protected readonly cashNewClientPec = signal('');
   protected readonly cashNewClientBillingAddress = signal('');
+  protected readonly cashNewClientBillingPostalCode = signal('');
+  protected readonly cashNewClientBillingProvince = signal('');
+  protected readonly cashNewClientBillingCountry = signal('IT');
 
   // ✅ Modale Dati Identificativi Fattura (quando passi da scontrino → fattura con cliente walk-in o incompleto)
   protected readonly cashInvoiceDataModalOpen = signal(false);
@@ -652,6 +873,9 @@ export class SectionPageComponent {
   protected readonly cashInvSdiCode = signal('');
   protected readonly cashInvPec = signal('');
   protected readonly cashInvBillingAddress = signal('');
+  protected readonly cashInvBillingPostalCode = signal('');
+  protected readonly cashInvBillingProvince = signal('');
+  protected readonly cashInvBillingCountry = signal('IT');
   protected readonly cashInvCapturedType: WritableSignal<CashTransactionRecord['documentType'] | null> = signal(null);
   protected readonly cashPrivacyDispatchChannel = signal<'whatsapp' | 'email' | 'firma'>('whatsapp');
   protected readonly cashPrivacyNoticeAcknowledged = signal(false);
@@ -717,6 +941,20 @@ export class SectionPageComponent {
   });
   protected readonly reportFilter = signal<ReportFilterKey>('all');
   protected readonly reportSearch = signal('');
+  protected readonly reportCurrentPage = toSignal(
+    this.route.queryParamMap.pipe(
+      map((params) => this.parseReportPage(params.get('view'))),
+    ),
+    { initialValue: 'dashboard' as ReportPageKey },
+  );
+  protected readonly reportPeriodPreset = signal<ReportPeriodPreset>('ultimi-30');
+  protected readonly reportPeriodFrom = signal('');
+  protected readonly reportPeriodTo = signal('');
+  protected readonly reportComparePrevious = signal(true);
+  protected readonly reportLastRefreshAt = signal(new Date().toISOString());
+  protected readonly reportDrilldownRequest = signal<ReportDrilldownRequest | null>(null);
+  protected readonly reportDrilldownHeaders = signal<string[]>([]);
+  protected readonly reportDrilldownRows = signal<ReportDrilldownRow[]>([]);
   protected readonly employeeDraft = signal<CashOperatorRecord | null>(null);
   protected readonly selectedEmployee = computed(() => {
     return this.employeeDraft();
@@ -1157,18 +1395,73 @@ export class SectionPageComponent {
     { key: 'dipendenti', label: 'Dipendenti', icon: '👥' },
     { key: 'pagamenti', label: 'Pagamenti', icon: '💳' },
     { key: 'orari-negozio', label: 'Orari Negozio', icon: '🏪' },
-    { key: 'listino', label: 'Listino & Servizi', icon: '💰' },
     { key: 'fiscale', label: 'Fiscale', icon: '🧾' },
     { key: 'preferenze', label: 'Preferenze', icon: '⚙️' },
     { key: 'privacy', label: 'Privacy', icon: '🔒' },
   ] as const;
   protected readonly activeSettingsTab: WritableSignal<string> = signal(
-    this.storage.getItem('audiomax_settings_last_tab') ?? 'azienda'
+    this.SETTINGS_TABS.some((tab) => tab.key === this.storage.getItem('audiomax_settings_last_tab'))
+      ? (this.storage.getItem('audiomax_settings_last_tab') as string)
+      : 'azienda'
   );
   protected setActiveSettingsTab(key: string): void {
     this.activeSettingsTab.set(key);
     this.storage.setItem('audiomax_settings_last_tab', key);
   }
+
+  // ========================================================================
+  // CATALOGO SERVIZI · TABS ORIZZONTALI (stile Impostazioni)
+  // ========================================================================
+  protected readonly SERVICES_TABS = [
+    { key: 'servizi', label: 'Servizi', icon: '🛠️' },
+    { key: 'categorie', label: 'Categorie', icon: '🏷️' },
+    { key: 'listino', label: 'Listino', icon: '💰' },
+  ] as const;
+  protected readonly activeServicesTab: WritableSignal<string> = signal('servizi');
+  protected setActiveServicesTab(key: string): void {
+    this.activeServicesTab.set(key);
+  }
+
+  // ------------------------------------------------------------------------
+  // LISTINO CASSA · vista in sola lettura con selezione ed export PDF
+  // ------------------------------------------------------------------------
+  protected readonly listinoQuery = signal('');
+  protected readonly listinoCategoryFilter = signal('tutte');
+  /** Id delle voci di listino selezionate per l'export */
+  protected readonly listinoSelectedIds = signal<string[]>([]);
+
+  protected readonly listinoCategoryOptions = computed(() =>
+    [...new Set(this.allCashProducts().map((item) => item.category).filter((category) => !!category))].sort(
+      (left, right) => left.localeCompare(right, 'it-IT'),
+    ),
+  );
+
+  protected readonly listinoFilteredProducts = computed(() => {
+    const query = this.listinoQuery().trim().toLowerCase();
+    const category = this.listinoCategoryFilter();
+
+    return this.allCashProducts()
+      .filter((item) => `${item.name} ${item.category}`.toLowerCase().includes(query))
+      .filter((item) => (category === 'tutte' ? true : item.category === category))
+      .sort(
+        (left, right) =>
+          left.category.localeCompare(right.category, 'it-IT') || left.name.localeCompare(right.name, 'it-IT'),
+      );
+  });
+
+  protected readonly listinoSelectedProducts = computed(() => {
+    const selected = new Set(this.listinoSelectedIds());
+    return this.allCashProducts()
+      .filter((item) => selected.has(item.id))
+      .sort(
+        (left, right) =>
+          left.category.localeCompare(right.category, 'it-IT') || left.name.localeCompare(right.name, 'it-IT'),
+      );
+  });
+
+  protected readonly listinoSelectionTotal = computed(() =>
+    this.listinoSelectedProducts().reduce((total, item) => total + this.resolveCashProductPrice(item), 0),
+  );
 
   // ========================================================================
   // TASK 2: AGENDA PAGINA + DASHBOARD · MINI-MODALE HR ⚡ Operazioni Dipendenti
@@ -2406,7 +2699,7 @@ export class SectionPageComponent {
     const query = this.inventoryQuery().trim().toLowerCase();
     const statusFilter = this.inventoryStatusFilter();
 
-    return [...this.historicalInventoryItems()]
+    return [...this.allInventoryItems()]
       .filter((item) =>
         `${item.name} ${item.sku} ${item.category} ${item.supplier} ${item.location} ${item.status}`
           .toLowerCase()
@@ -2717,7 +3010,7 @@ export class SectionPageComponent {
     return [...groups.values()].sort((left, right) => right.totalCost - left.totalCost);
   });
   protected readonly warehouseHistoricalValue = computed(() =>
-    this.historicalInventoryItems().reduce((total, item) => total + (Math.max(0, item.stock) * item.unitCost), 0),
+    this.allInventoryItems().reduce((total, item) => total + (Math.max(0, item.stock) * item.unitCost), 0),
   );
   protected readonly warehouseLowStockAlerts = computed(() =>
     this.allInventoryItems().filter((item) => item.stock <= item.minStock),
@@ -2734,7 +3027,7 @@ export class SectionPageComponent {
     if (view === 'acquisto') {
       return {
         title: 'Acquisti prodotti',
-        description: 'Controlla gli ultimi carichi, i documenti di acquisto e i fornitori più utilizzati.',
+        description: 'Controlla gli ultimi carichi e i documenti di acquisto, con scarico rapido delle giacenze di magazzino.',
       };
     }
 
@@ -2762,7 +3055,7 @@ export class SectionPageComponent {
     if (view === 'valore') {
       return {
         title: 'Valore magazzino',
-        description: 'Mostra il valore reale dello stock, consente l’esportazione dell’inventario e segnala eventuali anomalie di giacenza.',
+        description: 'Mostra il valore per articolo, consente l’inventario a una data selezionata ed evidenzia eventuali anomalie di giacenza.',
       };
     }
 
@@ -2770,6 +3063,20 @@ export class SectionPageComponent {
       return {
         title: 'Storico movimenti',
         description: 'Filtra carichi, scarichi e rettifiche per data, operatore e causale.',
+      };
+    }
+
+    if (view === 'ordini') {
+      return {
+        title: 'Registro ordini',
+        description: 'Consulta gli ordini del portale e del gestionale con filtri per data, stato e dettaglio righe.',
+      };
+    }
+
+    if (view === 'fornitori') {
+      return {
+        title: 'Fornitori',
+        description: 'Consulta tutti i fornitori presenti, gli ordini fatti, l’ultimo documento e il dettaglio completo per fornitore.',
       };
     }
 
@@ -2809,18 +3116,136 @@ export class SectionPageComponent {
       )
       .slice(0, 40),
   );
-  protected readonly warehouseValuationRows = computed(() =>
-    [...this.warehouseInventorySummary()]
+  protected readonly warehouseValuationRows = computed<WarehouseValuationRow[]>(() =>
+    [...this.historicalInventoryItems()]
+      .map((item) => ({
+        item,
+        quantityAvailable: Math.max(0, item.stock),
+        valuationByLot: Math.max(0, item.stock) * item.unitCost,
+      }))
       .sort((left, right) => right.valuationByLot - left.valuationByLot)
       .slice(0, 40),
   );
+  protected readonly warehouseValuationTotalValue = computed(() =>
+    this.historicalInventoryItems().reduce((total, item) => total + (Math.max(0, item.stock) * item.unitCost), 0),
+  );
   protected readonly warehouseInventoryExportRows = computed(() =>
-    this.warehouseInventorySummary().map((entry) => ({
-      ...entry,
-      valuation: entry.valuationByLot,
-      anomaly: entry.item.stock < 0 ? 'GIACENZA NEGATIVA' : '',
+    this.historicalInventoryItems().map((item) => ({
+      item,
+      quantityAvailable: Math.max(0, item.stock),
+      valuation: Math.max(0, item.stock) * item.unitCost,
+      anomaly: item.stock < 0 ? 'GIACENZA NEGATIVA' : '',
     })),
   );
+  protected readonly warehouseSupplierAllRows = computed<WarehouseSupplierSummaryRow[]>(() => {
+    const labels = new Map<string, string>();
+
+    this.allExpenseSuppliers().forEach((supplier) => {
+      const label = supplier.businessName.trim();
+      if (!label) {
+        return;
+      }
+      labels.set(this.normalizeLookup(label), label);
+    });
+
+    this.allWarehousePurchases().forEach((purchase) => {
+      const label = (purchase.supplier || '').trim() || 'Senza fornitore';
+      const key = this.normalizeLookup(label);
+      if (!labels.has(key)) {
+        labels.set(key, label);
+      }
+    });
+
+    const grouped = new Map<string, WarehouseSupplierSummaryRow & { itemIds: Set<string> }>();
+
+    labels.forEach((label, key) => {
+      grouped.set(key, {
+        supplier: label,
+        records: 0,
+        totalCost: 0,
+        lastReceivedDate: '',
+        lastDocumentNumber: '',
+        distinctItems: 0,
+        itemIds: new Set<string>(),
+      });
+    });
+
+    this.allWarehousePurchases().forEach((purchase) => {
+      const label = (purchase.supplier || '').trim() || 'Senza fornitore';
+      const key = this.normalizeLookup(label);
+      const current = grouped.get(key) ?? {
+        supplier: label,
+        records: 0,
+        totalCost: 0,
+        lastReceivedDate: '',
+        lastDocumentNumber: '',
+        distinctItems: 0,
+        itemIds: new Set<string>(),
+      };
+
+      current.records += 1;
+      current.totalCost += purchase.totalCost;
+      current.itemIds.add(purchase.inventoryItemId);
+
+      if (!current.lastReceivedDate || purchase.receivedDate > current.lastReceivedDate) {
+        current.lastReceivedDate = purchase.receivedDate;
+        current.lastDocumentNumber = purchase.documentNumber;
+      }
+
+      grouped.set(key, current);
+    });
+
+    return [...grouped.values()]
+      .map(({ itemIds, ...row }) => ({
+        ...row,
+        distinctItems: itemIds.size,
+      }))
+      .sort((left, right) => {
+        if (left.lastReceivedDate !== right.lastReceivedDate) {
+          return right.lastReceivedDate.localeCompare(left.lastReceivedDate);
+        }
+        return left.supplier.localeCompare(right.supplier, 'it-IT');
+      });
+  });
+  protected readonly warehouseSupplierRows = computed<WarehouseSupplierSummaryRow[]>(() => {
+    const query = this.normalizeLookup(this.warehouseSupplierQuery());
+
+    return this.warehouseSupplierAllRows().filter((row) =>
+      !query
+      || this.normalizeLookup(
+        `${row.supplier} ${row.lastDocumentNumber} ${row.lastReceivedDate} ${row.records}`,
+      ).includes(query),
+    );
+  });
+  protected readonly warehouseSupplierDetail = computed(() => {
+    const supplierName = this.warehouseSupplierDetailName();
+    return supplierName
+      ? this.warehouseSupplierAllRows().find(
+        (row) => this.normalizeLookup(row.supplier) === this.normalizeLookup(supplierName),
+      ) ?? null
+      : null;
+  });
+  protected readonly warehouseSupplierDetailOrders = computed<SupplierOrderHistoryEntry[]>(() => {
+    const supplier = this.warehouseSupplierDetail();
+    if (!supplier) {
+      return [];
+    }
+
+    const inventoryMap = new Map(this.allInventoryItems().map((item) => [item.id, item.name]));
+
+    return this.allWarehousePurchases()
+      .filter((purchase) => this.normalizeLookup(purchase.supplier) === this.normalizeLookup(supplier.supplier))
+      .sort((left, right) => right.receivedDate.localeCompare(left.receivedDate))
+      .map((purchase) => ({
+        purchase,
+        itemName: inventoryMap.get(purchase.inventoryItemId) ?? 'Articolo magazzino',
+        linkedExpense:
+          this.allExpenseRecords().find(
+            (expense) =>
+              expense.id === purchase.linkedExpenseId || expense.sourceReferenceId === purchase.id,
+          ) ?? null,
+      }));
+  });
   protected readonly warehouseTotalQuantity = computed(() =>
     this.allInventoryItems().reduce((total, item) => total + item.stock, 0),
   );
@@ -2879,11 +3304,43 @@ export class SectionPageComponent {
         `${item.name} ${item.category} ${item.price}`.toLowerCase().includes(query),
       )
       .filter((item) => (category === 'tutte' ? true : item.category === category))
-      .filter((item) =>
-        salesMode === 'servizi' ? item.linkedInventoryItemId === null : item.linkedInventoryItemId !== null,
-      )
+      .filter((item) => {
+        if (salesMode === 'servizi') return item.linkedInventoryItemId === null;
+        if (salesMode === 'rivendita') return item.linkedInventoryItemId !== null;
+        if (salesMode === 'storico') return true;
+        if (salesMode === 'tutti') return true;
+        return false;
+      })
       .sort((left, right) => Number(right.shortcut) - Number(left.shortcut))
       .slice(0, 12);
+  });
+  protected readonly cashVisibleCatalogCount = computed(() =>
+    this.cashSalesMode() === 'preventivi' ? this.confirmedQuotes().length : this.filteredCashProducts().length,
+  );
+  protected readonly cashVisibleCategories = computed(() => {
+    const salesMode = this.cashSalesMode();
+
+    if (salesMode === 'servizi') {
+      return this.cashCategories();
+    }
+
+    if (salesMode === 'rivendita') {
+      return this.productCategories();
+    }
+
+    if (salesMode === 'tutti') {
+      return [...new Set([...this.cashCategories(), ...this.productCategories()])].sort((left, right) =>
+        left.localeCompare(right, 'it-IT'),
+      );
+    }
+
+    if (salesMode === 'storico') {
+      return [...new Set([...this.cashCategories(), ...this.productCategories()])].sort((left, right) =>
+        left.localeCompare(right, 'it-IT'),
+      );
+    }
+
+    return [];
   });
   protected readonly cashInventoryById = computed(
     () => new Map(this.allInventoryItems().map((item) => [item.id, item])),
@@ -2980,6 +3437,106 @@ export class SectionPageComponent {
       appointments,
       tickets,
     };
+  });
+  protected readonly cashSelectedClientHistory = computed<SelectedClientHistory>(() => {
+    const client = this.selectedCashClient();
+    if (!client) {
+      return {
+        quotes: [],
+        transactions: [],
+        receipts: [],
+        invoices: [],
+        appointments: [],
+        tickets: [],
+      };
+    }
+
+    const quotes = this.allQuotes()
+      .filter((quote) =>
+        this.matchesClientReference(client, {
+          clientId: quote.clientId ?? null,
+          customerName: quote.customerName,
+          customerEmail: quote.customerEmail,
+          customerPhone: quote.customerPhone,
+        }),
+      )
+      .sort((left, right) =>
+        (right.issueDate ?? right.dueDate).localeCompare(left.issueDate ?? left.dueDate),
+      );
+    const transactions = this.allCashTransactions()
+      .filter((transaction) =>
+        this.matchesClientReference(client, {
+          clientId: transaction.clientId,
+          customerName: transaction.customerName,
+        }),
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const appointments = this.allAppointments()
+      .filter((appointment) =>
+        this.matchesClientReference(client, {
+          clientId: appointment.clientId ?? null,
+          customerName: appointment.customerName,
+        }),
+      )
+      .sort((left, right) => right.scheduledAt.localeCompare(left.scheduledAt));
+    const tickets = this.allServiceTickets()
+      .filter((ticket) =>
+        this.matchesClientReference(client, {
+          customerName: ticket.customerName,
+        }),
+      )
+      .sort((left, right) =>
+        (right.closedAt ?? right.createdAt).localeCompare(left.closedAt ?? left.createdAt),
+      );
+
+    return {
+      quotes,
+      transactions,
+      receipts: transactions.filter((transaction) => transaction.documentType === 'scontrino'),
+      invoices: transactions.filter((transaction) => transaction.documentType === 'fattura'),
+      appointments,
+      tickets,
+    };
+  });
+  protected readonly cashSelectedClientRecentItems = computed<CashClientRecentItem[]>(() => {
+    const history = this.cashSelectedClientHistory();
+
+    return [
+      ...history.quotes.slice(0, 4).map((quote) => ({
+        id: `quote-${quote.id}`,
+        kind: 'preventivo' as const,
+        title: quote.projectType,
+        meta: `${quote.stage} · € ${quote.value.toLocaleString('it-IT')}`,
+        dateKey: quote.issueDate ?? quote.dueDate,
+        tone: 'accent' as const,
+      })),
+      ...history.transactions.slice(0, 4).map((transaction) => ({
+        id: `txn-${transaction.id}`,
+        kind: 'vendita' as const,
+        title: transaction.reference,
+        meta: `${transaction.status} · € ${transaction.total.toLocaleString('it-IT')}`,
+        dateKey: transaction.createdAt,
+        tone: transaction.status === 'insoluto' ? 'warning' as const : 'success' as const,
+      })),
+      ...history.appointments.slice(0, 4).map((appointment) => ({
+        id: `appt-${appointment.id}`,
+        kind: 'appuntamento' as const,
+        title: appointment.title,
+        meta: `${appointment.status} · ${appointment.technician || 'Non assegnato'}`,
+        dateKey: appointment.scheduledAt,
+        tone: 'neutral' as const,
+      })),
+      ...history.tickets.slice(0, 4).map((ticket) => ({
+        id: `ticket-${ticket.id}`,
+        kind: 'ticket' as const,
+        title: ticket.title,
+        meta: `${ticket.status} · ${ticket.technician || 'Non assegnato'}`,
+        dateKey: ticket.closedAt ?? ticket.createdAt,
+        tone: ticket.resolutionStatus === 'risolto' ? 'success' as const : 'warning' as const,
+      })),
+    ]
+      .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
+      .slice(0, 8);
   });
   protected readonly selectedSupplierOrders = computed<SupplierOrderHistoryEntry[]>(() => {
     const supplier = this.selectedSupplier();
@@ -3863,6 +4420,18 @@ export class SectionPageComponent {
   }
 
   protected removeEmployeeLeave(id: string): void {
+    const leave = this.employeeLeaves().find((item) => item.id === id);
+
+    // Conferma esplicita: l'assenza sparisce dal registro e dai conteggi ferie/permessi
+    const confirmed = window.confirm(
+      leave
+        ? `Eliminare l'assenza di "${leave.employeeName}" (${this.employeeLeaveTypeLabel(leave.leaveType)} dal ${leave.startDate} al ${leave.endDate})?`
+        : 'Eliminare questa assenza dal registro?',
+    );
+    if (!confirmed) {
+      return;
+    }
+
     this.data.deleteEmployeeLeave(id);
   }
 
@@ -4575,66 +5144,609 @@ export class SectionPageComponent {
     }
     return [...totals.values()].sort((left, right) => right.total - left.total);
   });
-  protected readonly reportOverviewCards = computed<ReportStatusTile[]>(() => [
-    {
-      label: 'Incassato cassa',
-      value: Math.round(this.cashPaidTransactionsTotal()),
-      detail: `${this.cashTransactionsTotalCount()} movimenti registrati`,
-      tone: 'success',
-      format: 'currency',
-    },
-    {
-      label: 'Pipeline preventivi',
-      value: Math.round(this.quoteTotalValue()),
-      detail: `${this.quoteConversionRate()}% conversione`,
-      tone: 'info',
-      format: 'currency',
-    },
-    {
-      label: 'Valore magazzino',
-      value: Math.round(this.warehouseHistoricalValue()),
-      detail: `${this.warehouseLowStockAlerts().length} articoli sotto soglia`,
-      tone: this.warehouseNegativeStockItems().length ? 'danger' : 'neutral',
-      format: 'currency',
-    },
-    {
-      label: 'Spese del mese',
-      value: Math.round(this.expenseMonthlyTotal()),
-      detail: `${this.expenseUpcomingInstallments().length} scadenze aperte`,
-      tone: 'warning',
-      format: 'currency',
-    },
-    {
-      label: 'Clienti attivi',
-      value: this.allClients().length,
-      detail: `${this.clientPendingAlerts()} con insoluti`,
-      tone: 'neutral',
-      format: 'number',
-    },
-    {
-      label: 'Ticket tecnici aperti',
-      value: this.allServiceTickets().filter((ticket) => ticket.status !== 'chiuso').length,
-      detail: `${this.highPriorityFilteredTicketsCount()} ad alta priorità`,
-      tone: this.highPriorityFilteredTicketsCount() ? 'danger' : 'info',
-      format: 'number',
-    },
-  ]);
+  protected readonly reportPeriodOptions: ReportPeriodOption[] = [
+    { value: 'oggi', label: 'Oggi' },
+    { value: 'ultimi-7', label: 'Ultimi 7 giorni' },
+    { value: 'ultimi-30', label: 'Ultimi 30 giorni' },
+    { value: 'mese-corrente', label: 'Mese corrente' },
+    { value: 'mese-precedente', label: 'Mese precedente' },
+    { value: 'trimestre-corrente', label: 'Trimestre corrente' },
+    { value: 'anno-corrente', label: 'Anno corrente' },
+    { value: 'anno-precedente', label: 'Anno precedente' },
+    { value: 'custom', label: 'Personalizzato' },
+  ];
+  protected readonly reportPeriodRange = computed<ReportPeriodRange>(() =>
+    this.buildReportPeriodRange(
+      this.reportPeriodPreset(),
+      this.reportPeriodFrom(),
+      this.reportPeriodTo(),
+      this.reportComparePrevious(),
+    ),
+  );
+  protected readonly reportCurrentPaidTransactions = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allCashTransactions().filter((transaction) => transaction.status === 'pagato'),
+      (transaction) => transaction.settledAt || transaction.createdAt,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousPaidTransactions = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allCashTransactions().filter((transaction) => transaction.status === 'pagato'),
+      (transaction) => transaction.settledAt || transaction.createdAt,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentQuotes = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allQuotes(),
+      (quote) => quote.issueDate || quote.dueDate,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousQuotes = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allQuotes(),
+      (quote) => quote.issueDate || quote.dueDate,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentExpenses = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allExpenseRecords().filter((expense) => expense.status !== 'annullata'),
+      (expense) => expense.expenseDate,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousExpenses = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allExpenseRecords().filter((expense) => expense.status !== 'annullata'),
+      (expense) => expense.expenseDate,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentDdts = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.ddtDocuments(),
+      (record) => record.documentDate || record.createdAt,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousDdts = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.ddtDocuments(),
+      (record) => record.documentDate || record.createdAt,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentAppointments = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allAppointments(),
+      (appointment) => appointment.scheduledAt,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousAppointments = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allAppointments(),
+      (appointment) => appointment.scheduledAt,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentTickets = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allServiceTickets(),
+      (ticket) => ticket.createdAt,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousTickets = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allServiceTickets(),
+      (ticket) => ticket.createdAt,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentWarehouseMovements = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allWarehouseMovements(),
+      (movement) => movement.movedAt,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousWarehouseMovements = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allWarehouseMovements(),
+      (movement) => movement.movedAt,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentWarehousePurchases = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allWarehousePurchases(),
+      (purchase) => purchase.receivedDate,
+      this.reportPeriodRange().from,
+      this.reportPeriodRange().to,
+    ),
+  );
+  protected readonly reportPreviousWarehousePurchases = computed(() =>
+    this.filterRecordsByIsoDate(
+      this.allWarehousePurchases(),
+      (purchase) => purchase.receivedDate,
+      this.reportPeriodRange().previousFrom,
+      this.reportPeriodRange().previousTo,
+    ),
+  );
+  protected readonly reportCurrentClientRows = computed<ReportClientActivityRow[]>(() => {
+    const rows = new Map<string, ReportClientActivityRow>();
+    const clientsById = new Map(this.allClients().map((client) => [client.id, client]));
+    const clientsByName = new Map(
+      this.allClients().map((client) => [this.normalizeLookup(client.name), client]),
+    );
+
+    const ensureRow = (client: ClientRecord | null): ReportClientActivityRow | null => {
+      if (!client) {
+        return null;
+      }
+      const current =
+        rows.get(client.id) ??
+        {
+          client,
+          revenue: 0,
+          quotes: 0,
+          appointments: 0,
+          tickets: 0,
+          ddts: 0,
+          activities: 0,
+        };
+      rows.set(client.id, current);
+      return current;
+    };
+
+    for (const transaction of this.reportCurrentPaidTransactions()) {
+      const client =
+        (transaction.clientId ? clientsById.get(transaction.clientId) ?? null : null) ??
+        clientsByName.get(this.normalizeLookup(transaction.customerName)) ??
+        null;
+      const row = ensureRow(client);
+      if (!row) continue;
+      row.revenue += transaction.total;
+      row.activities += 1;
+    }
+
+    for (const quote of this.reportCurrentQuotes()) {
+      const client =
+        (quote.clientId ? clientsById.get(quote.clientId) ?? null : null) ??
+        clientsByName.get(this.normalizeLookup(quote.customerName)) ??
+        null;
+      const row = ensureRow(client);
+      if (!row) continue;
+      row.quotes += 1;
+      row.activities += 1;
+    }
+
+    for (const appointment of this.reportCurrentAppointments()) {
+      const client =
+        (appointment.clientId ? clientsById.get(appointment.clientId) ?? null : null) ??
+        clientsByName.get(this.normalizeLookup(appointment.customerName)) ??
+        null;
+      const row = ensureRow(client);
+      if (!row) continue;
+      row.appointments += 1;
+      row.activities += 1;
+    }
+
+    for (const ticket of this.reportCurrentTickets()) {
+      const client = clientsByName.get(this.normalizeLookup(ticket.customerName)) ?? null;
+      const row = ensureRow(client);
+      if (!row) continue;
+      row.tickets += 1;
+      row.activities += 1;
+    }
+
+    for (const ddt of this.reportCurrentDdts()) {
+      const client =
+        (ddt.clientId ? clientsById.get(ddt.clientId) ?? null : null) ??
+        clientsByName.get(this.normalizeLookup(ddt.clientSnapshot || ddt.recipientSnapshot?.name || '')) ??
+        null;
+      const row = ensureRow(client);
+      if (!row) continue;
+      row.ddts += 1;
+      row.activities += 1;
+    }
+
+    return [...rows.values()].sort(
+      (left, right) =>
+        right.revenue - left.revenue ||
+        right.activities - left.activities ||
+        left.client.name.localeCompare(right.client.name, 'it-IT'),
+    );
+  });
+  protected readonly reportPreviousActiveClientsCount = computed(() => {
+    const clientsById = new Map(this.allClients().map((client) => [client.id, client]));
+    const clientsByName = new Map(
+      this.allClients().map((client) => [this.normalizeLookup(client.name), client.id]),
+    );
+    const ids = new Set<string>();
+    const registerClient = (clientId: string | null | undefined, name: string | null | undefined): void => {
+      const direct = clientId ? clientsById.get(clientId)?.id ?? null : null;
+      const byName = name ? clientsByName.get(this.normalizeLookup(name)) ?? null : null;
+      const resolved = direct ?? byName;
+      if (resolved) ids.add(resolved);
+    };
+
+    for (const transaction of this.reportPreviousPaidTransactions()) {
+      registerClient(transaction.clientId, transaction.customerName);
+    }
+    for (const quote of this.reportPreviousQuotes()) {
+      registerClient(quote.clientId ?? null, quote.customerName);
+    }
+    for (const appointment of this.reportPreviousAppointments()) {
+      registerClient(appointment.clientId ?? null, appointment.customerName);
+    }
+    for (const ticket of this.reportPreviousTickets()) {
+      registerClient(null, ticket.customerName);
+    }
+    for (const ddt of this.reportPreviousDdts()) {
+      registerClient(ddt.clientId ?? null, ddt.clientSnapshot || ddt.recipientSnapshot?.name || '');
+    }
+
+    return ids.size;
+  });
+  protected readonly reportCurrentServicePerformanceRows = computed<ReportServiceActivityRow[]>(() => {
+    const services = this.servicesOnly();
+    const stats = new Map(
+      services.map((service) => [
+        service.id,
+        {
+          salesCount: 0,
+          salesTotal: 0,
+          quoteCount: 0,
+        },
+      ]),
+    );
+    const serviceNameMap = new Map(
+      services.map((service) => [service.name.trim().toLowerCase(), service.id]),
+    );
+
+    for (const transaction of this.reportCurrentPaidTransactions()) {
+      for (const line of transaction.lines) {
+        if (!stats.has(line.productId)) {
+          continue;
+        }
+        const current = stats.get(line.productId)!;
+        current.salesCount += Number(line.quantity) || 0;
+        current.salesTotal += Number(line.total) || 0;
+      }
+    }
+
+    for (const quote of this.reportCurrentQuotes()) {
+      const servicesInQuote = new Set<string>();
+      for (const line of quote.lines ?? []) {
+        if (line.kind !== 'servizio') {
+          continue;
+        }
+        const matched = serviceNameMap.get(line.description.trim().toLowerCase());
+        if (matched) {
+          servicesInQuote.add(matched);
+        }
+      }
+      for (const serviceId of servicesInQuote) {
+        const current = stats.get(serviceId);
+        if (current) {
+          current.quoteCount += 1;
+        }
+      }
+    }
+
+    return services
+      .map((service) => ({
+        id: service.id,
+        name: service.name,
+        category: service.category,
+        price: service.price,
+        quoteCount: stats.get(service.id)?.quoteCount ?? 0,
+        salesCount: stats.get(service.id)?.salesCount ?? 0,
+        salesTotal: stats.get(service.id)?.salesTotal ?? 0,
+      }))
+      .sort(
+        (left, right) =>
+          right.salesTotal - left.salesTotal ||
+          right.quoteCount - left.quoteCount ||
+          left.name.localeCompare(right.name, 'it-IT'),
+      );
+  });
+  protected readonly reportCurrentServiceTopPerformers = computed(() =>
+    this.reportCurrentServicePerformanceRows()
+      .filter((service) => service.salesCount > 0 || service.quoteCount > 0)
+      .slice(0, 6),
+  );
+  protected readonly reportCurrentServiceLowRotation = computed(() =>
+    [...this.reportCurrentServicePerformanceRows()]
+      .sort(
+        (left, right) =>
+          left.salesCount + left.quoteCount - (right.salesCount + right.quoteCount) ||
+          left.price - right.price ||
+          left.name.localeCompare(right.name, 'it'),
+      )
+      .slice(0, 6),
+  );
+  protected readonly reportCurrentQuoteStageSummary = computed(() => {
+    const quotes = this.reportCurrentQuotes();
+    const totalValue = quotes.reduce((total, quote) => total + quote.value, 0);
+    const draftQuotes = quotes.filter((quote) => quote.stage === 'bozza');
+    const negotiationQuotes = quotes.filter((quote) => quote.stage === 'trattativa');
+    const readyQuotes = quotes.filter((quote) => quote.stage === 'ordine' || quote.stage === 'confermato');
+    const draftValue = draftQuotes.reduce((total, quote) => total + quote.value, 0);
+    const negotiationValue = negotiationQuotes.reduce((total, quote) => total + quote.value, 0);
+    const readyValue = readyQuotes.reduce((total, quote) => total + quote.value, 0);
+
+    return [
+      {
+        filter: 'tutte' as const,
+        tone: 'all' as const,
+        kicker: 'Vista filtrata',
+        label: 'Archivio preventivi',
+        count: quotes.length,
+        value: totalValue,
+        detail: `Periodo ${this.reportPeriodRange().label.toLowerCase()}.`,
+      },
+      {
+        filter: 'bozza' as const,
+        tone: 'warning' as const,
+        kicker: 'Da definire',
+        label: 'Bozze',
+        count: draftQuotes.length,
+        value: draftValue,
+        detail: 'Offerte non ancora portate in trattativa.',
+      },
+      {
+        filter: 'trattativa' as const,
+        tone: 'info' as const,
+        kicker: 'In trattativa',
+        label: 'In attesa cliente',
+        count: negotiationQuotes.length,
+        value: negotiationValue,
+        detail: 'Preventivi in lavorazione o da richiamare.',
+      },
+      {
+        filter: 'ordine' as const,
+        tone: 'success' as const,
+        kicker: 'Accettati',
+        label: 'Confermati',
+        count: readyQuotes.length,
+        value: readyValue,
+        detail: 'Ordini confermati o già da evadere.',
+      },
+    ];
+  });
+  protected readonly reportCurrentWarehouseSupplierRows = computed<WarehouseSupplierSummaryRow[]>(() => {
+    const grouped = new Map<string, WarehouseSupplierSummaryRow & { itemIds: Set<string> }>();
+    for (const purchase of this.reportCurrentWarehousePurchases()) {
+      const key = purchase.supplier.trim() || 'Fornitore non indicato';
+      const current =
+        grouped.get(key) ??
+        {
+          supplier: key,
+          records: 0,
+          totalCost: 0,
+          lastReceivedDate: '',
+          lastDocumentNumber: '',
+          distinctItems: 0,
+          itemIds: new Set<string>(),
+        };
+      current.records += 1;
+      current.totalCost += purchase.totalCost;
+      current.itemIds.add(purchase.inventoryItemId);
+      if (!current.lastReceivedDate || purchase.receivedDate > current.lastReceivedDate) {
+        current.lastReceivedDate = purchase.receivedDate;
+        current.lastDocumentNumber = purchase.documentNumber;
+      }
+      grouped.set(key, current);
+    }
+
+    return [...grouped.values()]
+      .map(({ itemIds, ...row }) => ({
+        ...row,
+        distinctItems: itemIds.size,
+      }))
+      .sort(
+        (left, right) =>
+          right.totalCost - left.totalCost ||
+          right.records - left.records ||
+          right.lastReceivedDate.localeCompare(left.lastReceivedDate),
+      );
+  });
+  protected readonly reportOverviewCards = computed<ReportOverviewCard[]>(() => {
+    const range = this.reportPeriodRange();
+    const currentCash = this.reportCurrentPaidTransactions();
+    const previousCash = this.reportPreviousPaidTransactions();
+    const currentCashTotal = currentCash.reduce((sum, transaction) => sum + transaction.total, 0);
+    const previousCashTotal = previousCash.reduce((sum, transaction) => sum + transaction.total, 0);
+    const currentExpenses = this.reportCurrentExpenses();
+    const previousExpenses = this.reportPreviousExpenses();
+    const currentExpenseTotal = currentExpenses.reduce((sum, expense) => sum + expense.amountGross, 0);
+    const previousExpenseTotal = previousExpenses.reduce((sum, expense) => sum + expense.amountGross, 0);
+    const currentQuotes = this.reportCurrentQuotes();
+    const previousQuotes = this.reportPreviousQuotes();
+    const currentAcceptedQuotes = currentQuotes.filter(
+      (quote) => quote.stage === 'ordine' || quote.stage === 'confermato',
+    );
+    const previousAcceptedQuotes = previousQuotes.filter(
+      (quote) => quote.stage === 'ordine' || quote.stage === 'confermato',
+    );
+    const currentDdts = this.reportCurrentDdts().filter((record) => record.status !== 'annullato');
+    const previousDdts = this.reportPreviousDdts().filter((record) => record.status !== 'annullato');
+    const currentOpenTickets = this.reportCurrentTickets().filter((ticket) => ticket.status !== 'chiuso');
+    const previousOpenTickets = this.reportPreviousTickets().filter((ticket) => ticket.status !== 'chiuso');
+    const currentMovements = this.reportCurrentWarehouseMovements();
+    const previousMovements = this.reportPreviousWarehouseMovements();
+    const currentClients = this.reportCurrentClientRows();
+    const previousClients = this.reportPreviousActiveClientsCount();
+    const currentConversion = currentQuotes.length
+      ? Math.round((currentAcceptedQuotes.length / currentQuotes.length) * 100)
+      : 0;
+    const topClient = currentClients[0]?.client.name ?? 'Nessuna attività cliente nel periodo';
+
+    return [
+      this.buildReportOverviewCard({
+        label: 'Incassi effettivi',
+        value: currentCashTotal,
+        previousValue: previousCashTotal,
+        detail: `${currentCash.length} documenti pagati`,
+        tone: 'success',
+        format: 'currency',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'cash-paid',
+          title: 'Incassi effettivi',
+          subtitle: `Documenti pagati · ${range.label}`,
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'Costi registrati',
+        value: currentExpenseTotal,
+        previousValue: previousExpenseTotal,
+        detail: `${currentExpenses.length} spese contabilizzate`,
+        tone: 'warning',
+        format: 'currency',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'expenses',
+          title: 'Costi registrati',
+          subtitle: `Spese del periodo · ${range.label}`,
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'Preventivi creati',
+        value: currentQuotes.length,
+        previousValue: previousQuotes.length,
+        detail: `${currentAcceptedQuotes.length} accettati · ${currentConversion}% conversione`,
+        tone: 'info',
+        format: 'number',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'quotes-all',
+          title: 'Preventivi creati',
+          subtitle: `Preventivi nel periodo · ${range.label}`,
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'Preventivi accettati',
+        value: currentAcceptedQuotes.length,
+        previousValue: previousAcceptedQuotes.length,
+        detail: `€ ${this.formatCurrency(currentAcceptedQuotes.reduce((sum, quote) => sum + quote.value, 0))} confermati`,
+        tone: currentAcceptedQuotes.length ? 'success' : 'neutral',
+        format: 'number',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'quotes-stage',
+          title: 'Preventivi accettati',
+          subtitle: `Ordini e confermati · ${range.label}`,
+          filter: 'ordine|confermato',
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'Clienti attivi',
+        value: currentClients.length,
+        previousValue: previousClients,
+        detail: topClient,
+        tone: 'neutral',
+        format: 'number',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'clients-active',
+          title: 'Clienti attivi',
+          subtitle: `Clienti con attività reale · ${range.label}`,
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'Ticket aperti',
+        value: currentOpenTickets.length,
+        previousValue: previousOpenTickets.length,
+        detail: `${currentOpenTickets.filter((ticket) => ticket.priority === 'alta').length} urgenti`,
+        tone: currentOpenTickets.some((ticket) => ticket.priority === 'alta') ? 'danger' : 'info',
+        format: 'number',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'tickets',
+          title: 'Ticket aperti',
+          subtitle: `Ticket tecnici del periodo · ${range.label}`,
+          filter: 'open',
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'DDT emessi',
+        value: currentDdts.filter((record) => record.status === 'emesso' || record.status === 'consegnato').length,
+        previousValue: previousDdts.filter((record) => record.status === 'emesso' || record.status === 'consegnato').length,
+        detail: `${currentDdts.filter((record) => record.status === 'bozza').length} bozze nel periodo`,
+        tone: 'info',
+        format: 'number',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'ddts',
+          title: 'DDT del periodo',
+          subtitle: `Documenti di trasporto · ${range.label}`,
+        },
+      }),
+      this.buildReportOverviewCard({
+        label: 'Movimenti magazzino',
+        value: currentMovements.length,
+        previousValue: previousMovements.length,
+        detail: `${currentMovements.filter((movement) => movement.movementType === 'carico').length} carichi · ${currentMovements.filter((movement) => movement.movementType === 'scarico').length} scarichi`,
+        tone: 'neutral',
+        format: 'number',
+        periodLabel: range.label,
+        previousLabel: range.previousLabel,
+        drilldown: {
+          kind: 'warehouse-movements',
+          title: 'Movimenti di magazzino',
+          subtitle: `Movimenti del periodo · ${range.label}`,
+        },
+      }),
+    ];
+  });
   protected readonly reportRevenueMixBars = computed<ReportBarRow[]>(() => {
+    const currentCashTotal = this.reportCurrentPaidTransactions().reduce((sum, transaction) => sum + transaction.total, 0);
+    const currentQuoteTotal = this.reportCurrentQuotes().reduce((sum, quote) => sum + quote.value, 0);
+    const currentServiceTotal = this.reportCurrentServicePerformanceRows().reduce((sum, service) => sum + service.salesTotal, 0);
+    const currentExpenseTotal = this.reportCurrentExpenses().reduce((sum, expense) => sum + expense.amountGross, 0);
     const rows = [
       {
         label: 'Cassa',
-        value: this.cashPaidTransactionsTotal(),
-        detail: `${this.cashTransactionsTotalCount()} operazioni`,
+        value: currentCashTotal,
+        detail: `${this.reportCurrentPaidTransactions().length} operazioni`,
       },
       {
         label: 'Preventivi',
-        value: this.quoteTotalValue(),
-        detail: `${this.allQuotes().length} documenti`,
+        value: currentQuoteTotal,
+        detail: `${this.reportCurrentQuotes().length} documenti`,
       },
       {
         label: 'Servizi',
-        value: this.servicePerformanceRows().reduce((total, service) => total + service.salesTotal, 0),
-        detail: `${this.serviceTopPerformers().length} top performer`,
+        value: currentServiceTotal,
+        detail: `${this.reportCurrentServiceTopPerformers().length} servizi attivi`,
       },
       {
         label: 'Magazzino',
@@ -4643,8 +5755,8 @@ export class SectionPageComponent {
       },
       {
         label: 'Spese',
-        value: this.expenseMonthlyTotal(),
-        detail: `${this.allExpenseRecords().length} registrazioni`,
+        value: currentExpenseTotal,
+        detail: `${this.reportCurrentExpenses().length} registrazioni`,
       },
     ];
     const maxValue = Math.max(...rows.map((row) => row.value), 1);
@@ -4654,31 +5766,38 @@ export class SectionPageComponent {
     }));
   });
   protected readonly reportCommercialFunnel = computed<ReportBarRow[]>(() => {
+    const activeClients = this.reportCurrentClientRows();
+    const currentQuotes = this.reportCurrentQuotes();
+    const currentConfirmedQuotes = currentQuotes.filter(
+      (quote) => quote.stage === 'ordine' || quote.stage === 'confermato',
+    );
+    const currentAppointments = this.reportCurrentAppointments();
+    const currentTickets = this.reportCurrentTickets();
     const rows = [
       {
         label: 'Clienti in anagrafica',
-        value: this.allClients().length,
-        detail: `${this.loyalClients().length} fidelizzati`,
+        value: activeClients.length,
+        detail: `${activeClients.filter((entry) => entry.revenue > 0).length} con ricavi nel periodo`,
       },
       {
         label: 'Preventivi totali',
-        value: this.allQuotes().length,
-        detail: `${this.quoteConversionRate()}% conversione`,
+        value: currentQuotes.length,
+        detail: `${currentQuotes.length ? Math.round((currentConfirmedQuotes.length / currentQuotes.length) * 100) : 0}% conversione`,
       },
       {
         label: 'Preventivi confermati',
-        value: this.confirmedQuotes().length,
+        value: currentConfirmedQuotes.length,
         detail: 'Ordini o confermati da saldare/gestire',
       },
       {
         label: 'Agenda attiva',
-        value: this.allAppointments().filter((appointment) => appointment.status !== 'chiuso').length,
-        detail: `${this.allAppointments().filter((appointment) => appointment.status === 'in-corso').length} in corso`,
+        value: currentAppointments.filter((appointment) => appointment.status !== 'chiuso').length,
+        detail: `${currentAppointments.filter((appointment) => appointment.status === 'in-corso').length} in corso`,
       },
       {
         label: 'Ticket aperti',
-        value: this.allServiceTickets().filter((ticket) => ticket.status !== 'chiuso').length,
-        detail: `${this.highPriorityFilteredTicketsCount()} urgenti`,
+        value: currentTickets.filter((ticket) => ticket.status !== 'chiuso').length,
+        detail: `${currentTickets.filter((ticket) => ticket.priority === 'alta').length} urgenti`,
       },
     ];
     const maxValue = Math.max(...rows.map((row) => row.value), 1);
@@ -4688,7 +5807,14 @@ export class SectionPageComponent {
     }));
   });
   protected readonly reportAppointmentMixBars = computed<ReportBarRow[]>(() => {
-    const counts = this.appointmentCountsByType();
+    const appointments = this.reportCurrentAppointments();
+    const counts = {
+      negozio: appointments.filter((appointment) => appointment.appointmentType === 'negozio').length,
+      uscita: appointments.filter((appointment) => appointment.appointmentType === 'uscita').length,
+      installazione: appointments.filter((appointment) => appointment.appointmentType === 'installazione').length,
+      assistenza: appointments.filter((appointment) => appointment.appointmentType === 'assistenza').length,
+      sopralluogo: appointments.filter((appointment) => appointment.appointmentType === 'sopralluogo').length,
+    };
     const rows = [
       { label: 'Negozio', value: counts.negozio, detail: 'Attività in showroom' },
       { label: 'Uscite', value: counts.uscita, detail: 'Appuntamenti fuori sede' },
@@ -4703,7 +5829,7 @@ export class SectionPageComponent {
     }));
   });
   protected readonly reportWarehouseMovementBars = computed<ReportBarRow[]>(() => {
-    const movements = this.allWarehouseMovements();
+    const movements = this.reportCurrentWarehouseMovements();
     const rows = [
       {
         label: 'Carichi',
@@ -4848,49 +5974,49 @@ export class SectionPageComponent {
   protected readonly reportSectionDescriptors = computed<ReportSectionDescriptor[]>(() => [
     {
       key: 'overview',
-      kicker: 'Executive',
-      label: 'Overview',
-      description: 'Panoramica generale con KPI e grafici trasversali.',
-      metric: `€ ${this.formatCurrency(this.cashPaidTransactionsTotal())}`,
+      kicker: 'Cabina di regia',
+      label: 'Cruscotto attività',
+      description: 'Sintesi veloce tra preventivi, documenti, ticket, agenda tecnica e materiali.',
+      metric: `€ ${this.formatCurrency(this.reportCurrentPaidTransactions().reduce((sum, transaction) => sum + transaction.total, 0))}`,
       badge: `${this.reportOverviewCards().length} KPI`,
     },
     {
       key: 'cross',
-      kicker: 'Incroci',
-      label: 'Collegamenti moduli',
-      description: 'Legami tra CRM, cassa, servizi, magazzino e spese.',
+      kicker: 'Filiera lavoro',
+      label: 'Incroci moduli',
+      description: 'Collegamenti reali tra CRM, preventivi, ticket, magazzino, DDT e fornitori.',
       metric: `${this.reportCrossModuleTiles().length}`,
       badge: 'Alert e opportunità',
     },
     {
       key: 'commerciale',
-      kicker: 'Vendite',
+      kicker: 'Preventivi e clienti',
       label: 'Commerciale',
-      description: 'Clienti, preventivi, conversione e servizi da spingere.',
-      metric: `${this.quoteConversionRate()}%`,
+      description: 'Andamento preventivi, clienti caldi, servizi venduti e trattative da chiudere.',
+      metric: `${this.reportCurrentQuotes().length ? Math.round((this.reportCurrentQuotes().filter((quote) => quote.stage === 'ordine' || quote.stage === 'confermato').length / this.reportCurrentQuotes().length) * 100) : 0}%`,
       badge: 'Conversione',
     },
     {
       key: 'operatività',
-      kicker: 'Produzione',
-      label: 'Operatività',
-      description: 'Agenda, ticket tecnici, movimenti e consumi di magazzino.',
-      metric: `${this.allServiceTickets().filter((ticket) => ticket.status !== 'chiuso').length}`,
+      kicker: 'Tecnico',
+      label: 'Agenda e assistenze',
+      description: 'Sopralluoghi, installazioni, assistenze, ticket e materiali movimentati.',
+      metric: `${this.reportCurrentTickets().filter((ticket) => ticket.status !== 'chiuso').length}`,
       badge: 'Ticket aperti',
     },
     {
       key: 'amministrazione',
-      kicker: 'Contabilità',
+      kicker: 'Documenti e conti',
       label: 'Amministrazione',
-      description: 'Incassi per metodo, spese, fornitori e scadenze aperte.',
-      metric: `€ ${this.formatCurrency(this.expenseMonthlyTotal())}`,
-      badge: 'Spese mese',
+      description: 'Incassi, spese, numerazione documenti, fornitori e acquisti tecnici.',
+      metric: `€ ${this.formatCurrency(this.reportCurrentExpenses().reduce((sum, expense) => sum + expense.amountGross, 0))}`,
+      badge: 'Spese periodo',
     },
     {
       key: 'alert',
-      kicker: 'Monitoraggio',
-      label: 'Priorità',
-      description: 'Situazioni da seguire subito tra insoluti, stock e urgenze.',
+      kicker: 'Da seguire',
+      label: 'Priorità operative',
+      description: 'Urgenze su ticket, insoluti, materiali sotto scorta e ordini da chiudere.',
       metric: `${this.reportOperationalAlerts().filter((tile) => tile.tone === 'danger').length}`,
       badge: 'Criticità',
     },
@@ -4907,6 +6033,13 @@ export class SectionPageComponent {
       ),
     ),
   );
+  protected readonly reportActiveFilterLabel = computed(() => {
+    const active = this.reportFilter();
+    if (active === 'all') {
+      return 'Tutti i settori';
+    }
+    return this.reportSectionDescriptors().find((section) => section.key === active)?.label ?? 'Settore';
+  });
   protected readonly filteredReportOverviewCards = computed(() =>
     this.reportOverviewCards().filter((card) =>
       this.reportMatchesSearch(card.label, card.detail, card.value),
@@ -4943,24 +6076,24 @@ export class SectionPageComponent {
     ),
   );
   protected readonly filteredReportQuoteStages = computed(() =>
-    this.quoteStageSummary().filter((stage) =>
+    this.reportCurrentQuoteStageSummary().filter((stage) =>
       this.reportMatchesSearch(stage.kicker, stage.label, stage.detail, stage.count, stage.value),
     ),
   );
   protected readonly filteredReportLoyalClients = computed(() =>
-    this.loyalClients().filter((entry) =>
+    this.reportCurrentClientRows().filter((entry) =>
       this.reportMatchesSearch(
         entry.client.name,
         entry.client.city,
         entry.client.status,
-        entry.visits,
-        entry.points,
-        entry.totalSpent,
+        entry.activities,
+        entry.revenue,
+        entry.quotes,
       ),
     ),
   );
   protected readonly filteredReportServiceTopPerformers = computed(() =>
-    this.serviceTopPerformers().filter((service) =>
+    this.reportCurrentServiceTopPerformers().filter((service) =>
       this.reportMatchesSearch(
         service.name,
         service.category,
@@ -4971,7 +6104,7 @@ export class SectionPageComponent {
     ),
   );
   protected readonly filteredReportServiceLowRotation = computed(() =>
-    this.serviceLowRotation().filter((service) =>
+    this.reportCurrentServiceLowRotation().filter((service) =>
       this.reportMatchesSearch(
         service.name,
         service.category,
@@ -4982,7 +6115,7 @@ export class SectionPageComponent {
     ),
   );
   protected readonly filteredReportTickets = computed(() =>
-    this.filteredServiceTickets().filter((ticket) =>
+    this.reportCurrentTickets().filter((ticket) =>
       this.reportMatchesSearch(
         ticket.title,
         ticket.customerName,
@@ -4994,6 +6127,8 @@ export class SectionPageComponent {
   );
   protected readonly filteredReportWarehouseConsumedItems = computed(() =>
     this.warehouseConsumedItems().filter((movement) =>
+      this.extractIsoDateOnly(movement.movedAt) >= this.reportPeriodRange().from &&
+      this.extractIsoDateOnly(movement.movedAt) <= this.reportPeriodRange().to &&
       this.reportMatchesSearch(
         movement.itemName,
         movement.sourceModule,
@@ -5007,8 +6142,27 @@ export class SectionPageComponent {
       this.reportMatchesSearch(supplier.supplier, supplier.count, supplier.total),
     ),
   );
+  protected readonly filteredReportWarehouseSuppliers = computed(() =>
+    this.reportCurrentWarehouseSupplierRows()
+      .filter((supplier) => supplier.records > 0)
+      .filter((supplier) =>
+        this.reportMatchesSearch(
+          supplier.supplier,
+          supplier.records,
+          supplier.totalCost,
+          supplier.lastDocumentNumber,
+          supplier.lastReceivedDate,
+          supplier.distinctItems,
+        ),
+      ),
+  );
+  protected readonly reportTopWarehouseSupplier = computed(() =>
+    this.filteredReportWarehouseSuppliers()[0] ?? null,
+  );
   protected readonly reportExecutiveCharts = computed<ReportDonutChart[]>(() => {
-    const methods = this.cashTotalsByMethod();
+    const methods = this.reportTotalsByPaymentMethod(this.reportCurrentPaidTransactions());
+    const currentQuotes = this.reportCurrentQuotes();
+    const currentQuoteStages = this.reportCurrentQuoteStageSummary();
 
     return [
       this.buildReportDonutChart(
@@ -5016,16 +6170,16 @@ export class SectionPageComponent {
         'Distribuzione economica',
         'Peso dei reparti sul valore complessivo',
         [
-          { label: 'Cassa', value: this.cashPaidTransactionsTotal(), detail: 'Incassi registrati', color: '#2563eb' },
-          { label: 'Preventivi', value: this.quoteTotalValue(), detail: 'Valore pipeline', color: '#7c3aed' },
+          { label: 'Cassa', value: this.reportCurrentPaidTransactions().reduce((sum, transaction) => sum + transaction.total, 0), detail: 'Incassi registrati', color: '#2563eb' },
+          { label: 'Preventivi', value: currentQuotes.reduce((sum, quote) => sum + quote.value, 0), detail: 'Valore pipeline', color: '#7c3aed' },
           {
             label: 'Servizi',
-            value: this.servicePerformanceRows().reduce((total, service) => total + service.salesTotal, 0),
+            value: this.reportCurrentServicePerformanceRows().reduce((total, service) => total + service.salesTotal, 0),
             detail: 'Vendite da catalogo servizi',
             color: '#0f766e',
           },
           { label: 'Magazzino', value: this.warehouseHistoricalValue(), detail: 'Valore stock', color: '#d97706' },
-          { label: 'Spese', value: this.expenseMonthlyTotal(), detail: 'Uscite del mese', color: '#dc2626' },
+          { label: 'Spese', value: this.reportCurrentExpenses().reduce((sum, expense) => sum + expense.amountGross, 0), detail: 'Uscite del periodo', color: '#dc2626' },
         ],
         'currency',
       ),
@@ -5033,7 +6187,7 @@ export class SectionPageComponent {
         'pipeline',
         'Pipeline preventivi',
         'Stati commerciali e avanzamento',
-        this.quoteStageSummary()
+        currentQuoteStages
           .filter((stage) => stage.filter !== 'tutte')
           .map((stage, index) => ({
             label: stage.label,
@@ -5065,6 +6219,228 @@ export class SectionPageComponent {
       this.filteredReportOperationalAlerts().length
     );
   });
+  protected readonly reportDashboardKpis = computed<ReportDashboardKpi[]>(() => {
+    const currentQuotes = this.reportCurrentQuotes();
+    const confirmedQuotes = currentQuotes.filter(
+      (quote) => quote.stage === 'ordine' || quote.stage === 'confermato',
+    );
+    const pendingQuotes = currentQuotes.filter((quote) => quote.stage === 'trattativa');
+    const openTickets = this.reportCurrentTickets().filter((ticket) => ticket.status !== 'chiuso');
+    const appointmentsToDo = this.reportCurrentAppointments().filter(
+      (appointment) => appointment.status === 'programmato' || appointment.status === 'in-corso',
+    );
+    const incassi = this.reportCurrentPaidTransactions().reduce((sum, transaction) => sum + transaction.total, 0);
+
+    return [
+      {
+        key: 'valore-confermato',
+        icon: '€',
+        label: 'Valore confermato',
+        value: confirmedQuotes.reduce((sum, quote) => sum + quote.value, 0),
+        detail: `${confirmedQuotes.length} ordini o conferme nel periodo`,
+        tone: confirmedQuotes.length ? 'success' : 'neutral',
+        format: 'currency',
+        page: 'preventivi',
+      },
+      {
+        key: 'incassi-effettivi',
+        icon: '€',
+        label: 'Incassi effettivi',
+        value: incassi,
+        detail: `${this.reportCurrentPaidTransactions().length} documenti pagati`,
+        tone: incassi > 0 ? 'success' : 'neutral',
+        format: 'currency',
+        page: 'economici',
+      },
+      {
+        key: 'crediti-aperti',
+        icon: '€',
+        label: 'Crediti aperti',
+        value: this.cashPendingTransactionsCount(),
+        detail: this.cashPendingTransactionsLabel(),
+        tone: this.cashPendingTransactionsCount() ? 'warning' : 'success',
+        format: 'number',
+        page: 'economici',
+      },
+      {
+        key: 'clienti-attivi',
+        icon: '👥',
+        label: 'Clienti attivi',
+        value: this.reportCurrentClientRows().length,
+        detail: this.reportCurrentClientRows()[0]?.client.name ?? 'Nessun cliente attivo nel periodo',
+        tone: this.reportCurrentClientRows().length ? 'info' : 'neutral',
+        format: 'number',
+        page: 'clienti',
+      },
+      {
+        key: 'preventivi-attesa',
+        icon: '🧾',
+        label: 'Preventivi in attesa',
+        value: pendingQuotes.length,
+        detail: `${currentQuotes.length} preventivi filtrati nel periodo`,
+        tone: pendingQuotes.length ? 'warning' : 'success',
+        format: 'number',
+        page: 'preventivi',
+      },
+      {
+        key: 'interventi-da-completare',
+        icon: '🛠️',
+        label: 'Interventi da completare',
+        value: openTickets.length + appointmentsToDo.length,
+        detail: `${openTickets.length} ticket aperti · ${appointmentsToDo.length} appuntamenti attivi`,
+        tone: openTickets.length + appointmentsToDo.length ? 'danger' : 'success',
+        format: 'number',
+        page: 'servizi',
+      },
+    ];
+  });
+  protected readonly reportAreaCards = computed<ReportAreaCard[]>(() => {
+    const currentCashTotal = this.reportCurrentPaidTransactions().reduce((sum, transaction) => sum + transaction.total, 0);
+    const currentQuotes = this.reportCurrentQuotes();
+    const confirmedQuotes = currentQuotes.filter(
+      (quote) => quote.stage === 'ordine' || quote.stage === 'confermato',
+    );
+    const emittedDdts = this.reportCurrentDdts().filter(
+      (record) => record.status === 'emesso' || record.status === 'consegnato',
+    ).length;
+
+    return [
+      {
+        key: 'economici',
+        icon: '€',
+        title: 'Report economici',
+        description: 'Incassi, costi, crediti aperti, cassa e spese del periodo selezionato.',
+        metric: this.formatReportMetric(currentCashTotal, 'currency'),
+        badge: `${this.cashPendingTransactionsCount()} crediti aperti`,
+      },
+      {
+        key: 'clienti',
+        icon: '👥',
+        title: 'Report clienti',
+        description: 'Clienti attivi, ricavi, frequenza e storico operativo collegato.',
+        metric: `${this.reportCurrentClientRows().length} attivi`,
+        badge: `${this.reportCurrentClientRows().filter((entry) => entry.revenue > 0).length} con ricavi`,
+      },
+      {
+        key: 'preventivi',
+        icon: '🧾',
+        title: 'Report preventivi',
+        description: 'Stati, conversioni, valori confermati e trattative da richiamare.',
+        metric: `${currentQuotes.length} preventivi`,
+        badge: `${confirmedQuotes.length} confermati`,
+      },
+      {
+        key: 'servizi',
+        icon: '🛠️',
+        title: 'Servizi e interventi',
+        description: 'Agenda tecnica, ticket, assistenze e lavorazioni piu\' richieste.',
+        metric: `${this.reportCurrentTickets().filter((ticket) => ticket.status !== 'chiuso').length} ticket`,
+        badge: `${this.reportCurrentAppointments().filter((appointment) => appointment.status === 'programmato' || appointment.status === 'in-corso').length} appuntamenti attivi`,
+      },
+      {
+        key: 'documenti',
+        icon: '🚚',
+        title: 'Report documenti',
+        description: 'DDT, incassi documentali, numerazione e accesso ai dettagli cassa.',
+        metric: `${emittedDdts} DDT`,
+        badge: `${this.reportCurrentPaidTransactions().length} documenti pagati`,
+      },
+      {
+        key: 'magazzino',
+        icon: '📦',
+        title: 'Prodotti e magazzino',
+        description: 'Movimentazioni, consumi, fornitori tecnici e situazione operativa stock.',
+        metric: `${this.reportCurrentWarehouseMovements().length} movimenti`,
+        badge: `${this.warehouseLowStockAlerts().length} scorte critiche`,
+      },
+      {
+        key: 'altre',
+        icon: '⚠️',
+        title: 'Altre analisi',
+        description: 'Incroci tra moduli, priorita\' operative e alert da seguire.',
+        metric: `${this.reportOperationalAlerts().filter((tile) => tile.tone === 'danger').length} criticita\'`,
+        badge: `${this.reportCrossModuleTiles().length} incroci utili`,
+      },
+    ];
+  });
+  protected readonly reportCurrentPageMeta = computed(() => {
+    const page = this.reportCurrentPage();
+    if (page === 'dashboard') {
+      return {
+        title: 'Report e statistiche',
+        kicker: 'Dashboard compatta',
+        description: 'Vista di sintesi con KPI essenziali, trend rapido e accesso diretto alle aree di analisi.',
+      };
+    }
+    const area = this.reportAreaCards().find((item) => item.key === page);
+    return {
+      title: area?.title ?? 'Report',
+      kicker: 'Analisi dedicata',
+      description: area?.description ?? 'Approfondimento operativo del modulo selezionato.',
+    };
+  });
+  protected readonly reportDashboardTrendChart = computed<ReportTrendChart>(() =>
+    this.buildReportTrendChart(this.reportCurrentPaidTransactions()),
+  );
+  protected readonly reportDashboardDistributionChart = computed<ReportDonutChart>(() =>
+    this.buildReportDonutChart(
+      'dashboard-pipeline',
+      'Distribuzione preventivi',
+      'Stati reali del periodo selezionato',
+      this.reportCurrentQuoteStageSummary()
+        .filter((stage) => stage.filter !== 'tutte')
+        .map((stage, index) => ({
+          label: stage.label,
+          value: stage.count,
+          detail: stage.detail,
+          color: ['#f59e0b', '#2563eb', '#16a34a'][index] ?? '#64748b',
+        })),
+      'number',
+    ),
+  );
+  protected readonly reportEconomiciCards = computed(() =>
+    this.filterReportOverviewCardsByLabels([
+      'Incassi effettivi',
+      'Costi registrati',
+      'Preventivi accettati',
+      'DDT emessi',
+    ]),
+  );
+  protected readonly reportClientiCards = computed(() =>
+    this.filterReportOverviewCardsByLabels([
+      'Clienti attivi',
+      'Preventivi creati',
+      'Preventivi accettati',
+    ]),
+  );
+  protected readonly reportPreventiviCards = computed(() =>
+    this.filterReportOverviewCardsByLabels([
+      'Preventivi creati',
+      'Preventivi accettati',
+      'Clienti attivi',
+    ]),
+  );
+  protected readonly reportServiziCards = computed(() =>
+    this.filterReportOverviewCardsByLabels([
+      'Ticket aperti',
+      'Movimenti magazzino',
+      'Clienti attivi',
+    ]),
+  );
+  protected readonly reportDocumentiCards = computed(() =>
+    this.filterReportOverviewCardsByLabels([
+      'DDT emessi',
+      'Incassi effettivi',
+      'Preventivi accettati',
+    ]),
+  );
+  protected readonly reportMagazzinoCards = computed(() =>
+    this.filterReportOverviewCardsByLabels([
+      'Movimenti magazzino',
+      'Ticket aperti',
+      'DDT emessi',
+    ]),
+  );
   protected isReportSectionOpen(section: ReportSectionKey): boolean {
     return this.reportSectionState()[section];
   }
@@ -5083,6 +6459,24 @@ export class SectionPageComponent {
 
   protected clearReportSearch(): void {
     this.reportSearch.set('');
+  }
+
+  protected isReportPageActive(page: ReportPageKey): boolean {
+    return this.reportCurrentPage() === page;
+  }
+
+  protected openReportPage(page: ReportPageKey): void {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        view: page === 'dashboard' ? null : page,
+      },
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  protected openReportDashboard(): void {
+    this.openReportPage('dashboard');
   }
 
   protected setReportFilter(filter: ReportFilterKey): void {
@@ -5120,19 +6514,441 @@ export class SectionPageComponent {
   }
 
   protected focusReportSection(section: ReportSectionKey): void {
-    this.setReportFilter(section);
+    this.openReportPage(this.reportPageForSection(section));
+  }
 
-    if (typeof document === 'undefined') {
+  protected setReportPeriodPreset(preset: ReportPeriodPreset): void {
+    this.reportPeriodPreset.set(preset);
+    if (preset !== 'custom') {
+      this.reportPeriodFrom.set('');
+      this.reportPeriodTo.set('');
+    }
+    this.refreshReportData();
+  }
+
+  protected updateReportPeriodFrom(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.reportPeriodPreset.set('custom');
+    this.reportPeriodFrom.set(target?.value ?? '');
+    this.refreshReportData();
+  }
+
+  protected updateReportPeriodTo(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.reportPeriodPreset.set('custom');
+    this.reportPeriodTo.set(target?.value ?? '');
+    this.refreshReportData();
+  }
+
+  protected toggleReportComparePrevious(): void {
+    this.reportComparePrevious.update((current) => !current);
+    this.refreshReportData();
+  }
+
+  protected refreshReportData(): void {
+    this.reportLastRefreshAt.set(new Date().toISOString());
+  }
+
+  protected reportTrendIcon(card: ReportOverviewCard): string {
+    if (card.trend === 'up') return '▲';
+    if (card.trend === 'down') return '▼';
+    if (card.trend === 'flat') return '•';
+    return '—';
+  }
+
+  protected reportDeltaTone(card: ReportOverviewCard): 'positive' | 'negative' | 'neutral' {
+    if (card.trend === 'up') return 'positive';
+    if (card.trend === 'down') return 'negative';
+    return 'neutral';
+  }
+
+  protected reportAbsolute(value: number | null | undefined): number {
+    return Math.abs(Number(value) || 0);
+  }
+
+  protected openReportOverviewDrilldown(card: ReportOverviewCard): void {
+    if (!card.drilldown) {
+      return;
+    }
+    this.openReportDrilldown(card.drilldown);
+  }
+
+  protected openReportQuoteStageDrilldown(stageFilter: string, stageLabel: string): void {
+    this.openReportDrilldown({
+      kind: 'quotes-stage',
+      title: `Preventivi · ${stageLabel}`,
+      subtitle: `Dettaglio preventivi · ${this.reportPeriodRange().label}`,
+      filter: stageFilter,
+    });
+  }
+
+  protected openReportPaymentMethodDrilldown(method: 'contanti' | 'pos' | 'bonifico' | 'misto'): void {
+    this.openReportDrilldown({
+      kind: 'payment-method',
+      title: `Incassi ${method}`,
+      subtitle: `Documenti pagati · ${this.reportPeriodRange().label}`,
+      filter: method,
+    });
+  }
+
+  protected openReportSupplierDrilldown(): void {
+    this.openReportDrilldown({
+      kind: 'warehouse-suppliers',
+      title: 'Fornitori magazzino',
+      subtitle: `Acquisti per fornitore · ${this.reportPeriodRange().label}`,
+    });
+  }
+
+  protected openReportServiceDrilldown(mode: 'services-top' | 'services-low'): void {
+    this.openReportDrilldown({
+      kind: mode,
+      title: mode === 'services-top' ? 'Servizi più richiesti' : 'Servizi meno richiesti',
+      subtitle: `Catalogo servizi · ${this.reportPeriodRange().label}`,
+    });
+  }
+
+  protected openReportTicketDrilldown(): void {
+    this.openReportDrilldown({
+      kind: 'tickets',
+      title: 'Ticket del periodo',
+      subtitle: `Interventi tecnici · ${this.reportPeriodRange().label}`,
+    });
+  }
+
+  protected closeReportDrilldown(): void {
+    this.reportDrilldownRequest.set(null);
+    this.reportDrilldownHeaders.set([]);
+    this.reportDrilldownRows.set([]);
+  }
+
+  protected exportReportDrilldownCsv(): void {
+    const request = this.reportDrilldownRequest();
+    if (!request || !this.reportDrilldownHeaders().length) {
+      return;
+    }
+    const rows = [
+      this.reportDrilldownHeaders(),
+      ...this.reportDrilldownRows().map((row) => row.values.map((value) => String(value))),
+    ];
+    this.downloadCsv(rows, `report-${request.kind}-${new Date().toISOString().slice(0, 10)}.csv`);
+    this.pushToast('Dettaglio report esportato in CSV.', 'success');
+  }
+
+  protected printReportDrilldown(): void {
+    const request = this.reportDrilldownRequest();
+    if (!request) {
+      return;
+    }
+    const popup = window.open('', '_blank', 'width=1180,height=780');
+    if (!popup) {
+      this.pushToast('Popup bloccato dal browser: impossibile aprire la stampa del report.', 'error');
       return;
     }
 
-    requestAnimationFrame(() => {
-      document.getElementById(`report-section-${section}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    });
+    const headers = this.reportDrilldownHeaders()
+      .map((header) => `<th>${this.escapeHtml(header)}</th>`)
+      .join('');
+    const rows = this.reportDrilldownRows()
+      .map((row) => `<tr>${row.values.map((value) => `<td>${this.escapeHtml(String(value))}</td>`).join('')}</tr>`)
+      .join('');
+    const html = `<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <title>${this.escapeHtml(request.title)}</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;color:#0f172a}
+    h1{margin:0 0 6px;font-size:20px}
+    p{margin:0 0 18px;color:#475569}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #e2e8f0;padding:10px 8px;font-size:12px;text-align:left}
+    th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#475569}
+  </style>
+</head>
+<body>
+  <h1>${this.escapeHtml(request.title)}</h1>
+  <p>${this.escapeHtml(request.subtitle)}</p>
+  <table>
+    <thead><tr>${headers}</tr></thead>
+    <tbody>${rows || '<tr><td colspan="99">Nessun dato disponibile.</td></tr>'}</tbody>
+  </table>
+</body>
+</html>`;
+    popup.document.open();
+    popup.document.write(html);
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => {
+      popup.print();
+    }, 250);
   }
+
+  protected executeReportDrilldownAction(row: ReportDrilldownRow): void {
+    if (!row.actionType || !row.actionId) {
+      return;
+    }
+
+    switch (row.actionType) {
+      case 'cash': {
+        const receipt = this.allCashTransactions().find((transaction) => transaction.id === row.actionId) ?? null;
+        this.openCashReceiptsModal();
+        this.selectedCashReceiptId.set(receipt?.id ?? null);
+        this.syncCashReceiptEditForm(receipt);
+        break;
+      }
+      case 'quote':
+        this.selectQuote(row.actionId);
+        break;
+      case 'client':
+        this.selectClient(row.actionId);
+        break;
+      case 'ticket':
+        this.selectTicket(row.actionId);
+        break;
+      case 'ddt':
+        this.openDdtDetail(row.actionId);
+        break;
+      case 'supplier':
+        this.openWarehouseSupplierDetail(row.actionId);
+        break;
+    }
+  }
+
+  protected openReportDrilldown(request: ReportDrilldownRequest): void {
+    this.reportDrilldownRequest.set(request);
+
+    switch (request.kind) {
+      case 'cash-paid': {
+        const rows = [...this.reportCurrentPaidTransactions()]
+          .sort((left, right) => (right.settledAt || right.createdAt).localeCompare(left.settledAt || left.createdAt))
+          .map<ReportDrilldownRow>((transaction) => ({
+            id: transaction.id,
+            values: [
+              this.epFormatDate(transaction.settledAt || transaction.createdAt),
+              transaction.reference,
+              transaction.customerName,
+              this.reportCashDocumentTypeLabel(transaction.documentType),
+              this.reportCashPaymentMethodLabel(transaction.paymentMethod),
+              `€ ${this.formatCurrency(transaction.total)}`,
+            ],
+            actionType: 'cash',
+            actionId: transaction.id,
+            actionLabel: 'Apri',
+          }));
+        this.reportDrilldownHeaders.set(['Data', 'Riferimento', 'Cliente', 'Documento', 'Pagamento', 'Totale']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'quotes-all':
+      case 'quotes-stage': {
+        const allowedStages = (request.filter ?? '')
+          .split('|')
+          .map((value) => value.trim())
+          .filter(Boolean);
+        const rows = [...this.reportCurrentQuotes()]
+          .filter((quote) => !allowedStages.length || allowedStages.includes(quote.stage))
+          .sort((left, right) => String(right.issueDate || right.dueDate).localeCompare(String(left.issueDate || left.dueDate)))
+          .map<ReportDrilldownRow>((quote) => ({
+            id: quote.id,
+            values: [
+              this.quoteCode(quote.id),
+              this.epFormatDate(quote.issueDate || quote.dueDate),
+              quote.customerName,
+              quote.projectType,
+              this.quoteStageLabel(quote.stage),
+              `€ ${this.formatCurrency(quote.value)}`,
+            ],
+            actionType: 'quote',
+            actionId: quote.id,
+            actionLabel: 'Apri',
+          }));
+        this.reportDrilldownHeaders.set(['Numero', 'Data', 'Cliente', 'Progetto', 'Stato', 'Valore']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'expenses': {
+        const supplierMap = new Map(this.allExpenseSuppliers().map((supplier) => [supplier.id, supplier.businessName]));
+        const rows = [...this.reportCurrentExpenses()]
+          .sort((left, right) => right.expenseDate.localeCompare(left.expenseDate))
+          .map<ReportDrilldownRow>((expense) => ({
+            id: expense.id,
+            values: [
+              this.epFormatDate(expense.expenseDate),
+              expense.description,
+              supplierMap.get(expense.supplierId ?? '') ?? expense.genericSupplierLabel ?? '—',
+              expense.status,
+              `€ ${this.formatCurrency(expense.amountGross)}`,
+            ],
+          }));
+        this.reportDrilldownHeaders.set(['Data', 'Descrizione', 'Fornitore', 'Stato', 'Totale']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'clients-active':
+      case 'clients-top': {
+        const rows = [...this.reportCurrentClientRows()]
+          .map<ReportDrilldownRow>((entry) => ({
+            id: entry.client.id,
+            values: [
+              entry.client.name,
+              entry.client.city || '—',
+              entry.activities,
+              entry.quotes,
+              entry.appointments,
+              entry.tickets,
+              entry.ddts,
+              `€ ${this.formatCurrency(entry.revenue)}`,
+            ],
+            actionType: 'client',
+            actionId: entry.client.id,
+            actionLabel: 'Scheda',
+          }));
+        this.reportDrilldownHeaders.set(['Cliente', 'Città', 'Attività', 'Preventivi', 'Agenda', 'Ticket', 'DDT', 'Ricavi']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'tickets': {
+        const rows = [...this.reportCurrentTickets()]
+          .filter((ticket) => request.filter === 'open' ? ticket.status !== 'chiuso' : true)
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+          .map<ReportDrilldownRow>((ticket) => ({
+            id: ticket.id,
+            values: [
+              this.epFormatDate(ticket.createdAt),
+              ticket.title,
+              ticket.customerName,
+              ticket.technician || '—',
+              ticket.priority,
+              ticket.status,
+            ],
+            actionType: 'ticket',
+            actionId: ticket.id,
+            actionLabel: 'Apri',
+          }));
+        this.reportDrilldownHeaders.set(['Data', 'Titolo', 'Cliente', 'Tecnico', 'Priorità', 'Stato']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'appointments': {
+        const rows = [...this.reportCurrentAppointments()]
+          .sort((left, right) => right.scheduledAt.localeCompare(left.scheduledAt))
+          .map<ReportDrilldownRow>((appointment) => ({
+            id: appointment.id,
+            values: [
+              this.epFormatDateTime(appointment.scheduledAt),
+              appointment.customerName,
+              appointment.appointmentType,
+              appointment.technician || '—',
+              appointment.status,
+            ],
+          }));
+        this.reportDrilldownHeaders.set(['Quando', 'Cliente', 'Tipologia', 'Tecnico', 'Stato']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'ddts': {
+        const rows = [...this.reportCurrentDdts()]
+          .sort((left, right) => String(right.documentDate || right.createdAt).localeCompare(String(left.documentDate || left.createdAt)))
+          .map<ReportDrilldownRow>((record) => ({
+            id: record.id,
+            values: [
+              record.number || 'Bozza',
+              this.epFormatDate(record.documentDate || record.createdAt),
+              record.clientSnapshot || record.recipientSnapshot?.name || '—',
+              record.causale || '—',
+              record.status,
+              record.lines.length,
+            ],
+            actionType: 'ddt',
+            actionId: record.id,
+            actionLabel: 'Apri',
+          }));
+        this.reportDrilldownHeaders.set(['Numero', 'Data', 'Cliente', 'Causale', 'Stato', 'Righe']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'warehouse-movements': {
+        const inventoryMap = new Map(this.allInventoryItems().map((item) => [item.id, item.name]));
+        const rows = [...this.reportCurrentWarehouseMovements()]
+          .sort((left, right) => right.movedAt.localeCompare(left.movedAt))
+          .map<ReportDrilldownRow>((movement) => ({
+            id: movement.id,
+            values: [
+              this.epFormatDateTime(movement.movedAt),
+              inventoryMap.get(movement.inventoryItemId) ?? movement.inventoryItemId,
+              this.warehouseMovementTypeLabel(movement.movementType),
+              this.warehouseSourceModuleLabel(movement.sourceModule),
+              movement.quantity,
+              `€ ${this.formatCurrency(movement.totalCost)}`,
+            ],
+          }));
+        this.reportDrilldownHeaders.set(['Quando', 'Articolo', 'Tipo', 'Origine', 'Qta', 'Costo']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'warehouse-suppliers': {
+        const rows = [...this.reportCurrentWarehouseSupplierRows()]
+          .map<ReportDrilldownRow>((supplier) => ({
+            id: supplier.supplier,
+            values: [
+              supplier.supplier,
+              supplier.records,
+              supplier.lastDocumentNumber || '—',
+              this.epFormatDate(supplier.lastReceivedDate),
+              supplier.distinctItems,
+              `€ ${this.formatCurrency(supplier.totalCost)}`,
+            ],
+            actionType: 'supplier',
+            actionId: supplier.supplier,
+            actionLabel: 'Apri',
+          }));
+        this.reportDrilldownHeaders.set(['Fornitore', 'Ordini', 'Ultimo documento', 'Ultima data', 'Articoli', 'Totale']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'services-top':
+      case 'services-low': {
+        const source = request.kind === 'services-top'
+          ? this.reportCurrentServiceTopPerformers()
+          : this.reportCurrentServiceLowRotation();
+        const rows = source.map<ReportDrilldownRow>((service) => ({
+          id: service.id,
+          values: [
+            service.name,
+            service.category,
+            service.salesCount,
+            service.quoteCount,
+            `€ ${this.formatCurrency(service.salesTotal)}`,
+          ],
+        }));
+        this.reportDrilldownHeaders.set(['Servizio', 'Categoria', 'Vendite', 'Preventivi', 'Ricavi']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+      case 'payment-method': {
+        const rows = [...this.reportCurrentPaidTransactions()]
+          .filter((transaction) => transaction.paymentMethod === request.filter)
+          .sort((left, right) => (right.settledAt || right.createdAt).localeCompare(left.settledAt || left.createdAt))
+          .map<ReportDrilldownRow>((transaction) => ({
+            id: transaction.id,
+            values: [
+              this.epFormatDate(transaction.settledAt || transaction.createdAt),
+              transaction.reference,
+              transaction.customerName,
+              this.reportCashDocumentTypeLabel(transaction.documentType),
+              `€ ${this.formatCurrency(transaction.total)}`,
+            ],
+            actionType: 'cash',
+            actionId: transaction.id,
+            actionLabel: 'Apri',
+          }));
+        this.reportDrilldownHeaders.set(['Data', 'Riferimento', 'Cliente', 'Documento', 'Totale']);
+        this.reportDrilldownRows.set(rows);
+        break;
+      }
+    }
+  }
+
   protected readonly clientForm = this.formBuilder.nonNullable.group({
     kind: this.formBuilder.nonNullable.control<'privato' | 'azienda'>('privato'),
     name: ['', Validators.required],
@@ -5156,6 +6972,9 @@ export class SectionPageComponent {
     // ✅ Fix ISS-06: validatore PEC (stessa sintassi email, dominio tipico accettato)
     pec: ['', [Validators.email]],
     billingAddress: [''],
+    billingPostalCode: ['', [Validators.pattern(/^[0-9]{5}$/)]],
+    billingProvince: ['', [Validators.pattern(/^[A-Z]{2}$/)]],
+    billingCountry: ['IT'],
   });
 
   protected readonly quoteForm = this.formBuilder.nonNullable.group({
@@ -5190,7 +7009,8 @@ export class SectionPageComponent {
     paymentAlertDays: [7, [Validators.min(1)]],
     paymentNotes: [''],
     projectType: ['', Validators.required],
-    value: [0, [Validators.required, Validators.min(1)]],
+    // Il valore è calcolato automaticamente dalle righe: non va chiesto a mano
+    value: [0, [Validators.min(0)]],
     dueDate: ['', Validators.required],
     stage: this.formBuilder.nonNullable.control<QuoteRecord['stage']>('bozza'),
     serviceId: [''],
@@ -5498,19 +7318,25 @@ export class SectionPageComponent {
 
   /** Definizione delle tab del portale (barra sticky inferiore) */
   protected readonly epTabs = [
-    { id: 'dashboard' as const, label: 'Home', icon: '🏠' },
-    { id: 'magazzino' as const, label: 'Magazzino', icon: '📦' },
-    { id: 'ddt' as const, label: 'DDT', icon: '🚚' },
-    { id: 'servizi' as const, label: 'Servizi', icon: '💶' },
-    { id: 'ordini' as const, label: 'Ordini', icon: '🛒' },
-    { id: 'agenda' as const, label: 'Agenda', icon: '📅' },
-    { id: 'comunicazioni' as const, label: 'Comunicazioni', icon: '🔔' },
+    { id: 'dashboard' as const, label: 'Home' },
+    { id: 'agenda' as const, label: 'Agenda' },
+    { id: 'magazzino' as const, label: 'Materiali' },
+    { id: 'comunicazioni' as const, label: 'Messaggi' },
+    { id: 'ddt' as const, label: 'DDT' },
+    { id: 'servizi' as const, label: 'Servizi' },
+    { id: 'ordini' as const, label: 'Ordini' },
   ] as const;
+
+  // Quattro destinazioni frequenti; le altre restano accessibili dal menu "Altro".
+  protected readonly epPrimaryTabs = this.epTabs.slice(0, 4);
 
   /** Tab attualmente selezionata (persistenza in sessione per ricaricamenti pagina) */
   protected readonly epActiveTab = signal<
     'dashboard' | 'magazzino' | 'ddt' | 'servizi' | 'ordini' | 'agenda' | 'comunicazioni'
   >('dashboard');
+  protected readonly epCurrentTabLabel = computed(
+    () => this.epTabs.find((tab) => tab.id === this.epActiveTab())?.label ?? 'Home',
+  );
 
   /** Visibilità modale "Link telefono / QR" (header) */
   protected epOpenMobilePanel = false;
@@ -5533,6 +7359,47 @@ export class SectionPageComponent {
 
   /** Elenco operatori attivi da mostrare nella fase di onboarding */
   protected readonly epOperatoriAttivi = this.data.activeCashOperators;
+
+  // ============ PORTALE DIPENDENTI: Permessi Magazzino (configurati dal titolare nel CRM) ============
+  /** Modalità di scrittura magazzino configurata per il portale dipendenti */
+  protected readonly epInventoryWriteMode = computed(() => this.data.portalSettings().inventoryWriteMode);
+  /** Il tecnico può creare nuovi articoli dal portale? (solo in modalità "aggiungi") */
+  protected readonly epCanAddInventory = computed(() => this.epInventoryWriteMode() === 'aggiungi');
+  /** Il tecnico può modificare gli articoli esistenti dal portale? (esclusa la sola consultazione) */
+  protected readonly epCanEditInventory = computed(() => this.epInventoryWriteMode() !== 'solo-lettura');
+
+  /** Opzioni descrittive delle modalità di scrittura magazzino del portale */
+  protected readonly epInventoryWriteModeOptions: {
+    value: PortalSettings['inventoryWriteMode'];
+    label: string;
+    hint: string;
+    icon: string;
+  }[] = [
+      {
+        value: 'solo-lettura',
+        label: 'Solo consultazione',
+        hint: 'Il tecnico vede gli articoli e può solo prelevarli.',
+        icon: '👀',
+      },
+      {
+        value: 'aggiorna',
+        label: 'Aggiorna esistenti',
+        hint: 'Può modificare giacenza, prezzi e dati degli articoli già presenti.',
+        icon: '✏️',
+      },
+      {
+        value: 'aggiungi',
+        label: 'Aggiungi e aggiorna',
+        hint: 'Può anche creare nuovi articoli direttamente dal portale.',
+        icon: '➕',
+      },
+    ];
+
+  /** Imposta dal CRM la modalità di scrittura magazzino del portale dipendenti */
+  protected epSetInventoryWriteMode(mode: PortalSettings['inventoryWriteMode']): void {
+    this.data.updatePortalSettings({ inventoryWriteMode: mode });
+    this.pushToast('Impostazione Portale Dipendenti aggiornata', 'success');
+  }
 
   /** ID operatore attivo attualmente selezionato (signal + persistenza storage) */
   protected readonly epActiveOperatorId = (() => {
@@ -5620,6 +7487,11 @@ export class SectionPageComponent {
     if (!session) return null;
     if (session.expireAt < Date.now()) {
       queueMicrotask(() => this.epLogout());
+      return null;
+    }
+    // Se lo stato dal server LAN non è ancora stato caricato, non validiamo la sessione
+    // per evitare logout falsi su dispositivi nuovi (le credenziali arrivano dal server).
+    if (!this.data.serverStateReady()) {
       return null;
     }
     // Check JIT via service: legge signal cashOperators LIVE (revokedAt visto immediatamente).
@@ -5932,6 +7804,198 @@ export class SectionPageComponent {
     const end = new Date(start.getTime() + (Number(a.durationMinutes) || 0) * 60 * 1000);
     const fmt = (d: Date) => d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', hour12: false });
     return { start: fmt(start), end: fmt(end) };
+  }
+
+  // ============ PORTALE DIPENDENTI - Agenda: calendario mensile, dettaglio e creazione ============
+  /** Converte una data locale in stringa ISO yyyy-mm-dd (senza slittamenti di fuso) */
+  private epIsoDay(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+      date.getDate(),
+    ).padStart(2, '0')}`;
+  }
+
+  /** Data odierna in formato ISO locale (yyyy-mm-dd) */
+  protected epTodayIso(): string {
+    return this.epIsoDay(new Date());
+  }
+
+  /** Vista agenda: elenco raggruppato oppure calendario mensile */
+  protected readonly epAgendaView = signal<'lista' | 'calendario'>('lista');
+
+  /** Primo giorno del mese mostrato nel calendario (ISO yyyy-mm-01) */
+  protected readonly epAgendaMonthAnchor = signal<string>(
+    (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    })(),
+  );
+
+  /** Etichetta del mese mostrato (es. "ottobre 2026") */
+  protected readonly epAgendaMonthLabel = computed(() => {
+    const [y, m] = this.epAgendaMonthAnchor().split('-').map(Number);
+    const now = new Date();
+    const d = new Date(y || now.getFullYear(), (m || 1) - 1, 1);
+    return d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+  });
+
+  /** Settimane del mese per la griglia calendario: ogni cella è un giorno con i suoi appuntamenti */
+  protected readonly epAgendaCalendarWeeks = computed(() => {
+    const anchor = this.epAgendaMonthAnchor();
+    const [y, m] = anchor.split('-').map(Number);
+    const first = new Date(y, (m || 1) - 1, 1);
+    // Settimana che inizia di lunedì (getDay(): domenica = 0)
+    const startOffset = (first.getDay() + 6) % 7;
+    const gridStart = new Date(first);
+    gridStart.setDate(first.getDate() - startOffset);
+
+    const byDay = new Map<string, AppointmentRecord[]>();
+    for (const a of this.epMyAgendaAppts()) {
+      const key = a.scheduledAt.slice(0, 10);
+      const list = byDay.get(key) ?? [];
+      list.push(a);
+      byDay.set(key, list);
+    }
+
+    const todayIso = this.epTodayIso();
+    const weeks: {
+      key: string;
+      days: {
+        key: string;
+        iso: string;
+        dayNumber: number;
+        inMonth: boolean;
+        isToday: boolean;
+        appts: AppointmentRecord[];
+      }[];
+    }[] = [];
+
+    const cursor = new Date(gridStart);
+    for (let w = 0; w < 6; w++) {
+      const days: (typeof weeks)[number]['days'] = [];
+      for (let i = 0; i < 7; i++) {
+        const iso = this.epIsoDay(cursor);
+        days.push({
+          key: `${iso}-${i}`,
+          iso,
+          dayNumber: cursor.getDate(),
+          inMonth: cursor.getMonth() === first.getMonth(),
+          isToday: iso === todayIso,
+          appts: byDay.get(iso) ?? [],
+        });
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      weeks.push({ key: `w${w}`, days });
+    }
+    return weeks;
+  });
+
+  /** Giorno selezionato nel calendario (elenco appuntamenti sotto la griglia) */
+  protected readonly epAgendaSelectedDay = signal<string | null>(null);
+
+  /** Appuntamenti del giorno selezionato (o di oggi se nessun giorno è selezionato) */
+  protected readonly epAgendaSelectedDayAppts = computed(() => {
+    const day = this.epAgendaSelectedDay() ?? this.epTodayIso();
+    return this.epMyAgendaAppts().filter((a) => a.scheduledAt.slice(0, 10) === day);
+  });
+
+  /** Cambia mese nel calendario (delta in mesi) */
+  protected epAgendaShiftMonth(delta: number): void {
+    const [y, m] = this.epAgendaMonthAnchor().split('-').map(Number);
+    const d = new Date(y, (m || 1) - 1 + delta, 1);
+    this.epAgendaMonthAnchor.set(this.epIsoDay(d));
+  }
+
+  /** Torna al mese corrente */
+  protected epAgendaGoToday(): void {
+    const now = new Date();
+    this.epAgendaMonthAnchor.set(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`);
+    this.epAgendaSelectedDay.set(this.epTodayIso());
+  }
+
+  /** Seleziona/deseleziona un giorno nel calendario (toggle) */
+  protected epAgendaSelectDay(iso: string): void {
+    this.epAgendaSelectedDay.update((cur) => (cur === iso ? null : iso));
+  }
+
+  /** Appuntamento aperto nel dettaglio */
+  protected readonly epSelectedAppointmentId = signal<string | null>(null);
+
+  /** Appuntamento selezionato risolto a partire dall'id */
+  protected readonly epSelectedAppointment = computed(() => {
+    const id = this.epSelectedAppointmentId();
+    if (!id) return null;
+    return this.epMyAgendaAppts().find((a) => a.id === id) ?? null;
+  });
+
+  /** Apre/chiude il dettaglio di un appuntamento */
+  protected epToggleAppointmentDetail(id: string): void {
+    this.epSelectedAppointmentId.update((cur) => (cur === id ? null : id));
+  }
+
+  /** Editor di creazione appuntamento dal portale */
+  protected readonly epAppointmentEditorOpen = signal<boolean>(false);
+
+  /** Form di creazione appuntamento (il tecnico è automaticamente l'utente attivo) */
+  protected readonly epAppointmentForm = this.formBuilder.nonNullable.group({
+    title: [''],
+    customerName: ['', Validators.required],
+    appointmentType: this.formBuilder.nonNullable.control<AppointmentRecord['appointmentType']>('uscita'),
+    locationType: this.formBuilder.nonNullable.control<AppointmentRecord['locationType']>('domicilio'),
+    address: [''],
+    date: ['', Validators.required],
+    time: ['09:00', Validators.required],
+    durationMinutes: [60, [Validators.required, Validators.min(15)]],
+  });
+
+  /** Apre l'editor per un nuovo appuntamento (opzionalmente precompilando il giorno) */
+  protected epOpenNewAppointment(prefillDate?: string): void {
+    this.epAppointmentForm.reset({
+      title: '',
+      customerName: '',
+      appointmentType: 'uscita',
+      locationType: 'domicilio',
+      address: '',
+      date: prefillDate ?? this.epTodayIso(),
+      time: '09:00',
+      durationMinutes: 60,
+    });
+    this.epAppointmentEditorOpen.set(true);
+  }
+
+  /** Chiude l'editor appuntamento */
+  protected epCloseAppointmentEditor(): void {
+    this.epAppointmentEditorOpen.set(false);
+  }
+
+  /** Crea l'appuntamento dal portale, assegnandolo al tecnico attivo */
+  protected epSubmitAppointment(): void {
+    if (this.epAppointmentForm.invalid) {
+      this.epAppointmentForm.markAllAsTouched();
+      return;
+    }
+    const me = this.epSessionOperator();
+    if (!me) {
+      this.pushToast('Sessione scaduta, accedi di nuovo.', 'error');
+      return;
+    }
+    const raw = this.epAppointmentForm.getRawValue();
+    const customerName = raw.customerName.trim();
+    this.data.addAppointment({
+      title: raw.title.trim() || `${this.epAppointmentTypeLabel(raw.appointmentType)} · ${customerName}`,
+      clientId: null,
+      customerName,
+      appointmentType: raw.appointmentType,
+      locationType: raw.locationType,
+      address: raw.address.trim(),
+      scheduledAt: `${raw.date}T${raw.time || '09:00'}:00`,
+      durationMinutes: raw.durationMinutes,
+      technician: me.name,
+      linkedQuoteId: null,
+      status: 'programmato',
+    });
+    this.pushToast('Appuntamento creato', 'success');
+    this.epAppointmentEditorOpen.set(false);
+    this.epAgendaSelectedDay.set(raw.date);
   }
 
   // ============ PORTALE DIPENDENTI v3 - Modifica righe installazione da preventivo ============
@@ -6493,8 +8557,19 @@ export class SectionPageComponent {
       case 'bozza': return 'Bozza';
       case 'emesso': return 'Emesso';
       case 'consegnato': return 'Consegnato';
+      case 'annullato': return 'Annullato';
       default: return String(status ?? 'Bozza');
     }
+  }
+
+  /** Conteggio dei DDT per stato (usato dalla barra KPI cliccabile) */
+  protected ddtStatusCount(status: WarehouseDdtRecord['status']): number {
+    return this.ddtDocuments().filter((d) => d.status === status).length;
+  }
+
+  /** Imposta il filtro di stato dal pulsante KPI ('tutti' mostra l'elenco completo) */
+  protected ddtSetStatusFilter(status: 'tutti' | WarehouseDdtRecord['status']): void {
+    this.ddtFilterStatus.set(status);
   }
 
   /** Helper etichette tipo servizio */
@@ -6562,6 +8637,55 @@ export class SectionPageComponent {
   protected readonly epWarehouseSearch = signal<string>('');
   protected readonly epSelectedInventoryItem = signal<InventoryItemRecord | null>(null);
 
+  /** Chiave storage degli articoli usati di recente nel portale */
+  private readonly EP_RECENT_ITEMS_STORAGE_KEY = 'audiomax.ep.recentItems';
+  /** Numero massimo di articoli recenti mostrati */
+  private readonly EP_RECENT_ITEMS_MAX = 6;
+
+  /** ID degli ultimi articoli usati (il più recente in testa), persistiti nel browser */
+  protected readonly epRecentInventoryIds = (() => {
+    let initial: string[] = [];
+    try {
+      const raw = this.storage.getItem(this.EP_RECENT_ITEMS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          initial = parsed.filter((value): value is string => typeof value === 'string');
+        }
+      }
+    } catch {
+      initial = [];
+    }
+    return signal<string[]>(initial);
+  })();
+
+  /** Articoli recenti risolti (ignora eventuali ID non più esistenti) */
+  protected readonly epRecentInventoryItems = computed(() => {
+    const items = this.allInventoryItems();
+    return this.epRecentInventoryIds()
+      .map((id) => items.find((it) => it.id === id) ?? null)
+      .filter((it): it is InventoryItemRecord => it !== null);
+  });
+
+  /** Apre la scheda di prelievo partendo da un articolo recente */
+  protected epSelectRecentItem(item: InventoryItemRecord): void {
+    this.epResetPrelievoForm();
+    this.epSelectedInventoryItem.set(item);
+  }
+
+  /** Memorizza un articolo tra i "usati di recente" (il più recente in testa) */
+  private epRegisterRecentItem(id: string): void {
+    this.epRecentInventoryIds.update((ids) => {
+      const next = [id, ...ids.filter((value) => value !== id)].slice(0, this.EP_RECENT_ITEMS_MAX);
+      try {
+        this.storage.setItem(this.EP_RECENT_ITEMS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* storage non disponibile: ignora */
+      }
+      return next;
+    });
+  }
+
   /** Elenco articoli filtrati per ricerca testuale (nome, sku, categoria, fornitore) */
   protected readonly epFilteredInventoryItems = computed(() => {
     const q = this.epWarehouseSearch().trim().toLowerCase();
@@ -6572,6 +8696,134 @@ export class SectionPageComponent {
       return haystack.includes(q);
     });
   });
+
+  // --- Portale MAGAZZINO: editor articolo (creazione/modifica) gated dai permessi del titolare ---
+  /** Editor articolo aperto nel portale (creazione o modifica) */
+  protected readonly epInventoryEditorOpen = signal<boolean>(false);
+  /** ID dell'articolo in modifica (null = nuovo articolo) */
+  protected readonly epEditingInventoryId = signal<string | null>(null);
+
+  /** Form compatto di creazione/modifica articolo dal portale */
+  protected readonly epInventoryForm = this.formBuilder.nonNullable.group({
+    name: ['', Validators.required],
+    sku: [''],
+    barcode: [''],
+    category: [''],
+    stock: [0, [Validators.required, Validators.min(0)]],
+    minStock: [0, [Validators.min(0)]],
+    unitCost: [0, [Validators.min(0)]],
+    salePrice: [0, [Validators.min(0)]],
+    supplier: [''],
+    location: [''],
+  });
+
+  /** Apre l'editor per un nuovo articolo (solo se il titolare ha abilitato l'inserimento) */
+  protected epOpenNewInventoryItem(): void {
+    if (!this.epCanAddInventory()) {
+      this.pushToast('Inserimento nuovi articoli non abilitato dal titolare.', 'error');
+      return;
+    }
+    this.epEditingInventoryId.set(null);
+    this.epInventoryForm.reset({
+      name: '',
+      sku: '',
+      barcode: '',
+      category: '',
+      stock: 0,
+      minStock: 0,
+      unitCost: 0,
+      salePrice: 0,
+      supplier: '',
+      location: '',
+    });
+    this.epInventoryEditorOpen.set(true);
+  }
+
+  /** Apre l'editor per modificare un articolo esistente (solo se abilitato) */
+  protected epOpenEditInventoryItem(item: InventoryItemRecord): void {
+    if (!this.epCanEditInventory()) {
+      this.pushToast('Modifica articoli non abilitata dal titolare.', 'error');
+      return;
+    }
+    this.epEditingInventoryId.set(item.id);
+    this.epInventoryForm.reset({
+      name: item.name ?? '',
+      sku: item.sku ?? '',
+      barcode: item.barcode ?? '',
+      category: item.category ?? '',
+      stock: item.stock ?? 0,
+      minStock: item.minStock ?? 0,
+      unitCost: item.unitCost ?? 0,
+      salePrice: item.salePrice ?? 0,
+      supplier: item.supplier ?? '',
+      location: item.location ?? '',
+    });
+    this.epInventoryEditorOpen.set(true);
+  }
+
+  /** Chiude l'editor articolo del portale */
+  protected epCloseInventoryEditor(): void {
+    this.epInventoryEditorOpen.set(false);
+    this.epEditingInventoryId.set(null);
+  }
+
+  /** Salva l'articolo dal portale: crea o aggiorna in base ai permessi del titolare */
+  protected epSubmitInventoryItem(): void {
+    if (this.epInventoryForm.invalid) {
+      this.epInventoryForm.markAllAsTouched();
+      return;
+    }
+    const raw = this.epInventoryForm.getRawValue();
+    const editingId = this.epEditingInventoryId();
+
+    if (editingId) {
+      if (!this.epCanEditInventory()) {
+        this.pushToast('Modifica articoli non abilitata dal titolare.', 'error');
+        return;
+      }
+      const existing = this.allInventoryItems().find((it) => it.id === editingId);
+      if (!existing) {
+        this.pushToast('Articolo non trovato.', 'error');
+        return;
+      }
+      this.data.updateInventoryItem({
+        ...existing,
+        name: raw.name.trim(),
+        sku: raw.sku.trim(),
+        barcode: raw.barcode.trim(),
+        category: raw.category.trim(),
+        stock: raw.stock,
+        minStock: raw.minStock,
+        unitCost: raw.unitCost,
+        salePrice: raw.salePrice,
+        supplier: raw.supplier.trim(),
+        location: raw.location.trim(),
+      });
+      this.pushToast(`Articolo "${raw.name.trim()}" aggiornato`, 'success');
+    } else {
+      if (!this.epCanAddInventory()) {
+        this.pushToast('Inserimento nuovi articoli non abilitato dal titolare.', 'error');
+        return;
+      }
+      this.data.addInventoryItem({
+        name: raw.name.trim(),
+        sku: raw.sku.trim(),
+        barcode: raw.barcode.trim(),
+        category: raw.category.trim(),
+        usageType: 'rivendita',
+        stock: raw.stock,
+        cableRolls: null,
+        cableMetersPerRoll: null,
+        minStock: raw.minStock,
+        unitCost: raw.unitCost,
+        salePrice: raw.salePrice,
+        supplier: raw.supplier.trim(),
+        location: raw.location.trim(),
+      });
+      this.pushToast(`Articolo "${raw.name.trim()}" creato`, 'success');
+    }
+    this.epCloseInventoryEditor();
+  }
 
   protected readonly epPrelievoClienteSearch = signal<string>('');
 
@@ -6632,6 +8884,1730 @@ export class SectionPageComponent {
     this.epOrderForm.get('clientSearch')?.setValue(val, { emitEvent: false });
   }
 
+  // --- Modulo DDT CRM -------------------------------------------------------
+  /** Identificativo operatore usato per i DDT creati dal gestionale CRM (visibili anche nel portale dipendenti) */
+  protected readonly crmDdtOperatorId = 'crm-ddt';
+
+  protected readonly ddtCauseOptions = [
+    'Vendita',
+    'Consegna merce',
+    'Reso a fornitore',
+    'Reso da cliente',
+    'Trasferimento tra magazzini',
+    'Conto visione',
+    'Conto lavoro',
+    'Riparazione o assistenza',
+    'Materiale destinato a installazione',
+    'Altro',
+  ];
+
+  private ddtMakeLineForm(): FormGroup {
+    return this.formBuilder.nonNullable.group({
+      search: [''],
+      inventoryItemId: [''],
+      itemCode: [''],
+      description: [''],
+      quantity: [1, [Validators.required, Validators.min(0.01)]],
+      unitOfMeasure: ['pz'],
+      note: [''],
+      lotNumber: [''],
+      serialNumber: [''],
+      quoteLineId: [''],
+      plannedQuantity: [0],
+      alreadyDeliveredQuantity: [0],
+      remainingQuantity: [0],
+    });
+  }
+
+  protected readonly ddtLinesForm: FormArray = this.formBuilder.array([this.ddtMakeLineForm()]);
+  protected get ddtLineGroups(): FormGroup[] {
+    return this.ddtLinesForm.controls as FormGroup[];
+  }
+
+  protected readonly ddtForm = this.formBuilder.nonNullable.group({
+    clientSearch: [''],
+    clientId: [''],
+    recipientMode: ['cliente'],
+    recipientName: [''],
+    recipientAddress: [''],
+    recipientPostalCode: [''],
+    recipientCity: [''],
+    recipientProvince: [''],
+    recipientVatNumber: [''],
+    recipientTaxCode: [''],
+    deliveryName: [''],
+    deliveryAddress: [''],
+    deliveryPostalCode: [''],
+    deliveryCity: [''],
+    deliveryProvince: [''],
+    series: ['A'],
+    documentDate: [new Date().toISOString().slice(0, 10), Validators.required],
+    transportStartAt: [''],
+    causale: ['Vendita', Validators.required],
+    departurePlace: [''],
+    destinationPlace: [''],
+    carrierName: [''],
+    vehicle: [''],
+    transportMethod: [''],
+    packageCount: [0],
+    packagingType: [''],
+    weight: [''],
+    linkedQuoteId: [''],
+    linkedQuoteNumber: [''],
+    linkedTicketId: [''],
+    linkedAppointmentId: [''],
+    referenceOrder: [''],
+    referenceJob: [''],
+    referenceOther: [''],
+    note: [''],
+    internalNote: [''],
+    inventoryMode: ['scarico'],
+    alsoDeduct: [true],
+    lines: this.ddtLinesForm,
+  });
+
+  protected readonly ddtClientSuggestions = computed(() => {
+    const q = this.ddtForm.controls.clientSearch.value.trim().toLowerCase();
+    if (!q) return [];
+    return this.allClients()
+      .filter((client) =>
+        `${client.name} ${client.phone} ${client.email} ${client.city}`.toLowerCase().includes(q),
+      )
+      .slice(0, 10);
+  });
+
+  protected readonly ddtQuoteSuggestions = computed(() => {
+    const q = this.ddtQuoteSearch().trim().toLowerCase();
+    const quotes = [...this.allQuotes()].sort((left, right) =>
+      String(right.issueDate ?? right.dueDate ?? '').localeCompare(String(left.issueDate ?? left.dueDate ?? '')),
+    );
+    if (!q) {
+      return quotes.slice(0, 30);
+    }
+    return quotes.filter((quote) => {
+      const haystack = [
+        this.quoteCode(quote.id),
+        quote.customerName,
+        quote.projectType,
+        quote.issueDate ?? '',
+        quote.dueDate ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  });
+
+  protected readonly ddtDocuments = computed(() =>
+    [...this.data.warehouseDdts()].sort((left, right) =>
+      String(right.documentDate || right.createdAt).localeCompare(String(left.documentDate || left.createdAt)),
+    ),
+  );
+
+  protected readonly ddtSavedDraftDocuments = computed(() =>
+    this.ddtDocuments().filter((record) => record.status === 'bozza'),
+  );
+
+  protected readonly ddtLocalDraft = computed<DdtLocalDraftSummary | null>(() => {
+    const savedAt = this.formDrafts.savedAt('ddt');
+    if (!savedAt) {
+      return null;
+    }
+
+    const stored = this.formDrafts.peekDraft<{
+      recipientName?: string;
+      causale?: string;
+      documentDate?: string;
+      linkedQuoteNumber?: string;
+      lines?: Array<unknown>;
+    }>('ddt');
+    if (!stored) {
+      return null;
+    }
+
+    return {
+      savedAt,
+      recipientName: String(stored.value.recipientName ?? '').trim(),
+      causale: String(stored.value.causale ?? '').trim(),
+      documentDate: String(stored.value.documentDate ?? '').trim(),
+      linkedQuoteNumber: String(stored.value.linkedQuoteNumber ?? '').trim(),
+      lineCount: Array.isArray(stored.value.lines) ? stored.value.lines.length : 0,
+    };
+  });
+
+  protected readonly ddtDraftCount = computed(
+    () => this.ddtSavedDraftDocuments().length + (this.ddtLocalDraft() ? 1 : 0),
+  );
+
+  protected readonly selectedDdtSendRecord = computed(
+    () => this.ddtDocuments().find((item) => item.id === this.ddtSendRecordId()) ?? null,
+  );
+
+  protected readonly ddtCauseFilterOptions = computed(() => {
+    const found = new Set(this.ddtCauseOptions);
+    for (const record of this.ddtDocuments()) {
+      const cause = (record.causale ?? '').trim();
+      if (cause) found.add(cause);
+    }
+    return ['tutte', ...Array.from(found)];
+  });
+
+  protected readonly filteredDdts = computed(() => {
+    const q = this.ddtSearch().trim().toLowerCase();
+    const clientId = this.ddtFilterClientId();
+    const status = this.ddtFilterStatus();
+    const cause = this.ddtFilterCause();
+    const from = this.ddtFilterFrom();
+    const to = this.ddtFilterTo();
+
+    return this.ddtDocuments().filter((record) => {
+      const docDate = String(record.documentDate || record.createdAt).slice(0, 10);
+      if (clientId !== 'tutti' && record.clientId !== clientId) return false;
+      if (status !== 'tutti' && record.status !== status) return false;
+      if (cause !== 'tutte' && (record.causale ?? '') !== cause) return false;
+      if (from && docDate < from) return false;
+      if (to && docDate > to) return false;
+      if (!q) return true;
+
+      const haystack = [
+        record.number,
+        record.clientSnapshot,
+        record.clientCode ?? '',
+        record.causale ?? '',
+        record.linkedQuoteNumber ?? '',
+        ...record.lines.map((line) => `${line.itemCode ?? ''} ${line.itemSnapshot}`),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(q);
+    });
+  });
+
+  protected readonly selectedDdtRecord = computed(
+    () => this.ddtDocuments().find((record) => record.id === this.ddtDetailId()) ?? null,
+  );
+
+  protected ddtClientSearchInput(target: EventTarget | null): void {
+    const value = (target as HTMLInputElement | null)?.value ?? '';
+    this.ddtForm.controls.clientSearch.setValue(value, { emitEvent: false });
+  }
+
+  protected ddtLineSuggestions(index: number): InventoryItemRecord[] {
+    const ctrl = this.ddtLinesForm.at(index) as FormGroup;
+    const q = String(ctrl.get('search')?.value ?? '').trim().toLowerCase();
+    if (!q) return [];
+    return this.allInventoryItems()
+      .filter((item) => `${item.name} ${item.sku} ${item.category}`.toLowerCase().includes(q))
+      .slice(0, 8);
+  }
+
+  protected ddtSelectClient(client: ClientRecord): void {
+    const billing = client.privacyProfile.billingProfile;
+    this.ddtForm.patchValue({
+      clientSearch: client.name,
+      clientId: client.id,
+      recipientMode: 'cliente',
+      recipientName: client.name,
+      recipientAddress: billing?.billingAddress || client.address || '',
+      recipientPostalCode: '',
+      recipientCity: client.city || '',
+      recipientProvince: '',
+      recipientVatNumber: billing?.kind === 'azienda' ? billing?.taxId ?? '' : '',
+      recipientTaxCode: billing?.kind !== 'azienda' ? billing?.taxId ?? '' : '',
+      deliveryName: client.name,
+      deliveryAddress: client.address || billing?.billingAddress || '',
+      deliveryPostalCode: '',
+      deliveryCity: client.city || '',
+      deliveryProvince: '',
+    });
+  }
+
+  protected ddtSelectInventoryItem(index: number, item: InventoryItemRecord): void {
+    const ctrl = this.ddtLinesForm.at(index) as FormGroup;
+    ctrl.patchValue({
+      search: item.name,
+      inventoryItemId: item.id,
+      itemCode: item.sku || item.id,
+      description: item.name,
+      unitOfMeasure: 'pz',
+    });
+  }
+
+  protected ddtAddLine(): void {
+    this.ddtLinesForm.push(this.ddtMakeLineForm());
+  }
+
+  protected ddtRemoveLine(index: number): void {
+    if (this.ddtLinesForm.length <= 1) return;
+    const ctrl = this.ddtLinesForm.at(index) as FormGroup;
+    const description = String(ctrl.get('description')?.value ?? 'riga DDT').trim() || 'riga DDT';
+    if (!window.confirm(`Rimuovere "${description}" dal DDT?`)) return;
+    this.ddtLinesForm.removeAt(index);
+  }
+
+  protected openDdtEditor(): void {
+    this.ddtEditingId.set(null);
+    this.resetDdtEditor();
+    this.restoreFormDraft('ddt', this.ddtForm);
+    this.ddtEditorModalOpen.set(true);
+  }
+
+  protected closeDdtEditor(): void {
+    if (this.ddtForm.dirty && !window.confirm('Chiudere il DDT? Le modifiche non salvate resteranno in bozza locale.')) {
+      return;
+    }
+    this.ddtEditorModalOpen.set(false);
+    this.ddtEditingId.set(null);
+  }
+
+  protected openDdtDetail(recordId: string): void {
+    this.ddtDetailId.set(recordId);
+    this.ddtDetailModalOpen.set(true);
+  }
+
+  protected closeDdtDetail(): void {
+    this.ddtDetailModalOpen.set(false);
+    this.ddtDetailId.set(null);
+  }
+
+  protected openDdtQuotePicker(): void {
+    this.ddtQuoteSearch.set('');
+    this.ddtQuotePickerOpen.set(true);
+  }
+
+  protected closeDdtQuotePicker(): void {
+    this.ddtQuotePickerOpen.set(false);
+  }
+
+  protected openDdtDrafts(): void {
+    this.ddtDraftsModalOpen.set(true);
+  }
+
+  protected closeDdtDrafts(): void {
+    this.ddtDraftsModalOpen.set(false);
+  }
+
+  protected resumeLocalDdtDraft(): void {
+    this.ddtDraftsModalOpen.set(false);
+    this.openDdtEditor();
+  }
+
+  protected deleteLocalDdtDraft(): void {
+    if (!this.hasFormDraft('ddt')) {
+      return;
+    }
+    if (!window.confirm('Eliminare la bozza locale del DDT non ancora salvata come documento?')) {
+      return;
+    }
+    this.clearFormDraft('ddt');
+    this.pushToast('Bozza locale DDT eliminata.', 'success');
+  }
+
+  protected openDdtFromQuoteRecord(quoteId: string): void {
+    const quote = this.allQuotes().find((item) => item.id === quoteId) ?? null;
+    if (!quote) {
+      this.pushToast('Preventivo non trovato.', 'error');
+      return;
+    }
+
+    this.ddtEditingId.set(null);
+    this.resetDdtEditor();
+    this.ddtForm.patchValue({
+      linkedQuoteId: quote.id,
+      linkedQuoteNumber: this.quoteCode(quote.id),
+      clientSearch: quote.customerName,
+      recipientName: quote.customerName,
+      recipientAddress: quote.customerAddress || '',
+      deliveryName: quote.customerName,
+      deliveryAddress: quote.fulfillmentAddress || quote.customerAddress || '',
+      documentDate: new Date().toISOString().slice(0, 10),
+      causale: 'Materiale destinato a installazione',
+      destinationPlace: quote.fulfillmentAddress || quote.customerAddress || '',
+      note: quote.notes || '',
+      inventoryMode: 'scarico',
+      alsoDeduct: true,
+    });
+
+    const client = quote.clientId ? this.allClients().find((item) => item.id === quote.clientId) ?? null : null;
+    if (client) {
+      this.ddtSelectClient(client);
+      this.ddtForm.patchValue({
+        linkedQuoteId: quote.id,
+        linkedQuoteNumber: this.quoteCode(quote.id),
+        causale: 'Materiale destinato a installazione',
+        destinationPlace: quote.fulfillmentAddress || quote.customerAddress || '',
+        note: quote.notes || '',
+      });
+    }
+
+    this.replaceDdtLinesFromQuote(quote);
+    this.ddtEditorModalOpen.set(true);
+    this.ddtQuotePickerOpen.set(false);
+  }
+
+  protected editDdtRecord(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+    if (record.status !== 'bozza') {
+      this.pushToast('Puoi modificare solo DDT in bozza. Duplica il documento per creare una variante.', 'error');
+      return;
+    }
+
+    this.ddtEditingId.set(record.id);
+    this.resetDdtEditor();
+    this.patchDdtFormFromRecord(record);
+    this.ddtEditorModalOpen.set(true);
+  }
+
+  protected duplicateDdtRecord(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+
+    this.ddtEditingId.set(null);
+    this.resetDdtEditor();
+    this.patchDdtFormFromRecord(record, true);
+    this.ddtEditorModalOpen.set(true);
+  }
+
+  protected deleteDdtDraftRecord(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record || record.status !== 'bozza') {
+      return;
+    }
+    if (!window.confirm(`Eliminare definitivamente la bozza ${record.number || 'senza numero'}?`)) {
+      return;
+    }
+    this.data.deleteWarehouseDdt(record.id);
+    if (this.ddtDetailId() === record.id) {
+      this.closeDdtDetail();
+    }
+    this.pushToast('Bozza DDT eliminata.', 'success');
+  }
+
+  protected async submitDdtDocument(emit: boolean): Promise<void> {
+    if (this.ddtForm.invalid) {
+      this.pushToast('Completa i campi obbligatori del DDT.', 'error');
+      return;
+    }
+
+    const raw = this.ddtForm.getRawValue();
+    const lines = this.normalizeDdtLines(raw.lines as Array<Record<string, unknown>>);
+
+    if (!lines.length) {
+      this.pushToast('Inserisci almeno una riga merce valida.', 'error');
+      return;
+    }
+
+    const existing = this.ddtEditingId()
+      ? this.ddtDocuments().find((item) => item.id === this.ddtEditingId()) ?? null
+      : null;
+
+    if (existing && !window.confirm('Confermi il salvataggio delle modifiche al DDT?')) {
+      return;
+    }
+
+    const client = raw.clientId ? this.allClients().find((item) => item.id === raw.clientId) ?? null : null;
+    const payload = this.buildDdtRecordPayload(raw, lines, client, existing);
+
+    let record = existing
+      ? { ...existing, ...payload, number: existing.number, status: existing.status }
+      : this.data.addWarehouseDdt(payload);
+
+    if (existing) {
+      this.data.updateWarehouseDdt(record);
+    }
+
+    if (emit) {
+      if (!record.number) {
+        const assignedNumber = await this.data.reserveWarehouseDdtNumber(record.documentDate, record.series ?? 'A');
+        const emitted = this.data.updateWarehouseDdtStatus(record.id, 'emesso', {
+          assignedNumber,
+          operatorId: record.createdByOperatorId,
+          operatorName: record.createdByOperatorName,
+          note: 'Documento emesso dal modulo DDT',
+        });
+        record = emitted ?? record;
+      } else if (record.status === 'bozza') {
+        record = this.data.updateWarehouseDdtStatus(record.id, 'emesso', {
+          operatorId: record.createdByOperatorId,
+          operatorName: record.createdByOperatorName,
+          note: 'Documento emesso dal modulo DDT',
+        }) ?? record;
+      }
+
+      record = this.applyInventoryEffectsForDdt(record, 'emesso');
+      this.pushToast(`DDT ${record.number || 'emesso'} salvato correttamente.`, 'success');
+    } else {
+      this.pushToast(existing ? 'Bozza DDT aggiornata.' : 'Bozza DDT salvata.', 'success');
+    }
+
+    this.clearFormDraft('ddt');
+    this.ddtEditorModalOpen.set(false);
+    this.ddtEditingId.set(null);
+    this.ddtForm.markAsPristine();
+  }
+
+  protected ddtSetDelivered(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+    if (!window.confirm('Confermi la marcatura del DDT come consegnato?')) return;
+    this.data.updateWarehouseDdtStatus(record.id, 'consegnato', {
+      operatorId: record.createdByOperatorId,
+      operatorName: record.createdByOperatorName,
+      note: 'Consegna confermata',
+    });
+    this.pushToast('DDT segnato come consegnato.', 'success');
+  }
+
+  protected cancelDdtRecord(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+    const reason = window.prompt('Inserisci la motivazione dell’annullamento del DDT:', record.cancellationReason ?? '');
+    if (reason === null) return;
+    if (!reason.trim()) {
+      this.pushToast('Inserisci una motivazione per annullare il DDT.', 'error');
+      return;
+    }
+    if (!window.confirm(`Confermi l'annullamento del DDT ${record.number || 'in bozza'}?`)) return;
+
+    const updated = this.data.updateWarehouseDdtStatus(record.id, 'annullato', {
+      operatorId: record.createdByOperatorId,
+      operatorName: record.createdByOperatorName,
+      cancellationReason: reason.trim(),
+      note: `Documento annullato: ${reason.trim()}`,
+    });
+
+    if (updated) {
+      this.applyInventoryEffectsForDdt(updated, 'annullato');
+      this.pushToast('DDT annullato con storico conservato.', 'success');
+    }
+  }
+
+  protected ddtLinkedQuoteLabel(record: WarehouseDdtRecord): string {
+    if (record.linkedQuoteNumber?.trim()) return record.linkedQuoteNumber;
+    if (record.linkedQuoteId) return this.quoteCode(record.linkedQuoteId);
+    return '—';
+  }
+
+  protected openDdtSendModal(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) {
+      return;
+    }
+    const client = this.resolveDdtClient(record);
+    this.ddtSendRecordId.set(record.id);
+    this.ddtSendPhone.set(client?.phone ?? '');
+    this.ddtSendEmail.set(client?.email && !client.email.endsWith('@cash.local') ? client.email : '');
+    this.ddtSendModalOpen.set(true);
+  }
+
+  protected closeDdtSendModal(): void {
+    this.ddtSendModalOpen.set(false);
+    this.ddtSendRecordId.set(null);
+    this.ddtSendPhone.set('');
+    this.ddtSendEmail.set('');
+  }
+
+  protected updateDdtSendPhone(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.ddtSendPhone.set(target?.value ?? '');
+  }
+
+  protected updateDdtSendEmail(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.ddtSendEmail.set(target?.value ?? '');
+  }
+
+  protected async sendDdtWhatsapp(): Promise<void> {
+    const record = this.selectedDdtSendRecord();
+    if (!record) {
+      return;
+    }
+
+    const normalizedPhone = this.privacyDispatch.normalizeWhatsappPhone(this.ddtSendPhone());
+    if (!normalizedPhone) {
+      this.pushToast('Numero WhatsApp non valido o mancante.', 'error');
+      return;
+    }
+
+    const shareResult = await this.shareDdtPdf(record, this.buildDdtWhatsappMessage(record));
+    if (shareResult === 'shared') {
+      this.pushToast('PDF DDT pronto nella condivisione del dispositivo.', 'success');
+      this.closeDdtSendModal();
+      return;
+    }
+    if (shareResult === 'cancelled') {
+      return;
+    }
+
+    const blob = this.buildDdtPdfBlob(record);
+    this.downloadBlob(blob, this.ddtPdfFileName(record));
+    const targetUrl = `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(this.buildDdtWhatsappMessage(record))}`;
+    const opened = this.privacyDispatch.openExternalUrl(targetUrl);
+    if (!opened) {
+      this.pushToast('Popup bloccato dal browser: impossibile aprire WhatsApp.', 'error');
+      return;
+    }
+
+    this.pushToast('PDF scaricato: allegalo al messaggio WhatsApp appena aperto.', 'success');
+    this.closeDdtSendModal();
+  }
+
+  protected async sendDdtEmail(): Promise<void> {
+    const record = this.selectedDdtSendRecord();
+    if (!record) {
+      return;
+    }
+
+    const email = this.ddtSendEmail().trim();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      this.pushToast('Indirizzo email non valido o mancante.', 'error');
+      return;
+    }
+
+    const shareResult = await this.shareDdtPdf(record, this.buildDdtEmailBody(record));
+    if (shareResult === 'shared') {
+      this.pushToast('PDF DDT pronto nella condivisione del dispositivo.', 'success');
+      this.closeDdtSendModal();
+      return;
+    }
+    if (shareResult === 'cancelled') {
+      return;
+    }
+
+    const blob = this.buildDdtPdfBlob(record);
+    this.downloadBlob(blob, this.ddtPdfFileName(record));
+    const targetUrl =
+      `mailto:${email}?subject=${encodeURIComponent(this.buildDdtEmailSubject(record))}` +
+      `&body=${encodeURIComponent(this.buildDdtEmailBody(record))}`;
+    this.privacyDispatch.openExternalUrl(targetUrl);
+    this.pushToast('PDF scaricato: allegalo alla mail appena aperta.', 'success');
+    this.closeDdtSendModal();
+  }
+
+  protected ddtDeliveredFromQuote(quoteId: string, quoteLineId: string, excludeRecordId: string | null = null): number {
+    return this.ddtDocuments()
+      .filter((record) => record.linkedQuoteId === quoteId && record.id !== excludeRecordId && record.status !== 'annullato')
+      .flatMap((record) => record.lines)
+      .filter((line) => line.quoteLineId === quoteLineId)
+      .reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  }
+
+  private resetDdtEditor(): void {
+    // Sospende la sincronizzazione bozza: il reset a valori di default non deve creare una bozza locale
+    this.runWithoutDraftSync('ddt', () => {
+      while (this.ddtLinesForm.length) this.ddtLinesForm.removeAt(0);
+      this.ddtLinesForm.push(this.ddtMakeLineForm());
+      this.ddtForm.reset({
+        clientSearch: '',
+        clientId: '',
+        recipientMode: 'cliente',
+        recipientName: '',
+        recipientAddress: '',
+        recipientPostalCode: '',
+        recipientCity: '',
+        recipientProvince: '',
+        recipientVatNumber: '',
+        recipientTaxCode: '',
+        deliveryName: '',
+        deliveryAddress: '',
+        deliveryPostalCode: '',
+        deliveryCity: '',
+        deliveryProvince: '',
+        series: 'A',
+        documentDate: new Date().toISOString().slice(0, 10),
+        transportStartAt: '',
+        causale: 'Vendita',
+        departurePlace: '',
+        destinationPlace: '',
+        carrierName: '',
+        vehicle: '',
+        transportMethod: '',
+        packageCount: 0,
+        packagingType: '',
+        weight: '',
+        linkedQuoteId: '',
+        linkedQuoteNumber: '',
+        linkedTicketId: '',
+        linkedAppointmentId: '',
+        referenceOrder: '',
+        referenceJob: '',
+        referenceOther: '',
+        note: '',
+        internalNote: '',
+        inventoryMode: 'scarico',
+        alsoDeduct: true,
+        lines: [this.ddtMakeLineForm().getRawValue()],
+      });
+      this.ddtForm.markAsPristine();
+    });
+  }
+
+  private replaceDdtLinesFromQuote(quote: QuoteRecord, excludeRecordId: string | null = null): void {
+    while (this.ddtLinesForm.length) this.ddtLinesForm.removeAt(0);
+    const materialLines = (quote.lines ?? []).filter((line) => line.kind === 'materiale');
+
+    for (const line of materialLines) {
+      const alreadyDelivered = this.ddtDeliveredFromQuote(quote.id, line.id, excludeRecordId);
+      const remaining = Math.max(0, Number(line.quantity || 0) - alreadyDelivered);
+      const matched = this.allInventoryItems().find(
+        (item) => item.name.trim().toLowerCase() === line.description.trim().toLowerCase(),
+      );
+      const ctrl = this.ddtMakeLineForm();
+      ctrl.patchValue({
+        search: line.description,
+        inventoryItemId: matched?.id ?? '',
+        itemCode: matched?.sku ?? '',
+        description: line.description,
+        quantity: remaining > 0 ? remaining : line.quantity,
+        unitOfMeasure: 'pz',
+        quoteLineId: line.id,
+        plannedQuantity: line.quantity,
+        alreadyDeliveredQuantity: alreadyDelivered,
+        remainingQuantity: remaining,
+      });
+      this.ddtLinesForm.push(ctrl);
+    }
+
+    if (this.ddtLinesForm.length > 1) {
+      this.ddtLinesForm.removeAt(0);
+    }
+  }
+
+  private patchDdtFormFromRecord(record: WarehouseDdtRecord, duplicate = false): void {
+    while (this.ddtLinesForm.length) this.ddtLinesForm.removeAt(0);
+    for (const line of record.lines) {
+      const ctrl = this.ddtMakeLineForm();
+      ctrl.patchValue({
+        search: line.itemSnapshot,
+        inventoryItemId: line.inventoryItemId ?? '',
+        itemCode: line.itemCode ?? '',
+        description: line.itemSnapshot,
+        quantity: line.quantity,
+        unitOfMeasure: line.unitOfMeasure ?? 'pz',
+        note: line.note ?? '',
+        lotNumber: line.lotNumber ?? '',
+        serialNumber: line.serialNumber ?? '',
+        quoteLineId: line.quoteLineId ?? '',
+        plannedQuantity: line.plannedQuantity ?? 0,
+        alreadyDeliveredQuantity: line.alreadyDeliveredQuantity ?? 0,
+        remainingQuantity: line.remainingQuantity ?? 0,
+      });
+      this.ddtLinesForm.push(ctrl);
+    }
+    if (this.ddtLinesForm.length > 1) {
+      this.ddtLinesForm.removeAt(0);
+    }
+
+    this.ddtForm.patchValue({
+      clientSearch: record.clientSnapshot || record.recipientSnapshot?.name || '',
+      clientId: record.clientId ?? '',
+      recipientMode: record.clientId ? 'cliente' : 'occasionale',
+      recipientName: record.recipientSnapshot?.name ?? record.clientSnapshot ?? '',
+      recipientAddress: record.recipientSnapshot?.address ?? '',
+      recipientPostalCode: record.recipientSnapshot?.postalCode ?? '',
+      recipientCity: record.recipientSnapshot?.city ?? '',
+      recipientProvince: record.recipientSnapshot?.province ?? '',
+      recipientVatNumber: record.recipientSnapshot?.vatNumber ?? '',
+      recipientTaxCode: record.recipientSnapshot?.taxCode ?? '',
+      deliveryName: record.deliverySnapshot?.name ?? '',
+      deliveryAddress: record.deliverySnapshot?.address ?? record.destination ?? '',
+      deliveryPostalCode: record.deliverySnapshot?.postalCode ?? '',
+      deliveryCity: record.deliverySnapshot?.city ?? '',
+      deliveryProvince: record.deliverySnapshot?.province ?? '',
+      series: record.series ?? 'A',
+      documentDate: duplicate ? new Date().toISOString().slice(0, 10) : record.documentDate,
+      transportStartAt: duplicate ? '' : this.toDateTimeLocal(record.transportStartAt ?? ''),
+      causale: record.causale ?? 'Vendita',
+      departurePlace: record.departurePlace ?? '',
+      destinationPlace: record.destinationPlace ?? record.destination ?? '',
+      carrierName: record.carrierName ?? '',
+      vehicle: record.vehicle ?? '',
+      transportMethod: record.transportMethod ?? '',
+      packageCount: record.packageCount ?? 0,
+      packagingType: record.packagingType ?? '',
+      weight: record.weight ?? '',
+      linkedQuoteId: record.linkedQuoteId ?? '',
+      linkedQuoteNumber: record.linkedQuoteNumber ?? '',
+      linkedTicketId: record.linkedTicketId ?? '',
+      linkedAppointmentId: record.linkedAppointmentId ?? '',
+      referenceOrder: record.referenceOrder ?? '',
+      referenceJob: record.referenceJob ?? '',
+      referenceOther: record.referenceOther ?? '',
+      note: record.note ?? '',
+      internalNote: record.internalNote ?? '',
+      inventoryMode: record.inventoryMode ?? 'nessuno',
+      alsoDeduct: record.alsoDeduct ?? false,
+    });
+    this.ddtForm.markAsPristine();
+  }
+
+  private normalizeDdtLines(rawLines: Array<Record<string, unknown>>): WarehouseDdtLineRecord[] {
+    return rawLines
+      .filter((row) => Number(row['quantity']) > 0 && String(row['description'] ?? '').trim())
+      .map((row) => {
+        const inventoryItemId = String(row['inventoryItemId'] ?? '').trim();
+        const linked = inventoryItemId
+          ? this.allInventoryItems().find((item) => item.id === inventoryItemId)
+          : null;
+        return {
+          id: `ddt-ln-${crypto.randomUUID()}`,
+          inventoryItemId: inventoryItemId || null,
+          itemCode: String(row['itemCode'] ?? '').trim() || linked?.sku || '',
+          itemSnapshot: String(row['description'] ?? '').trim() || linked?.name || 'Articolo',
+          quantity: Math.max(0.01, Number(row['quantity']) || 0),
+          unitOfMeasure: String(row['unitOfMeasure'] ?? 'pz').trim() || 'pz',
+          unitCost: Number(linked?.unitCost ?? 0),
+          note: String(row['note'] ?? '').trim(),
+          lotNumber: String(row['lotNumber'] ?? '').trim(),
+          serialNumber: String(row['serialNumber'] ?? '').trim(),
+          quoteLineId: String(row['quoteLineId'] ?? '').trim() || null,
+          plannedQuantity: Number(row['plannedQuantity'] ?? 0) || null,
+          alreadyDeliveredQuantity: Number(row['alreadyDeliveredQuantity'] ?? 0) || null,
+          remainingQuantity: Number(row['remainingQuantity'] ?? 0) || null,
+        };
+      });
+  }
+
+  private buildDdtRecordPayload(
+    raw: ReturnType<typeof this.ddtForm.getRawValue>,
+    lines: WarehouseDdtLineRecord[],
+    client: ClientRecord | null,
+    existing: WarehouseDdtRecord | null,
+  ): Omit<WarehouseDdtRecord, 'id' | 'number' | 'createdAt' | 'emittedAt' | 'deliveredAt' | 'status'> & {
+    number?: string;
+    createdAt?: string;
+  } {
+    const createdAt = existing?.createdAt ?? new Date().toISOString();
+    const senderSnapshot: WarehouseDdtPartySnapshot = {
+      name: this.companyProfile().legalName ?? '',
+      address: this.companyProfile().address ?? '',
+      postalCode: this.companyProfile().postalCode ?? '',
+      city: this.companyProfile().city ?? '',
+      province: this.companyProfile().province ?? '',
+      vatNumber: this.companyProfile().vatNumber ?? '',
+      taxCode: this.companyProfile().taxCode ?? '',
+    };
+    const recipientSnapshot: WarehouseDdtPartySnapshot = {
+      name: raw.recipientName,
+      address: raw.recipientAddress,
+      postalCode: raw.recipientPostalCode,
+      city: raw.recipientCity,
+      province: raw.recipientProvince,
+      vatNumber: raw.recipientVatNumber,
+      taxCode: raw.recipientTaxCode,
+    };
+    const deliverySnapshot: WarehouseDdtPartySnapshot = {
+      name: raw.deliveryName || raw.recipientName,
+      address: raw.deliveryAddress,
+      postalCode: raw.deliveryPostalCode,
+      city: raw.deliveryCity,
+      province: raw.deliveryProvince,
+      vatNumber: '',
+      taxCode: '',
+    };
+
+    return {
+      createdAt,
+      documentDate: raw.documentDate,
+      transportStartAt: raw.transportStartAt ? new Date(raw.transportStartAt).toISOString() : null,
+      createdByOperatorId: existing?.createdByOperatorId ?? this.crmDdtOperatorId,
+      createdByOperatorName: existing?.createdByOperatorName ?? 'CRM Audiomax',
+      clientId: client?.id ?? null,
+      clientCode: client?.id ?? '',
+      clientSnapshot: recipientSnapshot.name || client?.name || 'Destinatario occasionale',
+      originType: raw.linkedQuoteId ? 'preventivo' : 'manuale',
+      series: raw.series || 'A',
+      linkedQuoteId: raw.linkedQuoteId || null,
+      linkedQuoteNumber: raw.linkedQuoteNumber || null,
+      linkedTicketId: raw.linkedTicketId || null,
+      linkedAppointmentId: raw.linkedAppointmentId || null,
+      causale: raw.causale,
+      departurePlace: raw.departurePlace,
+      destinationPlace: raw.destinationPlace,
+      carrierName: raw.carrierName,
+      transportMethod: raw.transportMethod,
+      packageCount: Number(raw.packageCount) > 0 ? Number(raw.packageCount) : null,
+      packagingType: raw.packagingType,
+      weight: raw.weight,
+      vehicle: raw.vehicle,
+      destination: raw.deliveryAddress || raw.destinationPlace || raw.recipientAddress || '',
+      note: raw.note,
+      internalNote: raw.internalNote,
+      referenceOrder: raw.referenceOrder,
+      referenceJob: raw.referenceJob,
+      referenceOther: raw.referenceOther,
+      lines,
+      senderSnapshot,
+      recipientSnapshot,
+      deliverySnapshot,
+      inventoryMode: (raw.alsoDeduct ? raw.inventoryMode : 'nessuno') as WarehouseDdtRecord['inventoryMode'],
+      inventoryMovementAppliedAt: existing?.inventoryMovementAppliedAt ?? null,
+      inventoryReturnAppliedAt: existing?.inventoryReturnAppliedAt ?? null,
+      alsoDeduct: raw.alsoDeduct,
+      cancellationReason: existing?.cancellationReason ?? '',
+      statusHistory: existing?.statusHistory ?? [],
+    };
+  }
+
+  private applyInventoryEffectsForDdt(record: WarehouseDdtRecord, nextStatus: WarehouseDdtRecord['status']): WarehouseDdtRecord {
+    if (nextStatus === 'emesso' && record.alsoDeduct) {
+      if (record.inventoryMode === 'scarico' && !record.inventoryMovementAppliedAt) {
+        for (const line of record.lines) {
+          if (!line.inventoryItemId) continue;
+          this.data.consumeInventoryFifoByItemId({
+            inventoryItemId: line.inventoryItemId,
+            quantity: line.quantity,
+            reason: `Scarico DDT ${record.number || ''} · ${record.causale || 'Trasporto merce'}`,
+            documentNumber: record.number || record.id,
+            operator: record.createdByOperatorName,
+            sourceModule: 'magazzino',
+          });
+        }
+        record = { ...record, inventoryMovementAppliedAt: new Date().toISOString() };
+        this.data.updateWarehouseDdt(record);
+      }
+
+      if (record.inventoryMode === 'carico' && !record.inventoryReturnAppliedAt) {
+        for (const line of record.lines) {
+          if (!line.inventoryItemId) continue;
+          this.data.returnInventoryStockByItemId({
+            inventoryItemId: line.inventoryItemId,
+            quantity: line.quantity,
+            reason: `Carico DDT ${record.number || ''} · ${record.causale || 'Rientro merce'}`,
+            documentNumber: record.number || record.id,
+            operator: record.createdByOperatorName,
+            sourceModule: 'magazzino',
+          });
+        }
+        record = { ...record, inventoryReturnAppliedAt: new Date().toISOString() };
+        this.data.updateWarehouseDdt(record);
+      }
+    }
+
+    if (nextStatus === 'annullato' && record.inventoryMode === 'scarico' && record.inventoryMovementAppliedAt && !record.inventoryReturnAppliedAt) {
+      for (const line of record.lines) {
+        if (!line.inventoryItemId) continue;
+        this.data.returnInventoryStockByItemId({
+          inventoryItemId: line.inventoryItemId,
+          quantity: line.quantity,
+          reason: `Storno annullamento DDT ${record.number || ''}`,
+          documentNumber: `ANN-${record.number || record.id}`,
+          operator: record.createdByOperatorName,
+          sourceModule: 'magazzino',
+        });
+      }
+      record = { ...record, inventoryReturnAppliedAt: new Date().toISOString() };
+      this.data.updateWarehouseDdt(record);
+    }
+
+    return record;
+  }
+
+  protected previewDdtPdf(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+    this.openDdtPdfBlob(record, 'preview');
+  }
+
+  protected downloadDdtPdf(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+    this.openDdtPdfBlob(record, 'download');
+  }
+
+  protected printDdtPdf(recordId: string): void {
+    const record = this.ddtDocuments().find((item) => item.id === recordId) ?? null;
+    if (!record) return;
+    this.openDdtPdfBlob(record, 'print');
+  }
+
+  private openDdtPdfBlob(record: WarehouseDdtRecord, mode: 'preview' | 'download' | 'print'): void {
+    const blob = this.buildDdtPdfBlob(record);
+    const url = URL.createObjectURL(blob);
+    const fileName = this.ddtPdfFileName(record);
+
+    if (mode === 'download') {
+      this.downloadBlob(blob, fileName);
+      const timer = setTimeout(() => URL.revokeObjectURL(url), 4000);
+      this.blobTimers.add(timer);
+      return;
+    }
+
+    // In stampa apriamo senza "noopener": altrimenti window.open restituisce null e la stampa non parte
+    const opened = mode === 'print'
+      ? window.open(url, '_blank')
+      : window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      this.pushToast(
+        mode === 'print'
+          ? 'Stampa bloccata dal browser: apri il PDF e usa il pulsante Stampa del visualizzatore.'
+          : 'Popup bloccato dal browser: impossibile aprire il PDF del DDT.',
+        'error',
+      );
+      return;
+    }
+
+    if (mode === 'print') {
+      const timer = setTimeout(() => {
+        try {
+          opened.print();
+        } finally {
+          URL.revokeObjectURL(url);
+          this.blobTimers.delete(timer);
+        }
+      }, 650);
+      this.blobTimers.add(timer);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      URL.revokeObjectURL(url);
+      this.blobTimers.delete(timer);
+    }, 120000);
+    this.blobTimers.add(timer);
+  }
+
+  private ddtPdfFileName(record: WarehouseDdtRecord): string {
+    return `${(record.number || `DDT-${record.id.slice(-6)}`).replace(/[^\w.-]+/g, '-')}.pdf`;
+  }
+
+  private async handleIssuedCashInvoice(transaction: CashTransactionRecord): Promise<void> {
+    if (transaction.documentType !== 'fattura') {
+      return;
+    }
+
+    const transmission = this.companyProfile().invoiceTransmission;
+    if (
+      transmission.providerCode === 'webhook'
+      && transmission.mode === 'api'
+      && transmission.apiUrl.trim()
+      && transmission.apiKey.trim()
+    ) {
+      await this.sendCashInvoiceToProvider(transaction, false);
+      return;
+    }
+
+    if (
+      transmission.providerCode === 'nessuno'
+      || transmission.mode === 'xml'
+      || transmission.fallbackToXmlDownload
+    ) {
+      this.downloadCashInvoiceXml(transaction, false);
+    }
+  }
+
+  private downloadCashInvoiceXml(transaction: CashTransactionRecord, showToast = true): void {
+    try {
+      const { xml, fileName } = this.buildFatturaElettronicaXml(transaction);
+      const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
+      this.downloadBlob(blob, fileName);
+      if (showToast) {
+        this.pushToast('XML fattura elettronica generato correttamente.', 'success');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Impossibile generare l XML fattura.';
+      this.pushToast(message, 'error');
+    }
+  }
+
+  private async sendCashInvoiceToProvider(
+    transaction: CashTransactionRecord,
+    requireConfirm: boolean,
+  ): Promise<void> {
+    const transmission = this.companyProfile().invoiceTransmission;
+
+    if (transaction.documentType !== 'fattura') {
+      this.pushToast('Solo le fatture possono essere inviate a un provider esterno.', 'error');
+      return;
+    }
+
+    if (
+      transmission.providerCode !== 'webhook'
+      || transmission.mode !== 'api'
+      || !transmission.apiUrl.trim()
+      || !transmission.apiKey.trim()
+    ) {
+      this.pushToast('Configura prima URL API e API key del provider fatture.', 'error');
+      return;
+    }
+
+    if (
+      requireConfirm
+      && !window.confirm('Inviare questa fattura al provider esterno configurato?')
+    ) {
+      return;
+    }
+
+    try {
+      const { xml, fileName } = this.buildFatturaElettronicaXml(transaction);
+      const response = await fetch(transmission.apiUrl.trim(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${transmission.apiKey.trim()}`,
+          'X-API-Key': transmission.apiKey.trim(),
+        },
+        body: JSON.stringify({
+          providerLabel: transmission.providerLabel.trim() || 'Provider fatture',
+          format: 'fatturapa-fpr12',
+          fileName,
+          xml,
+          invoiceNumber: transaction.invoiceNumber,
+          reference: transaction.reference,
+          customerName: transaction.customerName,
+          total: Number(transaction.total.toFixed(2)),
+          issuedAt: transaction.createdAt,
+        }),
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(
+          `Provider fatture non raggiungibile (${response.status}). ${responseText.slice(0, 180)}`.trim(),
+        );
+      }
+
+      this.pushToast('Fattura inviata correttamente al provider esterno.', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invio al provider fatture non riuscito.';
+      if (transmission.fallbackToXmlDownload) {
+        this.downloadCashInvoiceXml(transaction, false);
+        this.pushToast(`${message} XML scaricato in fallback.`, 'error');
+        return;
+      }
+      this.pushToast(message, 'error');
+    }
+  }
+
+  private buildFatturaElettronicaXml(transaction: CashTransactionRecord): { xml: string; fileName: string } {
+    if (transaction.documentType !== 'fattura' || !transaction.invoiceNumber) {
+      throw new Error('Il documento selezionato non ha un numero fattura valido.');
+    }
+
+    const company = this.companyProfile();
+    const transmission = company.invoiceTransmission;
+    const client = this.resolveCashInvoiceClient(transaction);
+    const billingProfile = client?.privacyProfile.billingProfile ?? null;
+
+    if (!billingProfile) {
+      throw new Error('Il cliente non ha un profilo di fatturazione completo in anagrafica.');
+    }
+
+    const companyCountry = this.normalizeInvoiceCountryCode(
+      transmission.issuingCountryCode || company.country || 'IT',
+    );
+    const companyVat = this.normalizeVatIdentity(company.vatNumber, companyCountry);
+    const companyTaxCode = this.normalizeFiscalCode(company.taxCode || companyVat.code);
+    const companyName = (company.legalName || 'Audiomax').trim();
+    const companyAddress = company.address.trim();
+    const companyPostalCode = company.postalCode.trim();
+    const companyCity = company.city.trim();
+    const companyProvince = company.province.trim().toUpperCase();
+    const companyPec = company.pec.trim();
+
+    if (
+      !companyVat.code
+      || !companyTaxCode
+      || !companyAddress
+      || !companyPostalCode
+      || !companyCity
+      || !companyProvince
+    ) {
+      throw new Error(
+        'Completa il profilo azienda nelle impostazioni fiscali: P.IVA, C.F., indirizzo, CAP, comune e provincia sono obbligatori.',
+      );
+    }
+
+    const customerName = (client?.name || transaction.customerName).trim();
+    const customerCity = (client?.city || '').trim();
+    const customerTaxCode = this.normalizeFiscalCode(billingProfile.taxId);
+    const customerCountry = this.normalizeInvoiceCountryCode(billingProfile.billingCountry || 'IT');
+    const customerVat = this.normalizeVatIdentity(billingProfile.taxId, customerCountry);
+    const customerAddress = billingProfile.billingAddress.trim();
+    const customerPostalCode = billingProfile.billingPostalCode.trim();
+    const customerProvince = billingProfile.billingProvince.trim().toUpperCase();
+    const customerSdi = billingProfile.sdiCode.trim().toUpperCase();
+    const customerPec = billingProfile.pec.trim();
+
+    if (!customerName || !customerTaxCode || !customerAddress || !customerPostalCode || !customerProvince || !customerCity) {
+      throw new Error(
+        'Per generare l XML servono nome, codice fiscale o P.IVA, indirizzo, CAP, comune e provincia del cliente.',
+      );
+    }
+
+    const preparedLines = this.prepareCashInvoiceXmlLines(transaction);
+    if (!preparedLines.length) {
+      throw new Error('La fattura non contiene righe valide da esportare in XML.');
+    }
+
+    const transmissionCode = customerSdi.length === 7 ? customerSdi : '0000000';
+    const progressivoInvio = `FT${String(transaction.invoiceNumber).padStart(8, '0')}`.slice(0, 10);
+    const invoiceDate = transaction.createdAt.slice(0, 10);
+    const paymentDetails = this.buildCashInvoicePaymentDetails(transaction, invoiceDate);
+    const totalDocument = this.formatXmlAmount(transaction.total);
+    const paymentTerms = transaction.status === 'insoluto' ? 'TP02' : 'TP01';
+    const customerAnagraphicXml =
+      billingProfile.kind === 'azienda'
+        ? `<Denominazione>${this.escapeXml(customerName)}</Denominazione>`
+        : this.renderInvoiceCustomerPersonXml(customerName);
+
+    const lineXml = preparedLines
+      .map(
+        (line) => `      <DettaglioLinee>
+        <NumeroLinea>${line.lineNumber}</NumeroLinea>
+        <Descrizione>${this.escapeXml(line.description)}</Descrizione>
+        <Quantita>${this.formatXmlDecimal(line.quantity, 2)}</Quantita>
+        <PrezzoUnitario>${this.formatXmlDecimal(line.unitNetAmount, 8)}</PrezzoUnitario>
+        <PrezzoTotale>${this.formatXmlAmount(line.taxableAmount)}</PrezzoTotale>
+        <AliquotaIVA>${this.formatXmlAmount(line.vatRate)}</AliquotaIVA>
+${line.vatRate > 0 ? '' : '        <Natura>N2.2</Natura>\n'}      </DettaglioLinee>`,
+      )
+      .join('\n');
+
+    const summaryXml = [...preparedLines.reduce((map, line) => {
+      const key = line.vatRate.toFixed(2);
+      const current = map.get(key) ?? { vatRate: line.vatRate, taxableAmount: 0, taxAmount: 0 };
+      current.taxableAmount = this.roundCurrency(current.taxableAmount + line.taxableAmount);
+      current.taxAmount = this.roundCurrency(current.taxAmount + line.taxAmount);
+      map.set(key, current);
+      return map;
+    }, new Map<string, { vatRate: number; taxableAmount: number; taxAmount: number }>()).values()]
+      .map(
+        (group) => `      <DatiRiepilogo>
+        <AliquotaIVA>${this.formatXmlAmount(group.vatRate)}</AliquotaIVA>
+${group.vatRate > 0 ? '' : '        <Natura>N2.2</Natura>\n'}        <ImponibileImporto>${this.formatXmlAmount(group.taxableAmount)}</ImponibileImporto>
+        <Imposta>${this.formatXmlAmount(group.taxAmount)}</Imposta>
+${group.vatRate > 0 ? '        <EsigibilitaIVA>I</EsigibilitaIVA>\n' : ''}      </DatiRiepilogo>`,
+      )
+      .join('\n');
+
+    const paymentXml = paymentDetails
+      .map(
+        (detail) => `      <DettaglioPagamento>
+        <ModalitaPagamento>${detail.mode}</ModalitaPagamento>
+        <DataScadenzaPagamento>${invoiceDate}</DataScadenzaPagamento>
+        <ImportoPagamento>${this.formatXmlAmount(detail.amount)}</ImportoPagamento>
+${detail.iban ? `        <IBAN>${this.escapeXml(detail.iban)}</IBAN>\n` : ''}      </DettaglioPagamento>`,
+      )
+      .join('\n');
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2" versione="FPR12">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente>
+        <IdPaese>${companyVat.country}</IdPaese>
+        <IdCodice>${companyVat.code}</IdCodice>
+      </IdTrasmittente>
+      <ProgressivoInvio>${progressivoInvio}</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>${this.escapeXml(transmissionCode)}</CodiceDestinatario>
+${customerPec ? `      <PECDestinatario>${this.escapeXml(customerPec)}</PECDestinatario>\n` : ''}    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA>
+          <IdPaese>${companyVat.country}</IdPaese>
+          <IdCodice>${companyVat.code}</IdCodice>
+        </IdFiscaleIVA>
+        <CodiceFiscale>${companyTaxCode}</CodiceFiscale>
+        <Anagrafica>
+          <Denominazione>${this.escapeXml(companyName)}</Denominazione>
+        </Anagrafica>
+        <RegimeFiscale>${this.escapeXml(transmission.taxRegime || 'RF01')}</RegimeFiscale>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>${this.escapeXml(companyAddress)}</Indirizzo>
+        <CAP>${this.escapeXml(companyPostalCode)}</CAP>
+        <Comune>${this.escapeXml(companyCity)}</Comune>
+        <Provincia>${this.escapeXml(companyProvince)}</Provincia>
+        <Nazione>${companyVat.country}</Nazione>
+      </Sede>
+${company.phone.trim() || company.email.trim() || companyPec ? `      <Contatti>
+${company.phone.trim() ? `        <Telefono>${this.escapeXml(company.phone.trim())}</Telefono>\n` : ''}${company.email.trim() ? `        <Email>${this.escapeXml(company.email.trim())}</Email>\n` : ''}      </Contatti>
+` : ''}    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+${customerVat.code ? `        <IdFiscaleIVA>
+          <IdPaese>${customerVat.country}</IdPaese>
+          <IdCodice>${customerVat.code}</IdCodice>
+        </IdFiscaleIVA>
+` : ''}        <CodiceFiscale>${customerTaxCode}</CodiceFiscale>
+        <Anagrafica>
+          ${customerAnagraphicXml}
+        </Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>${this.escapeXml(customerAddress)}</Indirizzo>
+        <CAP>${this.escapeXml(customerPostalCode)}</CAP>
+        <Comune>${this.escapeXml(customerCity)}</Comune>
+        <Provincia>${this.escapeXml(customerProvince)}</Provincia>
+        <Nazione>${customerCountry}</Nazione>
+      </Sede>
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>TD01</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>${invoiceDate}</Data>
+        <Numero>${transaction.invoiceNumber}</Numero>
+        <ImportoTotaleDocumento>${totalDocument}</ImportoTotaleDocumento>
+${transaction.notes.trim() ? `        <Causale>${this.escapeXml(transaction.notes.trim())}</Causale>\n` : ''}${transaction.linkedQuoteId ? `        <Causale>${this.escapeXml(`Rif. preventivo ${this.quoteCode(transaction.linkedQuoteId)}`)}</Causale>\n` : ''}      </DatiGeneraliDocumento>
+    </DatiGenerali>
+    <DatiBeniServizi>
+${lineXml}
+${summaryXml}
+    </DatiBeniServizi>
+    <DatiPagamento>
+      <CondizioniPagamento>${paymentTerms}</CondizioniPagamento>
+${paymentXml}
+    </DatiPagamento>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>
+`;
+
+    const fileName = `${companyVat.country}${companyVat.code}_FT_${String(transaction.invoiceNumber).padStart(5, '0')}.xml`;
+    return { xml, fileName };
+  }
+
+  private prepareCashInvoiceXmlLines(transaction: CashTransactionRecord): Array<{
+    lineNumber: number;
+    description: string;
+    quantity: number;
+    unitNetAmount: number;
+    taxableAmount: number;
+    taxAmount: number;
+    vatRate: number;
+  }> {
+    const visibleLines = transaction.lines.filter((line) => !line.excludeFromReceipt);
+    const totalGross = this.roundCurrency(visibleLines.reduce((sum, line) => sum + line.total, 0));
+    const discountAmount = this.roundCurrency(transaction.discountAmount || 0);
+    let allocatedDiscount = 0;
+
+    return visibleLines.map((line, index) => {
+      const vatRate = Math.max(0, Number(line.vatRate) || 22);
+      const grossAmount = this.roundCurrency(line.total);
+      const lineDiscount =
+        index === visibleLines.length - 1
+          ? this.roundCurrency(discountAmount - allocatedDiscount)
+          : this.roundCurrency(totalGross > 0 ? (discountAmount * grossAmount) / totalGross : 0);
+      allocatedDiscount = this.roundCurrency(allocatedDiscount + lineDiscount);
+      const adjustedGrossAmount = this.roundCurrency(Math.max(grossAmount - lineDiscount, 0));
+      const taxableAmount =
+        vatRate > 0
+          ? this.roundCurrency(adjustedGrossAmount / (1 + vatRate / 100))
+          : adjustedGrossAmount;
+      const taxAmount = this.roundCurrency(adjustedGrossAmount - taxableAmount);
+      const quantity = Math.max(Number(line.quantity) || 1, 1);
+      const unitNetAmount = taxableAmount / quantity;
+
+      return {
+        lineNumber: index + 1,
+        description: line.name || `Riga ${index + 1}`,
+        quantity,
+        unitNetAmount,
+        taxableAmount,
+        taxAmount,
+        vatRate,
+      };
+    });
+  }
+
+  private buildCashInvoicePaymentDetails(
+    transaction: CashTransactionRecord,
+    _invoiceDate: string,
+  ): Array<{ mode: string; amount: number; iban?: string }> {
+    if (transaction.paymentMethod === 'misto' && transaction.paymentSplit) {
+      const details: Array<{ mode: string; amount: number; iban?: string }> = [];
+      if (transaction.paymentSplit.contanti > 0) {
+        details.push({ mode: 'MP01', amount: transaction.paymentSplit.contanti });
+      }
+      if (transaction.paymentSplit.elettronico > 0) {
+        const isWire = transaction.paymentSplit.elettronicoMethod === 'bonifico';
+        details.push({
+          mode: isWire ? 'MP05' : 'MP08',
+          amount: transaction.paymentSplit.elettronico,
+          iban: isWire ? this.companyProfile().iban.trim() || undefined : undefined,
+        });
+      }
+      return details.length ? details : [{ mode: 'MP12', amount: transaction.total }];
+    }
+
+    if (transaction.paymentMethod === 'contanti') {
+      return [{ mode: 'MP01', amount: transaction.total }];
+    }
+
+    if (transaction.paymentMethod === 'bonifico') {
+      return [{ mode: 'MP05', amount: transaction.total, iban: this.companyProfile().iban.trim() || undefined }];
+    }
+
+    return [{ mode: 'MP08', amount: transaction.total }];
+  }
+
+  private resolveCashInvoiceClient(transaction: CashTransactionRecord): ClientRecord | null {
+    if (transaction.clientId) {
+      return this.allClients().find((item) => item.id === transaction.clientId) ?? null;
+    }
+
+    return this.allClients().find(
+      (item) => item.name.trim().toLowerCase() === transaction.customerName.trim().toLowerCase(),
+    ) ?? null;
+  }
+
+  private renderInvoiceCustomerPersonXml(fullName: string): string {
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      const firstName = parts.slice(0, -1).join(' ');
+      const lastName = parts[parts.length - 1];
+      return `<Nome>${this.escapeXml(firstName)}</Nome><Cognome>${this.escapeXml(lastName)}</Cognome>`;
+    }
+
+    return `<Denominazione>${this.escapeXml(fullName || 'Cliente privato')}</Denominazione>`;
+  }
+
+  private normalizeInvoiceCountryCode(value: string): string {
+    const normalized = value.trim().toUpperCase();
+    if (normalized === 'ITALIA') {
+      return 'IT';
+    }
+    return normalized.length === 2 ? normalized : 'IT';
+  }
+
+  private normalizeFiscalCode(value: string): string {
+    return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  private normalizeVatIdentity(value: string, fallbackCountry: string): { country: string; code: string } {
+    const normalized = value.trim().toUpperCase().replace(/\s+/g, '');
+    if (!normalized) {
+      return { country: fallbackCountry, code: '' };
+    }
+
+    const match = normalized.match(/^([A-Z]{2})?([A-Z0-9]+)$/);
+    if (!match) {
+      return { country: fallbackCountry, code: this.normalizeFiscalCode(normalized) };
+    }
+
+    return {
+      country: match[1] || fallbackCountry,
+      code: match[2],
+    };
+  }
+
+  private roundCurrency(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private formatXmlAmount(value: number): string {
+    return this.roundCurrency(value).toFixed(2);
+  }
+
+  private formatXmlDecimal(value: number, decimals: number): string {
+    return Number(value || 0).toFixed(decimals);
+  }
+
+  private downloadBlob(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    const timer = setTimeout(() => {
+      URL.revokeObjectURL(url);
+      this.blobTimers.delete(timer);
+    }, 4000);
+    this.blobTimers.add(timer);
+  }
+
+  private resolveDdtClient(record: WarehouseDdtRecord): ClientRecord | null {
+    if (!record.clientId) {
+      return null;
+    }
+    return this.allClients().find((item) => item.id === record.clientId) ?? null;
+  }
+
+  private buildDdtWhatsappMessage(record: WarehouseDdtRecord): string {
+    const recipientName = record.clientSnapshot || record.recipientSnapshot?.name || 'cliente';
+    const documentLabel = record.number || 'bozza DDT';
+    return (
+      `Ciao ${recipientName}, ti inviamo il DDT ${documentLabel} del ${this.formatIsoDateLabel(record.documentDate)}.` +
+      `\nCausale: ${record.causale || 'Documento di trasporto'}.` +
+      `\nIl PDF del documento è pronto per essere allegato.`
+    );
+  }
+
+  private buildDdtEmailSubject(record: WarehouseDdtRecord): string {
+    return `DDT ${record.number || 'bozza'} - ${record.clientSnapshot || record.recipientSnapshot?.name || 'Audiomax'}`;
+  }
+
+  private buildDdtEmailBody(record: WarehouseDdtRecord): string {
+    const recipientName = record.clientSnapshot || record.recipientSnapshot?.name || 'cliente';
+    return (
+      `Gentile ${recipientName},\n\n` +
+      `ti inviamo il DDT ${record.number || 'in bozza'} del ${this.formatIsoDateLabel(record.documentDate)}.\n` +
+      `Causale: ${record.causale || 'Documento di trasporto'}.\n\n` +
+      `Alleghiamo il PDF del documento.\n\n` +
+      `Cordiali saluti,\nAudiomax`
+    );
+  }
+
+  private async shareDdtPdf(
+    record: WarehouseDdtRecord,
+    text: string,
+  ): Promise<'shared' | 'unsupported' | 'cancelled'> {
+    const nav = navigator as Navigator & {
+      canShare?: (data?: ShareData) => boolean;
+      share?: (data?: ShareData) => Promise<void>;
+    };
+    if (typeof File === 'undefined' || typeof nav.share !== 'function') {
+      return 'unsupported';
+    }
+
+    const file = new File([this.buildDdtPdfBlob(record)], this.ddtPdfFileName(record), {
+      type: 'application/pdf',
+    });
+    const data: ShareData = {
+      title: this.buildDdtEmailSubject(record),
+      text,
+      files: [file],
+    };
+
+    if (typeof nav.canShare === 'function' && !nav.canShare(data)) {
+      return 'unsupported';
+    }
+
+    try {
+      await nav.share(data);
+      return 'shared';
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'cancelled';
+      }
+      return 'unsupported';
+    }
+  }
+
+  private buildDdtPdfBlob(record: WarehouseDdtRecord): Blob {
+    const pageWidth = 595;
+    const pageHeight = 842;
+    const marginLeft = 42;
+    const marginRight = 553;
+    const footerY = 58;
+    const sender = record.senderSnapshot ?? {
+      name: this.companyProfile().legalName ?? 'Audiomax',
+      address: this.companyProfile().address ?? '',
+      postalCode: this.companyProfile().postalCode ?? '',
+      city: this.companyProfile().city ?? '',
+      province: this.companyProfile().province ?? '',
+      vatNumber: this.companyProfile().vatNumber ?? '',
+      taxCode: this.companyProfile().taxCode ?? '',
+    };
+    const recipient = record.recipientSnapshot ?? {
+      name: record.clientSnapshot ?? '',
+      address: '',
+      postalCode: '',
+      city: '',
+      province: '',
+      vatNumber: '',
+      taxCode: '',
+    };
+    const delivery = record.deliverySnapshot ?? recipient;
+
+    const escapePdf = (value: string) =>
+      String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\(/g, '\\(')
+        .replace(/\)/g, '\\)');
+    const pdfValue = (value: unknown) => String(value ?? '').trim();
+    const pdfDetail = (label: string, value: unknown) => {
+      const normalized = pdfValue(value);
+      return normalized ? `${label}: ${normalized}` : '';
+    };
+    const text = (font: 'F1' | 'F2', size: number, x: number, y: number, value: string) =>
+      `BT /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${escapePdf(value)}) Tj ET\n`;
+    const line = (x1: number, y1: number, x2: number, y2: number) =>
+      `${x1} ${y1} m ${x2} ${y2} l S\n`;
+
+    const pages: string[] = [];
+    let current = '';
+    let y = 800;
+
+    const flushPage = () => {
+      pages.push(current);
+      current = '';
+      y = 800;
+    };
+
+    const header = (pageIndex: number) => {
+      current += text('F2', 18, marginLeft, y, 'Documento di Trasporto');
+      current += text('F1', 10, 390, y + 2, `Pagina ${pageIndex + 1}`);
+      y -= 24;
+      current += text('F2', 11, marginLeft, y, sender.name || 'Audiomax');
+      current += text('F1', 10, 390, y, `Numero: ${record.number || 'BOZZA'}`);
+      y -= 14;
+      const senderRow = [sender.address, `${sender.postalCode} ${sender.city} ${sender.province}`.trim()]
+        .filter(Boolean)
+        .join(' - ');
+      current += text('F1', 9, marginLeft, y, senderRow || 'Dati mittente non completi');
+      current += text('F1', 10, 390, y, `Data: ${this.formatIsoDateLabel(record.documentDate)}`);
+      y -= 14;
+      const senderTaxRow = [sender.vatNumber ? `P.IVA ${sender.vatNumber}` : '', sender.taxCode ? `CF ${sender.taxCode}` : '']
+        .filter(Boolean)
+        .join(' - ');
+      current += text('F1', 9, marginLeft, y, senderTaxRow);
+      y -= 18;
+      current += line(marginLeft, y, marginRight, y);
+      y -= 18;
+    };
+
+    const ensureSpace = (needed: number) => {
+      if (y - needed <= footerY) {
+        flushPage();
+        header(pages.length);
+      }
+    };
+
+    header(0);
+
+    current += text('F2', 11, marginLeft, y, 'Destinatario');
+    current += text('F2', 11, 320, y, 'Consegna / Trasporto');
+    y -= 15;
+    current += text('F1', 10, marginLeft, y, recipient.name || 'Destinatario occasionale');
+    current += text('F1', 10, 320, y, `Causale: ${record.causale || 'Vendita'}`);
+    y -= 13;
+    current += text('F1', 9, marginLeft, y, pdfValue(recipient.address));
+    current += text('F1', 9, 320, y, pdfDetail('Partenza', record.departurePlace));
+    y -= 13;
+    current += text('F1', 9, marginLeft, y, `${recipient.postalCode || ''} ${recipient.city || ''} ${recipient.province || ''}`.trim());
+    current += text('F1', 9, 320, y, pdfDetail('Destinazione', record.destinationPlace || delivery.address || record.destination));
+    y -= 13;
+    current += text('F1', 9, marginLeft, y, [recipient.vatNumber ? `P.IVA ${recipient.vatNumber}` : '', recipient.taxCode ? `CF ${recipient.taxCode}` : ''].filter(Boolean).join(' - '));
+    current += text('F1', 9, 320, y, pdfDetail('Vettore', record.carrierName || record.vehicle));
+    y -= 13;
+    current += text('F1', 9, marginLeft, y, pdfDetail('Consegna a', delivery.name || recipient.name));
+    current += text('F1', 9, 320, y, pdfDetail('Modalità', record.transportMethod));
+    y -= 13;
+    current += text('F1', 9, marginLeft, y, pdfDetail('Indirizzo consegna', delivery.address || record.destination));
+    current += text(
+      'F1',
+      9,
+      320,
+      y,
+      [
+        record.packageCount != null ? `Colli: ${record.packageCount}` : '',
+        record.packagingType ? `Imballo: ${record.packagingType}` : '',
+        record.weight ? `Peso: ${record.weight}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    );
+    y -= 20;
+
+    current += line(marginLeft, y, marginRight, y);
+    y -= 16;
+    current += text('F2', 10, marginLeft, y, 'Codice');
+    current += text('F2', 10, 118, y, 'Descrizione bene');
+    current += text('F2', 10, 430, y, 'Q.tà');
+    current += text('F2', 10, 475, y, 'UM');
+    current += text('F2', 10, 515, y, 'Note');
+    y -= 10;
+    current += line(marginLeft, y, marginRight, y);
+    y -= 14;
+
+    for (const ddtLine of record.lines) {
+      ensureSpace(30);
+      current += text('F1', 9, marginLeft, y, pdfValue(ddtLine.itemCode));
+      current += text('F1', 9, 118, y, (ddtLine.itemSnapshot || '').slice(0, 60));
+      current += text('F1', 9, 430, y, String(ddtLine.quantity));
+      current += text('F1', 9, 475, y, ddtLine.unitOfMeasure || 'pz');
+      current += text('F1', 9, 515, y, pdfValue(ddtLine.note || ddtLine.lotNumber || ddtLine.serialNumber).slice(0, 14));
+      y -= 12;
+
+      const lineMeta = [
+        ddtLine.lotNumber ? `Lotto ${ddtLine.lotNumber}` : '',
+        ddtLine.serialNumber ? `S/N ${ddtLine.serialNumber}` : '',
+        ddtLine.quoteLineId ? `rif. prev.` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      if (lineMeta) {
+        current += text('F1', 8, 118, y, lineMeta.slice(0, 72));
+        y -= 10;
+      }
+
+      current += line(marginLeft, y, marginRight, y);
+      y -= 12;
+    }
+
+    ensureSpace(92);
+    if (record.linkedQuoteId || record.linkedQuoteNumber) {
+      current += text('F1', 9, marginLeft, y, `Preventivo di origine: ${this.ddtLinkedQuoteLabel(record)}`);
+      y -= 14;
+    }
+    if (record.referenceOrder || record.referenceJob || record.referenceOther) {
+      current += text(
+        'F1',
+        9,
+        marginLeft,
+        y,
+        `Riferimenti: ${[record.referenceOrder, record.referenceJob, record.referenceOther].filter(Boolean).join(' · ')}`,
+      );
+      y -= 14;
+    }
+    if (record.note) {
+      current += text('F2', 10, marginLeft, y, 'Annotazioni');
+      y -= 12;
+      current += text('F1', 9, marginLeft, y, record.note.slice(0, 92));
+      y -= 16;
+    }
+
+    current += text('F1', 9, marginLeft, y, 'Firma consegnatario __________________________');
+    current += text('F1', 9, 320, y, 'Firma ricevente __________________________');
+    flushPage();
+
+    const objects: string[] = [];
+    const pageIds: number[] = [];
+    const contentIds: number[] = [];
+    let nextId = 5;
+
+    for (let i = 0; i < pages.length; i += 1) {
+      contentIds.push(nextId++);
+      pageIds.push(nextId++);
+    }
+
+    objects[1] = `<< /Type /Catalog /Pages 2 0 R >>`;
+    objects[2] = `<< /Type /Pages /Count ${pages.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] >>`;
+    objects[3] = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>`;
+    objects[4] = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>`;
+
+    for (let i = 0; i < pages.length; i += 1) {
+      objects[contentIds[i]] = `<< /Length ${pages[i].length} >>\nstream\n${pages[i]}endstream`;
+      objects[pageIds[i]] =
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] ` +
+        `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[i]} 0 R >>`;
+    }
+
+    let pdf = '%PDF-1.4\n';
+    const offsets: number[] = [];
+
+    for (let id = 1; id < objects.length; id += 1) {
+      offsets[id] = pdf.length;
+      pdf += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+    }
+
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let id = 1; id < objects.length; id += 1) {
+      pdf += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+    return new Blob([pdf], { type: 'application/pdf' });
+  }
+
   /**
    * Conferma il prelievo di materiale per installazione:
    *  - registra scarico FIFO dal magazzino
@@ -6671,13 +10647,14 @@ export class SectionPageComponent {
     );
     this.epResetPrelievoForm();
     this.epSelectedInventoryItem.set(null);
+    // Memorizza l'articolo tra i "usati di recente" per ritrovarlo in un tap
+    this.epRegisterRecentItem(item.id);
     setTimeout(() => this.epPrelievoLastConfirmMessage.set(''), 3500);
   }
 
   // --- Modulo DDT (Documento di Trasporto) -----------------------------------
   protected readonly epDdtEditorVisible = signal<boolean>(false);
   protected readonly epDdtClienteSearch = signal<string>('');
-  protected readonly epPrintableDdt = signal<any>(null);
   protected readonly epCompanyProfile = this.data.companyProfile;
 
   /** Helper: crea un FormGroup vuoto per una riga DDT */
@@ -6918,7 +10895,8 @@ export class SectionPageComponent {
     const all = this.data.warehouseDdts();
     const op = this.epActiveOperator();
     return all
-      .filter((d) => (op ? d.createdByOperatorId === op.id : true))
+      // Mostra i DDT dell'operatore collegato e anche quelli creati dal gestionale CRM
+      .filter((d) => !op || d.createdByOperatorId === op.id || d.createdByOperatorId === this.crmDdtOperatorId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   });
 
@@ -6974,12 +10952,9 @@ export class SectionPageComponent {
     this.epAdminCommPriority.set(p);
   }
 
-  /** Prepara un DDT per la stampa e avvia window.print() con piccolo delay */
-  protected epPrintDdt(ddt: any): void {
-    this.epPrintableDdt.set(ddt);
-    setTimeout(() => {
-      if (typeof window !== 'undefined') window.print();
-    }, 250);
+  /** Apre il PDF del DDT nella finestra di stampa del dispositivo (affidabile anche su smartphone) */
+  protected epPrintDdt(ddt: WarehouseDdtRecord): void {
+    this.openDdtPdfBlob(ddt, 'print');
   }
 
   // --- Modulo SERVIZI da inviare in CASSA ------------------------------------
@@ -6995,7 +10970,20 @@ export class SectionPageComponent {
     description: ['', [Validators.required, Validators.minLength(3)]],
     priceUnit: [0, [Validators.required, Validators.min(0)]],
     quantity: [1, [Validators.required, Validators.min(1)]],
+    /** Operatore di cassa a cui assegnare il servizio ('' = chiunque) */
+    cashOperatorId: [''],
   });
+
+  /** Operatori attualmente presenti/attivi in cassa */
+  protected readonly epServiceCashOperators = computed(() => this.data.activeCashOperators());
+
+  /** Apre l'editor servizio preselezionando l'operatore eventualmente già attivo in cassa */
+  protected epOpenNewService(): void {
+    const currentName = this.cashCurrentOperator();
+    const match = this.epServiceCashOperators().find((o) => o.name === currentName);
+    this.epServiceForm.patchValue({ cashOperatorId: match?.id ?? '' });
+    this.epServiceEditorVisible.set(true);
+  }
 
   protected readonly epServiceClientiFiltrati = computed(() => {
     const q = this.epServiceClienteSearch().trim().toLowerCase();
@@ -7035,6 +11023,10 @@ export class SectionPageComponent {
     const qty = Math.max(1, Number(raw.quantity) || 1);
     const price = Math.max(0, Number(raw.priceUnit) || 0);
     const total = qty * price;
+    // Operatore di cassa assegnato (se selezionato)
+    const targetOperator = raw.cashOperatorId
+      ? this.epServiceCashOperators().find((o) => o.id === raw.cashOperatorId) ?? null
+      : null;
     // Normalizza serviceDate
     const svcDate = raw.serviceDate
       ? (() => {
@@ -7053,10 +11045,14 @@ export class SectionPageComponent {
       priceUnit: price,
       quantity: qty,
       totalAmount: total,
+      targetCashOperatorId: targetOperator?.id ?? null,
+      targetCashOperatorName: targetOperator?.name ?? null,
     });
 
     this.epServiceLastConfirmMessage.set(
-      `✅ Servizio inviato in cassa · ${client.name} · € ${total.toFixed(2)}`,
+      targetOperator
+        ? `✅ Servizio inviato in cassa a ${targetOperator.name} · ${client.name} · € ${total.toFixed(2)}`
+        : `✅ Servizio inviato in cassa · ${client.name} · € ${total.toFixed(2)}`,
     );
     this.epServiceEditorVisible.set(false);
     this.epServiceForm.reset({
@@ -7067,6 +11063,7 @@ export class SectionPageComponent {
       description: '',
       priceUnit: 0,
       quantity: 1,
+      cashOperatorId: '',
     });
     this.epServiceClienteSearch.set('');
     setTimeout(() => this.epServiceLastConfirmMessage.set(''), 4000);
@@ -7172,7 +11169,12 @@ export class SectionPageComponent {
       // Nel magazzino uso il codice come termine di ricerca
       this.epWarehouseSearch.set(code);
       if (item) {
-        this.pushToast(`Trovato: ${item.name}`, 'success');
+        // Apro subito la scheda articolo con prelievo pronto: scan → quantità → conferma
+        this.epResetPrelievoForm();
+        this.epSelectedInventoryItem.set(item);
+        this.pushToast(`${item.name}: conferma la quantità e preleva.`, 'success');
+      } else {
+        this.pushToast(`Nessun articolo per il codice ${code}`, 'error');
       }
     }
 
@@ -7335,6 +11337,19 @@ export class SectionPageComponent {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   });
 
+  /** Ordine selezionato (dettaglio espanso nella lista) */
+  protected readonly epSelectedOrderId = signal<string | null>(null);
+  protected readonly epSelectedOrder = computed(() => {
+    const id = this.epSelectedOrderId();
+    if (!id) return null;
+    return this.epMieiOrdini().find((o) => o.id === id) ?? null;
+  });
+
+  /** Apre/chiude il dettaglio di un ordine (toggle) */
+  protected epToggleOrderDetail(orderId: string): void {
+    this.epSelectedOrderId.update((current) => (current === orderId ? null : orderId));
+  }
+
   // --- Modulo "Apri portale sul telefono": IP + QR + clipboard ----------------
   /**
    * Prova a ricavare un IP locale di default. In ambiente browser non si può accedere
@@ -7410,6 +11425,9 @@ export class SectionPageComponent {
     const description = svc.description ? ` (${svc.description})` : '';
     const lineName = `${label} · Portale dipendenti${description}`;
     const total = +(price * qty).toFixed(2);
+    // Operatore di cassa: usa quello assegnato dal portale, altrimenti il tecnico creatore
+    const lineOperator =
+      svc.targetCashOperatorName || svc.createdByOperatorName || this.cashCurrentOperator();
     this.cashCart.update((items) => [
       ...items,
       {
@@ -7419,16 +11437,34 @@ export class SectionPageComponent {
         quantity: qty,
         unitPrice: price,
         originalUnitPrice: price,
+        vatRate: 22,
         total,
         pricingMode: 'fisso',
-        operatorName: svc.createdByOperatorName || this.cashCurrentOperator(),
+        operatorName: lineOperator,
         excludeFromReceipt: false,
       },
     ]);
+    this.data.deletePendingService(svc.id);
     this.pushToast(
-      `Servizio aggiunto al carrello · € ${total.toFixed(2).replace('.', ',')}`,
+      svc.targetCashOperatorName
+        ? `Servizio assegnato a ${svc.targetCashOperatorName} caricato nel carrello · € ${total.toFixed(2).replace('.', ',')}`
+        : `Servizio caricato nel carrello · € ${total.toFixed(2).replace('.', ',')}`,
       'success',
     );
+  }
+
+  protected epRemovePendingService(svc: PendingServiceRecord): void {
+    const serviceLabel = this.epServiceTypeLabel(svc.type);
+    const clientLabel = this.epPendingServiceClientLabel(svc);
+    const confirmMessage =
+      `Rimuovere il servizio "${serviceLabel}" di ${clientLabel} dalla lista da incassare?\n\n` +
+      'L\'operazione elimina il servizio pendente dal feed della cassa.';
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    this.data.deletePendingService(svc.id);
+    this.pushToast('Servizio rimosso dalla lista da incassare.', 'success');
   }
 
   // --- Task 7: Ordini portale dipendenti nel /magazzino
@@ -7437,6 +11473,428 @@ export class SectionPageComponent {
       a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
     ),
   );
+
+  /**
+   * Ordini ancora da gestire mostrati nel feed del magazzino.
+   * Gli ordini ricevuti/annullati escono dal feed e restano solo nel Registro Ordini.
+   */
+  protected readonly epMagazzinoOrdiniAttivi = computed(() =>
+    this.epMagazzinoOrdini().filter(
+      (o) => o.status === 'pending' || o.status === 'seen' || o.status === 'approved',
+    ),
+  );
+
+  /** --- Registro Ordini (log completo, separato dallo storico movimenti) --- */
+  protected readonly epOrdersLogOpen = signal(false);
+  protected readonly epOrdersLogFilter = signal<'tutti' | WarehouseOrderRecord['status']>('tutti');
+  protected readonly epOrdersLogSearch = signal('');
+  protected readonly epOrdersLogDateFrom = signal('');
+  protected readonly epOrdersLogDateTo = signal('');
+  protected readonly epOrdersLogExpandedId = signal<string | null>(null);
+
+  /** Tutti gli ordini, dal più recente al più vecchio */
+  protected readonly epOrdersLogAll = computed(() =>
+    [...this.data.warehouseOrders()].sort((a, b) =>
+      a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+    ),
+  );
+
+  protected readonly epOrdersLogFiltered = computed(() => {
+    const filter = this.epOrdersLogFilter();
+    const query = this.epOrdersLogSearch().trim().toLowerCase();
+    const from = this.epOrdersLogDateFrom();
+    const to = this.epOrdersLogDateTo();
+    return this.epOrdersLogAll().filter((o) => {
+      if (filter !== 'tutti' && o.status !== filter) {
+        return false;
+      }
+      // Confronto per giorno (YYYY-MM-DD) sulla data di creazione dell'ordine
+      const orderDay = (o.createdAt || '').slice(0, 10);
+      if (from && orderDay < from) {
+        return false;
+      }
+      if (to && orderDay > to) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const haystack = [
+        o.number,
+        o.createdByOperatorName,
+        o.clientSnapshot,
+        o.note,
+        this.epMagazzinoOrderClientLabel(o),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  });
+
+  /** Ordine attualmente selezionato nella tabella del registro */
+  protected readonly epOrdersLogSelectedOrder = computed(() => {
+    const id = this.epOrdersLogExpandedId();
+    return id ? this.epOrdersLogAll().find((o) => o.id === id) ?? null : null;
+  });
+
+  protected epOrdersLogCount(status: WarehouseOrderRecord['status']): number {
+    return this.epOrdersLogAll().filter((o) => o.status === status).length;
+  }
+
+  protected epOpenOrdersLog(): void {
+    this.epOrdersLogExpandedId.set(null);
+    this.warehouseView.set('ordini');
+  }
+
+  protected epCloseOrdersLog(): void {
+    this.warehouseView.set('ricerca');
+  }
+
+  protected epSetOrdersLogFilter(filter: 'tutti' | WarehouseOrderRecord['status']): void {
+    this.epOrdersLogFilter.set(filter);
+  }
+
+  protected epSetOrdersLogSearch(value: string): void {
+    this.epOrdersLogSearch.set(value);
+  }
+
+  protected epSetOrdersLogDateFrom(value: string): void {
+    this.epOrdersLogDateFrom.set(value);
+  }
+
+  protected epSetOrdersLogDateTo(value: string): void {
+    this.epOrdersLogDateTo.set(value);
+  }
+
+  protected epToggleOrdersLogRow(id: string): void {
+    this.epOrdersLogExpandedId.set(this.epOrdersLogExpandedId() === id ? null : id);
+  }
+
+  /** Tutti gli ordini del portale sono tracciati con il prefisso ORD-EP */
+  protected epOrderOriginLabel(o: WarehouseOrderRecord): string {
+    return o.number.startsWith('ORD-EP-') ? 'Portale dipendenti' : 'Gestionale';
+  }
+
+  // ===== Export del Registro Ordini (solo gli ordini attualmente filtrati) =====
+
+  /** Intestazioni colonne del registro ordini (riusate da CSV e PDF) */
+  private readonly epOrdersLogHeaders: string[] = [
+    'Numero',
+    'Origine',
+    'Data ordine',
+    'Chi ha ordinato',
+    'Cliente',
+    'Tipo',
+    'Urgenza',
+    'Stato',
+    'Consegna prevista',
+    'Righe',
+    'Totale €',
+    'Note',
+  ];
+
+  /** Converte un ordine nelle celle testuali del registro */
+  private epOrderToLogCells(o: WarehouseOrderRecord): string[] {
+    return [
+      o.number,
+      this.epOrderOriginLabel(o),
+      this.epFormatDate(o.createdAt),
+      o.createdByOperatorName || 'Operatore',
+      this.epMagazzinoOrderClientLabel(o),
+      this.epOrderTypeLabel(o.orderType),
+      this.epOrderUrgencyLabel(o.urgency),
+      this.epOrderStatusLabel(o.status),
+      o.expectedDeliveryDate ? this.epFormatDate(o.expectedDeliveryDate) : '',
+      String(o.lines.length),
+      this.epMagazzinoOrderLinesTotal(o).toFixed(2).replace('.', ','),
+      o.note || '',
+    ];
+  }
+
+  /** Esporta in CSV (apribile con Excel) gli ordini filtrati nel registro */
+  protected epExportOrdersLogCsv(): void {
+    const rows = this.epOrdersLogFiltered();
+    if (!rows.length) {
+      this.pushToast('Nessun ordine da esportare con i filtri selezionati.', 'error');
+      return;
+    }
+    this.downloadCsv(
+      [this.epOrdersLogHeaders, ...rows.map((o) => this.epOrderToLogCells(o))],
+      `registro-ordini-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
+    this.pushToast(`Registro ordini esportato in CSV (${rows.length} ordini).`, 'success');
+  }
+
+  /** Apre la finestra di stampa con il registro ordini filtrato (Salva come PDF) */
+  protected epExportOrdersLogPdf(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const rows = this.epOrdersLogFiltered();
+    if (!rows.length) {
+      this.pushToast('Nessun ordine da esportare con i filtri selezionati.', 'error');
+      return;
+    }
+
+    const body = rows
+      .map(
+        (o) => `
+          <tr>
+            <td class="mono">${this.escapeHtml(o.number)}</td>
+            <td>${this.escapeHtml(this.epFormatDate(o.createdAt))}</td>
+            <td><strong>${this.escapeHtml(o.createdByOperatorName || 'Operatore')}</strong></td>
+            <td>${this.escapeHtml(this.epMagazzinoOrderClientLabel(o))}</td>
+            <td>${this.escapeHtml(this.epOrderTypeLabel(o.orderType))}</td>
+            <td>${this.escapeHtml(this.epOrderStatusLabel(o.status))}</td>
+            <td class="num">${o.lines.length}</td>
+            <td class="num">€ ${this.escapeHtml(this.epMagazzinoOrderLinesTotal(o).toFixed(2).replace('.', ','))}</td>
+          </tr>`,
+      )
+      .join('');
+
+    const filterLabel = this.epOrdersLogFilter() === 'tutti'
+      ? 'Tutti gli ordini'
+      : `Stato: ${this.epOrderStatusLabel(this.epOrdersLogFilter() as WarehouseOrderRecord['status'])}`;
+    const search = this.epOrdersLogSearch().trim();
+    const rangeFrom = this.epOrdersLogDateFrom();
+    const rangeTo = this.epOrdersLogDateTo();
+    const rangeLabel = rangeFrom || rangeTo
+      ? `Periodo: ${rangeFrom ? this.epFormatDate(rangeFrom) : 'inizio'} → ${rangeTo ? this.epFormatDate(rangeTo) : 'oggi'}`
+      : '';
+    const company = this.companyProfile();
+    const popup = window.open('', '_blank', 'width=1180,height=780');
+    if (!popup) {
+      this.pushToast('Popup bloccato dal browser: impossibile aprire il registro ordini.', 'error');
+      return;
+    }
+
+    popup.document.open();
+    popup.document.write(`<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Registro ordini</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:28px;color:#0f172a}
+    header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:3px solid #0f9f6d;padding-bottom:14px;margin-bottom:20px}
+    h1{font-size:22px;margin:0 0 6px;letter-spacing:.02em}
+    .brand{font-size:15px;font-weight:800;color:#0f9f6d;text-transform:uppercase;letter-spacing:.14em;margin:0 0 4px}
+    .meta{font-size:12px;color:#475569;line-height:1.5;margin:0}
+    .box{border:1px solid #cbd5e1;border-radius:12px;padding:12px 16px;text-align:right;font-size:12px;color:#475569;min-width:190px}
+    .box strong{display:block;font-size:18px;color:#0f172a}
+    table{width:100%;border-collapse:collapse}
+    th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;border-bottom:1px solid #cbd5e1;padding:8px 10px}
+    th.num{text-align:right}
+    td{padding:9px 10px;font-size:13px;border-bottom:1px solid #eef2f7}
+    td.num{text-align:right;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+    td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700}
+    footer{margin-top:18px;font-size:11px;color:#94a3b8;text-align:center}
+    @media print{body{margin:14mm}@page{size:A4 landscape;margin:10mm}}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="brand">${this.escapeHtml(company.legalName || 'AudioMax')}</p>
+      <h1>Registro ordini</h1>
+      <p class="meta">
+        ${this.escapeHtml(filterLabel)}${rangeLabel ? ` · ${this.escapeHtml(rangeLabel)}` : ''}${search ? ` · Ricerca: ${this.escapeHtml(search)}` : ''}<br>
+        ${this.escapeHtml([company.address, company.postalCode, company.city, company.province].filter((value) => !!value).join(' '))}
+        ${company.phone ? ` · Tel. ${this.escapeHtml(company.phone)}` : ''}
+      </p>
+    </div>
+    <div class="box">
+      <span>Ordini esportati</span>
+      <strong>${rows.length}</strong>
+      <span>Valore indicativo € ${this.escapeHtml(
+      rows.reduce((sum, o) => sum + this.epMagazzinoOrderLinesTotal(o), 0).toFixed(2).replace('.', ','),
+    )}</span>
+    </div>
+  </header>
+  <table>
+    <thead>
+      <tr>
+        <th>Numero</th>
+        <th>Data</th>
+        <th>Chi ha ordinato</th>
+        <th>Cliente</th>
+        <th>Tipo</th>
+        <th>Stato</th>
+        <th class="num">Righe</th>
+        <th class="num">Totale</th>
+      </tr>
+    </thead>
+    <tbody>${body}</tbody>
+  </table>
+  <footer>Registro generato il ${this.escapeHtml(new Date().toLocaleDateString('it-IT'))}</footer>
+</body>
+</html>`);
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => {
+      popup.print();
+    }, 250);
+    this.pushToast('Registro pronto: usa "Salva come PDF" nella finestra di stampa.', 'success');
+  }
+
+  // ===== Carico magazzino da ordine del portale =====
+  protected readonly epOrderReceiptOpen = signal(false);
+  protected readonly epOrderReceiptOrderId = signal<string | null>(null);
+  protected readonly epOrderReceiptSupplier = signal('');
+  protected readonly epOrderReceiptCategory = signal('');
+  protected readonly epOrderReceiptShelf = signal('');
+  protected readonly epOrderReceiptDate = signal(new Date().toISOString().slice(0, 10));
+  protected readonly epOrderReceiptOperator = signal('');
+  protected readonly epOrderReceiptDoc = signal('');
+  protected readonly epOrderReceiptLines = signal<OrderReceiptLineDraft[]>([]);
+
+  protected readonly epOrderReceiptOrder = computed(() => {
+    const id = this.epOrderReceiptOrderId();
+    return id ? this.data.warehouseOrders().find((o) => o.id === id) ?? null : null;
+  });
+
+  protected readonly epOrderReceiptLinesActive = computed(() =>
+    this.epOrderReceiptLines().filter((line) => !line.skip),
+  );
+
+  protected readonly epOrderReceiptTotalCost = computed(() =>
+    this.epOrderReceiptLinesActive().reduce(
+      (sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.unitCost) || 0),
+      0,
+    ),
+  );
+
+  /** True quando ogni riga attiva è pronta (prodotto scelto o nome nuovo compilato) */
+  protected readonly epOrderReceiptValid = computed(() =>
+    this.epOrderReceiptLinesActive().length > 0 &&
+    this.epOrderReceiptLinesActive().every(
+      (line) => !!line.inventoryItemId || !!line.newName.trim(),
+    ),
+  );
+
+  /** Apre la modale di carico precompilata con le righe dell'ordine */
+  protected epOpenOrderReceipt(order: WarehouseOrderRecord): void {
+    this.epOrderReceiptOrderId.set(order.id);
+    this.epOrderReceiptSupplier.set('');
+    this.epOrderReceiptCategory.set(this.productCategories()[0] ?? 'Da classificare');
+    this.epOrderReceiptShelf.set('');
+    this.epOrderReceiptDate.set(new Date().toISOString().slice(0, 10));
+    this.epOrderReceiptOperator.set(this.cashCurrentOperator() || 'Magazzino');
+    this.epOrderReceiptDoc.set('');
+    this.epOrderReceiptLines.set(
+      order.lines.map((line) => {
+        const item = line.inventoryItemId
+          ? this.allInventoryItems().find((it) => it.id === line.inventoryItemId) ?? null
+          : null;
+        const requestedPrice = Number(line.expectedUnitPrice) || 0;
+        return {
+          lineId: line.id,
+          description: line.description || 'Articolo',
+          inventoryItemId: item?.id ?? '',
+          newName: line.description || 'Articolo',
+          quantity: Math.max(1, Number(line.quantity) || 1),
+          unitCost: item ? item.unitCost : requestedPrice,
+          salePrice: item ? item.salePrice : requestedPrice,
+          skip: false,
+        };
+      }),
+    );
+    this.epOrderReceiptOpen.set(true);
+  }
+
+  protected epCloseOrderReceipt(): void {
+    this.epOrderReceiptOpen.set(false);
+  }
+
+  protected epPatchOrderReceiptLine(index: number, patch: Partial<OrderReceiptLineDraft>): void {
+    this.epOrderReceiptLines.update((lines) =>
+      lines.map((line, i) => (i === index ? { ...line, ...patch } : line)),
+    );
+  }
+
+  /** Registra il carico di tutte le righe attive e marca l'ordine come ricevuto */
+  protected epSubmitOrderReceipt(): void {
+    const order = this.epOrderReceiptOrder();
+    if (!order) {
+      return;
+    }
+    const lines = this.epOrderReceiptLinesActive();
+    if (!lines.length) {
+      this.pushToast('Abilita almeno una riga da caricare.', 'error');
+      return;
+    }
+    if (!this.epOrderReceiptValid()) {
+      this.pushToast('Completa i dati delle righe (prodotto o nome nuovo).', 'error');
+      return;
+    }
+
+    const totalCost = this.epOrderReceiptTotalCost();
+    const msg = [
+      '⚠️ CARICO MAGAZZINO DA ORDINE DEFINITIVO.',
+      '',
+      `Ordine ${order.number} · ${lines.length} righe`,
+      `Totale costo stimato: € ${totalCost.toFixed(2)}`,
+      this.epOrderReceiptSupplier() ? `Fornitore: ${this.epOrderReceiptSupplier()}` : '',
+      '',
+      'Verranno creati/aggiornati i prodotti, i movimenti di carico e i lotti.',
+      'L\'ordine verrà marcato come RICEVUTO e uscirà dalla lista da gestire.',
+      '',
+      'Confermi?',
+    ].filter(Boolean).join('\n');
+    const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
+    if (!ok) {
+      this.pushToast('Carico annullato · nessun movimento scritto.', 'success');
+      return;
+    }
+
+    const receivedDate = this.epOrderReceiptDate();
+    const supplier = this.epOrderReceiptSupplier();
+    const category = this.epOrderReceiptCategory().trim() || 'Da classificare';
+    const shelf = this.epOrderReceiptShelf().trim();
+    const operator = this.epOrderReceiptOperator().trim() || 'Magazzino';
+    const docNumber = this.epOrderReceiptDoc().trim();
+
+    let created = 0;
+    try {
+      lines.forEach((line, index) => {
+        const isNew = !line.inventoryItemId;
+        this.data.receiveWarehouseStock({
+          inventoryItemId: line.inventoryItemId || null,
+          sku: isNew ? `${order.number}-${index + 1}` : '',
+          name: isNew ? line.newName.trim() : '',
+          description: isNew ? `Carico da ordine ${order.number}` : '',
+          category,
+          usageType: 'rivendita',
+          unitOfMeasure: 'pz',
+          quantity: Math.max(1, Number(line.quantity) || 1),
+          unitCost: Number(line.unitCost) || 0,
+          salePrice: Number(line.salePrice) || 0,
+          receivedDate,
+          supplier,
+          lotNumber: '',
+          expiryDate: null,
+          shelfCode: shelf,
+          minStock: 0,
+          purchaseDocumentNumber: docNumber,
+          operator,
+          transportCost: 0,
+          customsCost: 0,
+          packagingCost: 0,
+        });
+        created += 1;
+      });
+
+      this.data.updateWarehouseOrderStatus(order.id, 'received');
+      this.pushToast(`Ordine ${order.number} · caricate ${created} righe in magazzino.`, 'success');
+      this.epOrderReceiptOpen.set(false);
+    } catch {
+      this.pushToast('Errore durante il carico da ordine.', 'error');
+    }
+  }
+
   protected readonly epMagazzinoExpandedOrderId = signal<string | null>(null);
   protected epOrderNextAction(status: WarehouseOrderRecord['status']): {
     label: string;
@@ -7455,6 +11913,11 @@ export class SectionPageComponent {
   }
   protected epOrderCanCancel(status: WarehouseOrderRecord['status']): boolean {
     return status !== 'cancelled' && status !== 'received';
+  }
+
+  /** L'ordine può essere caricato in magazzino finché non è ricevuto o annullato */
+  protected epOrderCanReceive(status: WarehouseOrderRecord['status']): boolean {
+    return status !== 'received' && status !== 'cancelled';
   }
   protected epMagazzinoUpdateOrderStatus(
     order: WarehouseOrderRecord,
@@ -7778,8 +12241,11 @@ export class SectionPageComponent {
       sdiCode: payload.sdiCode || '',
       pec: payload.pec || '',
       billingAddress: payload.billingAddress || '',
+      billingPostalCode: payload.billingPostalCode || '',
+      billingProvince: (payload.billingProvince || '').toUpperCase(),
+      billingCountry: (payload.billingCountry || 'IT').toUpperCase(),
     };
-    const { kind, taxId, sdiCode, pec, billingAddress, ...clientData } = payload;
+    const { kind, taxId, sdiCode, pec, billingAddress, billingPostalCode, billingProvince, billingCountry, ...clientData } = payload;
     const normalizedName = clientData.name.trim();
 
     if (!normalizedName) {
@@ -8076,10 +12542,24 @@ export class SectionPageComponent {
       this.data.addInventoryItem(normalizedPayload);
     }
 
+    this.inventoryEditModalOpen.set(false);
     this.resetInventoryForm();
   }
 
   protected receiveWarehouseStock(): void {
+    this.submitWarehouseReceipt(false);
+  }
+
+  /**
+   * Registra il carico e prepara subito il form per il prodotto successivo.
+   * Mantiene i dati condivisi (fornitore, categoria, data, operatore, scaffale)
+   * per velocizzare il popolamento di più articoli consecutivi.
+   */
+  protected receiveWarehouseStockAndNew(): void {
+    this.submitWarehouseReceipt(true);
+  }
+
+  private submitWarehouseReceipt(createAnother: boolean): void {
     if (this.warehouseReceiptForm.invalid) {
       this.warehouseReceiptForm.markAllAsTouched();
       return;
@@ -8165,9 +12645,19 @@ export class SectionPageComponent {
         );
       }
       this.clearFormDraft('warehouse');
-      this.warehouseModalOpen.set(false);
+      if (!createAnother) {
+        this.warehouseModalOpen.set(false);
+      }
     } catch {
       this.pushToast('Errore durante il salvataggio del prodotto.', 'error');
+      return;
+    }
+
+    // "Salva e crea nuovo": resta nel modale e azzera solo i campi del prodotto
+    // mantenendo i dati condivisi (fornitore, categoria, data, operatore, scaffale).
+    if (createAnother) {
+      this.prepareWarehouseReceiptForNextProduct();
+      this.pushToast('Prodotto salvato · pronto per il prossimo carico.', 'success');
       return;
     }
 
@@ -8204,6 +12694,50 @@ export class SectionPageComponent {
       expiryDate: '',
       receivedDate: new Date().toISOString().slice(0, 10),
     });
+  }
+
+  /**
+   * Azzera i soli campi del prodotto per iniziare un nuovo carico,
+   * conservando i dati condivisi dell'ultimo salvataggio.
+   */
+  private prepareWarehouseReceiptForNextProduct(): void {
+    const keep = this.warehouseReceiptForm.getRawValue();
+    this.warehouseReceiptMode.set('new');
+    this.warehouseReceiptTargetId.set(null);
+    this.runWithoutDraftSync('warehouse', () => {
+      this.warehouseReceiptForm.reset({
+        // Campi condivisi mantenuti
+        category: keep.category,
+        newCategory: '',
+        usageType: keep.usageType,
+        registrationMode: keep.registrationMode,
+        unitOfMeasure: keep.unitOfMeasure,
+        supplier: keep.supplier,
+        receivedDate: keep.receivedDate,
+        shelfCode: keep.shelfCode,
+        minStock: keep.minStock,
+        operator: keep.operator,
+        syncCashPrices: false,
+        // Campi del prodotto azzerati
+        inventoryItemId: '',
+        sku: '',
+        barcode: '',
+        name: '',
+        description: '',
+        quantity: 0,
+        cableRolls: 0,
+        cableMetersPerRoll: 0,
+        unitCost: 0,
+        salePrice: 0,
+        lotNumber: '',
+        expiryDate: '',
+        purchaseDocumentNumber: '',
+        transportCost: 0,
+        customsCost: 0,
+        packagingCost: 0,
+      });
+    });
+    this.syncWarehouseReceiptCategoryState();
   }
 
   protected applyInventoryAdjustment(): void {
@@ -8495,6 +13029,24 @@ export class SectionPageComponent {
     this.data.addServiceCategory(trimmed);
   }
 
+  /** Elimina una categoria servizi con conferma esplicita (le voci di listino restano invariate) */
+  protected removeServiceCategory(name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Eliminare la categoria "${trimmed}"?\n\nI servizi già associati restano nel listino, ma la categoria non sarà più disponibile per i nuovi inserimenti.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    this.data.removeServiceCategory(trimmed);
+    if (this.cashCategoryFilter() === trimmed) {
+      this.cashCategoryFilter.set('tutte');
+    }
+  }
+
   protected addProductCategory(name: string): void {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -8503,12 +13055,13 @@ export class SectionPageComponent {
     this.data.addProductCategory(trimmed);
   }
 
-  protected addCashProduct(): void {
+  protected addCashProduct(createAnother = false): void {
     if (this.cashProductForm.invalid) {
       this.cashProductForm.markAllAsTouched();
       return;
     }
 
+    const isEditing = Boolean(this.editingCashProductId());
     const payload = this.cashProductForm.getRawValue();
     let resolvedCategory = payload.category.trim();
     if (resolvedCategory === '__new__') {
@@ -8548,15 +13101,24 @@ export class SectionPageComponent {
           linkedInventoryItemId: normalizedRecord.linkedInventoryItemId,
         });
       }
-      this.pushToast('Servizio salvato correttamente.', 'success');
       this.clearFormDraft('service');
-      this.serviceModalOpen.set(false);
     } catch {
       this.pushToast('Errore durante il salvataggio del servizio.', 'error');
       return;
     }
 
+    // Salvataggio in serie: la modale resta aperta e conserva la categoria,
+    // così il catalogo si popola senza riaprire ogni volta la finestra.
+    if (createAnother && !isEditing) {
+      this.resetCashProductForm();
+      this.cashProductForm.controls.category.setValue(resolvedCategory || 'Servizi audio');
+      this.pushToast('Servizio salvato. Inserisci il prossimo.', 'success');
+      return;
+    }
+
+    this.pushToast('Servizio salvato correttamente.', 'success');
     this.resetCashProductForm();
+    this.serviceModalOpen.set(false);
   }
 
   protected editCashProduct(id: string): void {
@@ -8660,6 +13222,15 @@ export class SectionPageComponent {
   }
 
   protected removeCashProduct(id: string): void {
+    // Conferma esplicita prima di eliminare una voce dal listino (regola operativa di sicurezza)
+    const product = this.allCashProducts().find((entry) => entry.id === id);
+    const confirmed = window.confirm(
+      `Eliminare la voce di listino "${product?.name ?? id}"?\n\nL'operazione non è reversibile.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
     this.data.deleteCashProduct(id);
 
     if (this.selectedCashProductId() === id) {
@@ -9522,6 +14093,7 @@ export class SectionPageComponent {
         quantity: line.quantity,
         unitPrice: parseFloat(finalUnitPrice.toFixed(2)),
         originalUnitPrice: line.unitPrice,
+        vatRate: Math.max(0, Number(line.vatRate) || 22),
         discountPercentage: discount,
         total: line.quantity * parseFloat(finalUnitPrice.toFixed(2)),
         pricingMode: line.kind === 'servizio' ? 'ora' : 'fisso',
@@ -9538,6 +14110,7 @@ export class SectionPageComponent {
         quantity: 1,
         unitPrice: quote.value,
         originalUnitPrice: quote.value,
+        vatRate: 22,
         total: quote.value,
         pricingMode: 'fisso',
         operatorName: this.cashCurrentOperator(),
@@ -9586,6 +14159,7 @@ export class SectionPageComponent {
         quantity: 1,
         unitPrice: 0,
         originalUnitPrice: 0,
+        vatRate: 22,
         total: 0,
         pricingMode: 'fisso',
         operatorName,
@@ -9602,6 +14176,7 @@ export class SectionPageComponent {
           quantity: line.quantity,
           unitPrice: line.unitCost,
           originalUnitPrice: line.unitCost,
+          vatRate: 22,
           total: line.totalCost,
           pricingMode: 'fisso',
           operatorName,
@@ -9616,6 +14191,7 @@ export class SectionPageComponent {
         quantity: 1,
         unitPrice: ticket.materialCost,
         originalUnitPrice: ticket.materialCost,
+        vatRate: 22,
         total: ticket.materialCost,
         pricingMode: 'fisso',
         operatorName,
@@ -9670,6 +14246,7 @@ export class SectionPageComponent {
             quantity: 1,
             unitPrice: productPrice,
             originalUnitPrice: productPrice,
+            vatRate: 22,
             total: productPrice,
             pricingMode: product.pricingMode,
             operatorName: this.cashCurrentOperator(),
@@ -9980,6 +14557,7 @@ export class SectionPageComponent {
         status === 'insoluto' ? 'Insoluto registrato e collegato al cliente.' : 'Vendita registrata.',
         'success',
       );
+      void this.handleIssuedCashInvoice(transaction);
     }
 
     this.clearCashCart();
@@ -10100,6 +14678,14 @@ export class SectionPageComponent {
     const operator = this.allCashOperators().find((item) => item.id === id);
 
     if (!operator) {
+      return;
+    }
+
+    // Conferma esplicita: il dipendente esce dalle liste attive e perde l'accesso al portale
+    const confirmed = window.confirm(
+      `Disattivare il dipendente "${operator.name}"?\n\nNon comparirà più tra i dipendenti attivi e l'accesso al portale dipendenti viene revocato. I dati restano in archivio.`,
+    );
+    if (!confirmed) {
       return;
     }
 
@@ -10601,6 +15187,42 @@ export class SectionPageComponent {
     const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
     if (!target) return;
     this.data.updateCompanyProfile({ [field]: target.value });
+  }
+
+  protected updateInvoiceTransmissionSetting(
+    field: keyof CompanyProfileRecord['invoiceTransmission'],
+    event: Event,
+  ): void {
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+    if (!target) return;
+    this.data.updateCompanyProfile({
+      invoiceTransmission: {
+        ...this.companyProfile().invoiceTransmission,
+        [field]: target.value,
+      },
+    });
+  }
+
+  protected updateInvoiceTransmissionBoolean(
+    field: 'fallbackToXmlDownload',
+    event: Event,
+  ): void {
+    const target = event.target as HTMLInputElement | null;
+    if (!target) return;
+    this.data.updateCompanyProfile({
+      invoiceTransmission: {
+        ...this.companyProfile().invoiceTransmission,
+        [field]: target.checked,
+      },
+    });
+  }
+
+  protected invoiceProviderConfigured(): boolean {
+    const transmission = this.companyProfile().invoiceTransmission;
+    return transmission.providerCode === 'webhook'
+      && transmission.mode === 'api'
+      && !!transmission.apiUrl.trim()
+      && !!transmission.apiKey.trim();
   }
 
   protected onCompanyLogoSelected(event: Event): void {
@@ -11493,7 +16115,16 @@ export class SectionPageComponent {
     });
   }
 
-  protected setCashSalesMode(mode: 'servizi' | 'rivendita' | 'preventivi'): void {
+  protected setCashSalesMode(mode: CashSalesMode): void {
+    if (mode === 'storico') {
+      this.openCashHistoryModal();
+      this.cashSalesMode.set('tutti');
+      return;
+    }
+    if (mode !== this.cashSalesMode()) {
+      this.cashCategoryFilter.set('tutte');
+      this.cashProductQuery.set('');
+    }
     this.cashSalesMode.set(mode);
   }
 
@@ -11507,6 +16138,31 @@ export class SectionPageComponent {
     this.cashClientModalOpen.set(true);
   }
 
+  protected openCashHistoryModal(): void {
+    this.cashHistoryModalOpen.set(true);
+  }
+
+  protected closeCashHistoryModal(): void {
+    this.cashHistoryModalOpen.set(false);
+  }
+
+  /** Apre il popup con l'elenco dei clienti in attesa */
+  protected openCashWaitingModal(): void {
+    this.cashWaitingModalOpen.set(true);
+  }
+
+  protected closeCashWaitingModal(): void {
+    this.cashWaitingModalOpen.set(false);
+  }
+
+  protected openCashReceiptPreviewModal(): void {
+    this.cashReceiptPreviewModalOpen.set(true);
+  }
+
+  protected closeCashReceiptPreviewModal(): void {
+    this.cashReceiptPreviewModalOpen.set(false);
+  }
+
   protected closeCashClientModal(): void {
     this.cashClientModalOpen.set(false);
     this.cashNewClientName.set('');
@@ -11518,6 +16174,9 @@ export class SectionPageComponent {
     this.cashNewClientSdiCode.set('');
     this.cashNewClientPec.set('');
     this.cashNewClientBillingAddress.set('');
+    this.cashNewClientBillingPostalCode.set('');
+    this.cashNewClientBillingProvince.set('');
+    this.cashNewClientBillingCountry.set('IT');
     this.cashPrivacyDispatchChannel.set('whatsapp');
     this.cashPrivacyNoticeAcknowledged.set(false);
     this.cashPrivacyEmailMarketing.set(false);
@@ -11591,6 +16250,7 @@ export class SectionPageComponent {
 
     this.cashQueuedSessions.update((items) => items.filter((item) => item.id !== sessionId));
     this.restoreCashQueuedSession(session);
+    this.cashWaitingModalOpen.set(false);
     this.pushToast('Cliente ripreso dalla lista attese.', 'success');
   }
 
@@ -11833,6 +16493,9 @@ export class SectionPageComponent {
         sdiCode: this.cashNewClientSdiCode().trim(),
         pec: this.cashNewClientPec().trim(),
         billingAddress: this.cashNewClientBillingAddress().trim(),
+        billingPostalCode: this.cashNewClientBillingPostalCode().trim(),
+        billingProvince: this.cashNewClientBillingProvince().trim().toUpperCase(),
+        billingCountry: this.cashNewClientBillingCountry().trim().toUpperCase() || 'IT',
       }
       : {
         kind: 'privato',
@@ -11840,6 +16503,9 @@ export class SectionPageComponent {
         sdiCode: '',
         pec: '',
         billingAddress: '',
+        billingPostalCode: '',
+        billingProvince: '',
+        billingCountry: 'IT',
       };
     const existingClient =
       this.allClients().find(
@@ -12012,6 +16678,22 @@ export class SectionPageComponent {
     this.pushToast('Documento aggiornato correttamente.', 'success');
   }
 
+  protected downloadSelectedCashInvoiceXml(): void {
+    const receipt = this.selectedCashReceipt();
+    if (!receipt) {
+      return;
+    }
+    this.downloadCashInvoiceXml(receipt);
+  }
+
+  protected async sendSelectedCashInvoiceToProvider(): Promise<void> {
+    const receipt = this.selectedCashReceipt();
+    if (!receipt) {
+      return;
+    }
+    await this.sendCashInvoiceToProvider(receipt, true);
+  }
+
   protected restoreCashReceiptToDesk(): void {
     const receipt = this.selectedCashReceipt();
     if (!receipt) {
@@ -12151,6 +16833,9 @@ export class SectionPageComponent {
     this.cashInvSdiCode.set(bp?.sdiCode ?? '');
     this.cashInvPec.set(bp?.pec ?? '');
     this.cashInvBillingAddress.set(bp?.billingAddress ?? '');
+    this.cashInvBillingPostalCode.set(bp?.billingPostalCode ?? '');
+    this.cashInvBillingProvince.set(bp?.billingProvince ?? '');
+    this.cashInvBillingCountry.set(bp?.billingCountry ?? 'IT');
     this.cashInvCapturedType.set(captureFor);
     this.cashInvoiceDataModalOpen.set(true);
   }
@@ -12168,6 +16853,9 @@ export class SectionPageComponent {
     this.cashInvSdiCode.set('');
     this.cashInvPec.set('');
     this.cashInvBillingAddress.set('');
+    this.cashInvBillingPostalCode.set('');
+    this.cashInvBillingProvince.set('');
+    this.cashInvBillingCountry.set('IT');
   }
 
   // ✅ Salva i dati, crea/aggiorna l'anagrafica e switcha a FATTURA (o tipo catturato)
@@ -12191,6 +16879,10 @@ export class SectionPageComponent {
       this.pushToast('Inserisci indirizzo di fatturazione.', 'error');
       return;
     }
+    if (!this.cashInvBillingPostalCode().trim() || !this.cashInvBillingProvince().trim()) {
+      this.pushToast('Inserisci CAP e provincia per generare una fattura XML valida.', 'error');
+      return;
+    }
     if (!email && !pec && !sdiCode) {
       this.pushToast('Inserisci almeno un canale di invio: email, PEC o SDI.', 'error');
       return;
@@ -12202,6 +16894,9 @@ export class SectionPageComponent {
       sdiCode,
       pec,
       billingAddress,
+      billingPostalCode: this.cashInvBillingPostalCode().trim(),
+      billingProvince: this.cashInvBillingProvince().trim().toUpperCase(),
+      billingCountry: this.cashInvBillingCountry().trim().toUpperCase() || 'IT',
     };
 
     const selected = this.selectedCashClient();
@@ -12652,6 +17347,9 @@ export class SectionPageComponent {
       sdiCode: record.privacyProfile.billingProfile?.sdiCode ?? '',
       pec: record.privacyProfile.billingProfile?.pec ?? '',
       billingAddress: record.privacyProfile.billingProfile?.billingAddress ?? '',
+      billingPostalCode: record.privacyProfile.billingProfile?.billingPostalCode ?? '',
+      billingProvince: record.privacyProfile.billingProfile?.billingProvince ?? '',
+      billingCountry: record.privacyProfile.billingProfile?.billingCountry ?? 'IT',
     });
     this.clientModalOpen.set(true);
   }
@@ -12738,6 +17436,43 @@ export class SectionPageComponent {
       // ✅ Fix ISS-08: default OFF quando si modifica un prodotto esistente
       syncCashPrices: false,
     });
+  }
+
+  /** Apre il modale di modifica anagrafica del prodotto (pulsante "Modifica" nel dettaglio). */
+  protected openInventoryEditModal(id: string): void {
+    const record = this.allInventoryItems().find((item) => item.id === id);
+    if (!record) {
+      return;
+    }
+    this.editingInventoryId.set(record.id);
+    this.selectedInventoryId.set(record.id);
+    this.inventoryForm.setValue({
+      sku: record.sku,
+      barcode: record.barcode,
+      name: record.name,
+      category: record.category,
+      usageType: record.usageType,
+      stock: record.stock,
+      cableRolls: record.cableRolls ?? 0,
+      cableMetersPerRoll: record.cableMetersPerRoll ?? 0,
+      minStock: record.minStock,
+      unitCost: record.unitCost,
+      salePrice: record.salePrice,
+      supplier: record.supplier,
+      location: record.location,
+      // ✅ Fix ISS-08: default OFF quando si modifica un prodotto esistente
+      syncCashPrices: false,
+    });
+    this.inventoryEditModalOpen.set(true);
+  }
+
+  protected closeInventoryEditModal(): void {
+    this.inventoryEditModalOpen.set(false);
+  }
+
+  protected discardInventoryEditModal(): void {
+    this.inventoryEditModalOpen.set(false);
+    this.resetInventoryForm();
   }
 
   protected removeInventoryItem(id: string): void {
@@ -12968,6 +17703,11 @@ export class SectionPageComponent {
     this.quoteClientLookup.set(target?.value ?? '');
   }
 
+  // Mostra/nascondi il blocco dati fiscali del preventivo
+  protected toggleQuoteBilling(): void {
+    this.quoteBillingOpen.update((open) => !open);
+  }
+
   protected importQuoteClient(clientId: string): void {
     const client = this.allClients().find((item) => item.id === clientId);
 
@@ -12985,6 +17725,10 @@ export class SectionPageComponent {
       customerPec: billingProfile?.pec || '',
       customerSdiCode: billingProfile?.sdiCode || '',
     });
+    // Se il cliente ha dati fiscali salvati, apri il blocco per mostrarli subito
+    if (billingProfile && (billingProfile.taxId || billingProfile.sdiCode || billingProfile.pec)) {
+      this.quoteBillingOpen.set(true);
+    }
     this.quoteClientLookup.set('');
   }
 
@@ -13307,6 +18051,7 @@ export class SectionPageComponent {
             quantity: 1,
             unitPrice: total,
             originalUnitPrice: total,
+            vatRate: 22,
             total: total,
             pricingMode: 'fisso',
             operatorName: payload.operatorName,
@@ -13422,8 +18167,22 @@ export class SectionPageComponent {
     this.warehouseCategoryFilter.set(target?.value ?? 'tutte');
   }
 
+  protected updateWarehouseSupplierQuery(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.warehouseSupplierQuery.set(target?.value ?? '');
+  }
+
   protected setWarehouseView(
-    view: 'ricerca' | 'acquisto' | 'consumi' | 'utilizzo' | 'sottoscorta' | 'valore' | 'movimenti',
+    view:
+      | 'ricerca'
+      | 'acquisto'
+      | 'consumi'
+      | 'utilizzo'
+      | 'sottoscorta'
+      | 'valore'
+      | 'movimenti'
+      | 'ordini'
+      | 'fornitori',
   ): void {
     this.warehouseView.set(view);
 
@@ -13433,6 +18192,18 @@ export class SectionPageComponent {
       this.warehouseMovementDateFrom.set('');
       this.warehouseMovementDateTo.set('');
     }
+
+    if (view !== 'fornitori') {
+      this.closeWarehouseSupplierDetail();
+    }
+  }
+
+  protected openWarehouseSupplierDetail(supplier: string): void {
+    this.warehouseSupplierDetailName.set(supplier);
+  }
+
+  protected closeWarehouseSupplierDetail(): void {
+    this.warehouseSupplierDetailName.set(null);
   }
 
   protected warehouseUsageTypeLabel(value: InventoryItemRecord['usageType']): string {
@@ -13597,6 +18368,164 @@ export class SectionPageComponent {
     return kind === 'currency' ? `€ ${this.formatCurrency(value)}` : `${value}`;
   }
 
+  private reportCashDocumentTypeLabel(type: CashTransactionRecord['documentType']): string {
+    return type === 'fattura' ? 'Fattura' : 'Scontrino';
+  }
+
+  private reportCashPaymentMethodLabel(method: CashTransactionRecord['paymentMethod']): string {
+    switch (method) {
+      case 'contanti':
+        return 'Contanti';
+      case 'pos':
+        return 'POS';
+      case 'bonifico':
+        return 'Bonifico';
+      case 'misto':
+        return 'Misto';
+      default:
+        return method;
+    }
+  }
+
+  private reportTotalsByPaymentMethod(
+    transactions: CashTransactionRecord[],
+  ): Record<CashTransactionRecord['paymentMethod'], number> {
+    return transactions.reduce(
+      (totals, transaction) => {
+        totals[transaction.paymentMethod] += transaction.total;
+        return totals;
+      },
+      { contanti: 0, pos: 0, bonifico: 0, misto: 0 },
+    );
+  }
+
+  private buildReportPeriodRange(
+    preset: ReportPeriodPreset,
+    customFrom: string,
+    customTo: string,
+    compareEnabled: boolean,
+  ): ReportPeriodRange {
+    const today = new Date();
+    const todayIso = this.toIsoDateOnly(today);
+    let from = todayIso;
+    let to = todayIso;
+    let label = 'Oggi';
+
+    switch (preset) {
+      case 'oggi':
+        break;
+      case 'ultimi-7':
+        from = this.addDaysIso(todayIso, -6);
+        label = 'Ultimi 7 giorni';
+        break;
+      case 'ultimi-30':
+        from = this.addDaysIso(todayIso, -29);
+        label = 'Ultimi 30 giorni';
+        break;
+      case 'mese-corrente':
+        from = this.startOfMonthIso(todayIso);
+        to = this.endOfMonthIso(todayIso);
+        label = 'Mese corrente';
+        break;
+      case 'mese-precedente': {
+        const previousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const previousIso = this.toIsoDateOnly(previousMonth);
+        from = this.startOfMonthIso(previousIso);
+        to = this.endOfMonthIso(previousIso);
+        label = 'Mese precedente';
+        break;
+      }
+      case 'trimestre-corrente':
+        from = this.startOfQuarterIso(todayIso);
+        to = this.endOfQuarterIso(todayIso);
+        label = 'Trimestre corrente';
+        break;
+      case 'anno-corrente':
+        from = this.startOfYearIso(todayIso);
+        to = this.endOfYearIso(todayIso);
+        label = 'Anno corrente';
+        break;
+      case 'anno-precedente': {
+        const year = today.getFullYear() - 1;
+        from = `${year}-01-01`;
+        to = `${year}-12-31`;
+        label = 'Anno precedente';
+        break;
+      }
+      case 'custom':
+        from = customFrom || this.addDaysIso(todayIso, -29);
+        to = customTo || todayIso;
+        label = from === to ? `Data ${this.epFormatDate(from)}` : `${this.epFormatDate(from)} - ${this.epFormatDate(to)}`;
+        break;
+    }
+
+    if (from > to) {
+      [from, to] = [to, from];
+    }
+
+    const spanDays = Math.max(1, this.diffDaysInclusive(from, to));
+    const previousTo = this.addDaysIso(from, -1);
+    const previousFrom = this.addDaysIso(previousTo, -(spanDays - 1));
+
+    return {
+      label,
+      from,
+      to,
+      previousLabel: compareEnabled
+        ? previousFrom === previousTo
+          ? `Confronto ${this.epFormatDate(previousFrom)}`
+          : `${this.epFormatDate(previousFrom)} - ${this.epFormatDate(previousTo)}`
+        : 'Confronto disattivato',
+      previousFrom,
+      previousTo,
+      compareEnabled,
+    };
+  }
+
+  private buildReportOverviewCard(
+    input: Omit<ReportOverviewCard, 'delta' | 'deltaPercent' | 'trend'>,
+  ): ReportOverviewCard {
+    const compareEnabled = this.reportPeriodRange().compareEnabled;
+    const previousValue = compareEnabled ? input.previousValue ?? 0 : null;
+    const delta = compareEnabled && previousValue !== null ? input.value - previousValue : null;
+    const deltaPercent =
+      compareEnabled && previousValue !== null
+        ? previousValue === 0
+          ? input.value === 0
+            ? 0
+            : 100
+          : Math.round((delta! / previousValue) * 100)
+        : null;
+    const trend =
+      delta === null
+        ? 'none'
+        : delta > 0
+          ? 'up'
+          : delta < 0
+            ? 'down'
+            : 'flat';
+
+    return {
+      ...input,
+      previousValue,
+      delta,
+      deltaPercent,
+      trend,
+    };
+  }
+
+  private filterRecordsByIsoDate<T>(
+    records: T[],
+    extractor: (record: T) => string | null | undefined,
+    from: string,
+    to: string,
+  ): T[] {
+    return records.filter((record) => {
+      const iso = this.extractIsoDateOnly(extractor(record));
+      return !!iso && iso >= from && iso <= to;
+    });
+  }
+
   private buildReportDonutChart(
     key: string,
     title: string,
@@ -13658,6 +18587,227 @@ export class SectionPageComponent {
       gradient,
       segments: segments.map(({ _start, _end, ...segment }) => segment),
     };
+  }
+
+  private parseReportPage(value: string | null): ReportPageKey {
+    switch (value) {
+      case 'economici':
+      case 'clienti':
+      case 'preventivi':
+      case 'servizi':
+      case 'documenti':
+      case 'magazzino':
+      case 'altre':
+        return value;
+      default:
+        return 'dashboard';
+    }
+  }
+
+  private reportPageForSection(section: ReportSectionKey): ReportPageKey {
+    switch (section) {
+      case 'overview':
+        return 'dashboard';
+      case 'cross':
+        return 'altre';
+      case 'commerciale':
+        return 'preventivi';
+      case 'operatività':
+        return 'servizi';
+      case 'amministrazione':
+        return 'documenti';
+      case 'alert':
+        return 'altre';
+      default:
+        return 'dashboard';
+    }
+  }
+
+  private filterReportOverviewCardsByLabels(labels: string[]): ReportOverviewCard[] {
+    const allowed = new Set(labels);
+    return this.reportOverviewCards().filter((card) => allowed.has(card.label));
+  }
+
+  private buildReportTrendChart(transactions: CashTransactionRecord[]): ReportTrendChart {
+    const range = this.reportPeriodRange();
+    const totalDays = Math.max(1, this.diffDaysInclusive(range.from, range.to));
+    const bucketMode: 'day' | 'week' | 'month' =
+      totalDays <= 14 ? 'day' : totalDays <= 90 ? 'week' : 'month';
+    const buckets: Array<{ label: string; total: number }> = [];
+
+    if (bucketMode === 'day') {
+      let cursor = range.from;
+      while (cursor <= range.to) {
+        buckets.push({
+          label: this.reportTrendLabel(cursor, cursor, 'day'),
+          total: 0,
+        });
+        cursor = this.addDaysIso(cursor, 1);
+      }
+    } else if (bucketMode === 'week') {
+      let cursor = range.from;
+      while (cursor <= range.to) {
+        const weekEnd = this.addDaysIso(cursor, Math.min(6, Math.max(0, this.diffDaysInclusive(cursor, range.to) - 1)));
+        buckets.push({
+          label: this.reportTrendLabel(cursor, weekEnd, 'week'),
+          total: 0,
+        });
+        cursor = this.addDaysIso(weekEnd, 1);
+      }
+    } else {
+      const start = new Date(`${range.from}T12:00:00`);
+      const end = new Date(`${range.to}T12:00:00`);
+      let current = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (current <= end) {
+        const monthStart = this.toIsoDateOnly(current);
+        const nextMonth = new Date(current.getFullYear(), current.getMonth() + 1, 1);
+        const monthEndDate = new Date(nextMonth.getTime() - 86400000);
+        const monthEnd = this.toIsoDateOnly(monthEndDate);
+        buckets.push({
+          label: this.reportTrendLabel(monthStart, monthEnd, 'month'),
+          total: 0,
+        });
+        current = nextMonth;
+      }
+    }
+
+    transactions.forEach((transaction) => {
+      const isoDate = this.extractIsoDateOnly(transaction.settledAt || transaction.createdAt);
+      if (!isoDate) {
+        return;
+      }
+
+      if (bucketMode === 'day') {
+        const bucketIndex = Math.max(0, this.diffDaysInclusive(range.from, isoDate) - 1);
+        if (bucketIndex < buckets.length) {
+          buckets[bucketIndex].total += transaction.total;
+        }
+        return;
+      }
+
+      if (bucketMode === 'week') {
+        let cursor = range.from;
+        let bucketIndex = 0;
+        while (cursor <= range.to && bucketIndex < buckets.length) {
+          const weekEnd = this.addDaysIso(cursor, Math.min(6, Math.max(0, this.diffDaysInclusive(cursor, range.to) - 1)));
+          if (isoDate >= cursor && isoDate <= weekEnd) {
+            buckets[bucketIndex].total += transaction.total;
+            return;
+          }
+          cursor = this.addDaysIso(weekEnd, 1);
+          bucketIndex += 1;
+        }
+        return;
+      }
+
+      const txDate = new Date(`${isoDate}T12:00:00`);
+      const bucketIndex =
+        (txDate.getFullYear() - new Date(`${range.from}T12:00:00`).getFullYear()) * 12 +
+        txDate.getMonth() -
+        new Date(`${range.from}T12:00:00`).getMonth();
+      if (bucketIndex >= 0 && bucketIndex < buckets.length) {
+        buckets[bucketIndex].total += transaction.total;
+      }
+    });
+
+    const values = buckets.map((bucket) => bucket.total);
+    const maxValue = Math.max(...values, 1);
+    const chartWidth = 216;
+    const chartHeight = 72;
+    const points = buckets.map((bucket, index, allBuckets) => {
+      const x = allBuckets.length === 1 ? chartWidth / 2 : (index / Math.max(allBuckets.length - 1, 1)) * chartWidth;
+      const y = chartHeight - (bucket.total / maxValue) * (chartHeight - 12) - 6;
+      return {
+        label: bucket.label,
+        value: bucket.total,
+        valueLabel: this.formatReportMetric(bucket.total, 'currency'),
+        x: Number(x.toFixed(2)),
+        y: Number(y.toFixed(2)),
+      };
+    });
+    const polyline = points.map((point) => `${point.x},${point.y}`).join(' ');
+    const area = points.length
+      ? `0,${chartHeight} ${polyline} ${chartWidth},${chartHeight}`
+      : '';
+
+    return {
+      title: 'Andamento incassi',
+      subtitle:
+        bucketMode === 'day'
+          ? 'Distribuzione giornaliera del periodo'
+          : bucketMode === 'week'
+            ? 'Distribuzione settimanale del periodo'
+            : 'Distribuzione mensile del periodo',
+      totalLabel: this.formatReportMetric(values.reduce((sum, value) => sum + value, 0), 'currency'),
+      maxLabel: this.formatReportMetric(maxValue, 'currency'),
+      polyline,
+      area,
+      points,
+    };
+  }
+
+  private reportTrendLabel(from: string, to: string, mode: 'day' | 'week' | 'month'): string {
+    const date = new Date(`${from}T12:00:00`);
+    const monthLabels = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+    if (mode === 'month') {
+      return `${monthLabels[date.getMonth()]}`;
+    }
+    if (mode === 'week') {
+      return `${from.slice(8, 10)}-${to.slice(8, 10)} ${monthLabels[date.getMonth()]}`;
+    }
+    return `${from.slice(8, 10)}/${from.slice(5, 7)}`;
+  }
+
+  private extractIsoDateOnly(value: string | null | undefined): string {
+    if (!value) {
+      return '';
+    }
+    return String(value).slice(0, 10);
+  }
+
+  private toIsoDateOnly(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private addDaysIso(isoDate: string, days: number): string {
+    const date = new Date(`${isoDate}T12:00:00`);
+    date.setDate(date.getDate() + days);
+    return this.toIsoDateOnly(date);
+  }
+
+  private diffDaysInclusive(from: string, to: string): number {
+    const start = new Date(`${from}T12:00:00`).getTime();
+    const end = new Date(`${to}T12:00:00`).getTime();
+    return Math.round((end - start) / 86400000) + 1;
+  }
+
+  private startOfQuarterIso(isoDate: string): string {
+    const date = new Date(`${isoDate}T12:00:00`);
+    const quarterMonth = Math.floor(date.getMonth() / 3) * 3;
+    date.setMonth(quarterMonth, 1);
+    return this.toIsoDateOnly(date);
+  }
+
+  private endOfQuarterIso(isoDate: string): string {
+    const date = new Date(`${isoDate}T12:00:00`);
+    const quarterMonth = Math.floor(date.getMonth() / 3) * 3;
+    date.setMonth(quarterMonth + 3, 0);
+    return this.toIsoDateOnly(date);
+  }
+
+  private startOfYearIso(isoDate: string): string {
+    const date = new Date(`${isoDate}T12:00:00`);
+    date.setMonth(0, 1);
+    return this.toIsoDateOnly(date);
+  }
+
+  private endOfYearIso(isoDate: string): string {
+    const date = new Date(`${isoDate}T12:00:00`);
+    date.setMonth(11, 31);
+    return this.toIsoDateOnly(date);
   }
 
   private reportSearchTokens(): string[] {
@@ -13772,6 +18922,10 @@ export class SectionPageComponent {
     this.pushToast('Template magazzino scaricato.', 'success');
   }
 
+  protected warehouseValuationDateLabel(): string {
+    return this.warehouseValuationDate() || new Date().toISOString().slice(0, 10);
+  }
+
   protected exportWarehouseInventoryCsv(): void {
     const rows = [
       ['SKU', 'Barcode', 'Prodotto', 'Categoria', 'Destinazione', 'Rotoli', 'Metri per rotolo', 'Giacenza', 'Sottoscorta', 'Prezzo acquisto', 'Prezzo rivendita', 'Valore stock', 'Fornitore', 'Scaffale', 'Anomalia'],
@@ -13793,8 +18947,8 @@ export class SectionPageComponent {
         entry.anomaly,
       ]),
     ];
-    this.downloadCsv(rows, `inventario-magazzino-${new Date().toISOString().slice(0, 10)}.csv`);
-    this.pushToast('Inventario esportato in CSV.', 'success');
+    this.downloadCsv(rows, `giacenze-magazzino-${this.warehouseValuationDateLabel()}.csv`);
+    this.pushToast('Giacenze magazzino esportate in CSV.', 'success');
   }
 
   protected exportWarehouseInventoryPdf(): void {
@@ -13847,12 +19001,12 @@ export class SectionPageComponent {
   <div class="meta">
     <div>
       <h1>Inventario magazzino</h1>
-      <p>Esportazione del ${this.escapeHtml(new Date().toISOString().slice(0, 10))}</p>
+      <p>Situazione valorizzata al ${this.escapeHtml(this.warehouseValuationDateLabel())}</p>
     </div>
     <div class="box">
       <div><strong>Valore totale</strong></div>
-      <div>€ ${this.formatCurrency(this.warehouseHistoricalValue())}</div>
-      <div>Articoli: ${this.historicalInventoryItems().length}</div>
+      <div>€ ${this.formatCurrency(this.warehouseValuationTotalValue())}</div>
+      <div>Articoli: ${this.warehouseInventoryExportRows().length}</div>
     </div>
   </div>
   <table>
@@ -13941,6 +19095,143 @@ export class SectionPageComponent {
     this.cashCategoryFilter.set(
       target?.value ?? 'tutte',
     );
+  }
+
+  protected updateListinoQuery(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.listinoQuery.set(target?.value ?? '');
+  }
+
+  protected updateListinoCategoryFilter(event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    this.listinoCategoryFilter.set(target?.value ?? 'tutte');
+  }
+
+  protected isListinoSelected(id: string): boolean {
+    return this.listinoSelectedIds().includes(id);
+  }
+
+  protected toggleListinoSelection(id: string): void {
+    this.listinoSelectedIds.update((ids) => (ids.includes(id) ? ids.filter((entry) => entry !== id) : [...ids, id]));
+  }
+
+  /** Seleziona tutte le voci attualmente visibili con i filtri attivi */
+  protected listinoSelectAllVisible(): void {
+    const visibleIds = this.listinoFilteredProducts().map((item) => item.id);
+    this.listinoSelectedIds.update((ids) => [...new Set([...ids, ...visibleIds])]);
+  }
+
+  protected listinoClearSelection(): void {
+    this.listinoSelectedIds.set([]);
+  }
+
+  /** Esporta le voci selezionate in un listino pronto per la stampa o il salvataggio in PDF */
+  protected exportListinoPdf(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const selected = this.listinoSelectedProducts();
+    if (!selected.length) {
+      this.pushToast('Seleziona almeno una voce di listino da esportare.', 'error');
+      return;
+    }
+
+    // Raggruppo per categoria: il listino si legge a colpo d'occhio
+    const grouped = new Map<string, CashRegisterProductRecord[]>();
+    for (const product of selected) {
+      const key = product.category?.trim() || 'Senza categoria';
+      const bucket = grouped.get(key) ?? [];
+      bucket.push(product);
+      grouped.set(key, bucket);
+    }
+
+    const rows = [...grouped.entries()]
+      .map(
+        ([category, items]) => `
+          <tr class="group"><td colspan="3">${this.escapeHtml(category)}</td></tr>
+          ${items
+            .map(
+              (item) => `
+          <tr>
+            <td>${this.escapeHtml(item.name)}</td>
+            <td>${this.escapeHtml(this.pricingModeLabel(item.pricingMode))}</td>
+            <td class="price">€ ${this.escapeHtml(this.formatCurrency(this.resolveCashProductPrice(item)))}</td>
+          </tr>`,
+            )
+            .join('')}`,
+      )
+      .join('');
+
+    const company = this.companyProfile();
+    const popup = window.open('', '_blank', 'width=1180,height=780');
+    if (!popup) {
+      this.pushToast('Popup bloccato dal browser: impossibile aprire il listino.', 'error');
+      return;
+    }
+
+    popup.document.open();
+    popup.document.write(`<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Listino servizi</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:28px;color:#0f172a}
+    header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:3px solid #0f9f6d;padding-bottom:14px;margin-bottom:20px}
+    h1{font-size:22px;margin:0 0 6px;letter-spacing:.02em}
+    .brand{font-size:15px;font-weight:800;color:#0f9f6d;text-transform:uppercase;letter-spacing:.14em;margin:0 0 4px}
+    .meta{font-size:12px;color:#475569;line-height:1.5;margin:0}
+    .box{border:1px solid #cbd5e1;border-radius:12px;padding:12px 16px;text-align:right;font-size:12px;color:#475569;min-width:190px}
+    .box strong{display:block;font-size:18px;color:#0f172a}
+    table{width:100%;border-collapse:collapse}
+    th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;border-bottom:1px solid #cbd5e1;padding:8px 10px}
+    th.right{text-align:right}
+    td{padding:9px 10px;font-size:13px;border-bottom:1px solid #eef2f7}
+    td.price{text-align:right;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+    tr.group td{background:#f1faf6;color:#0f9f6d;font-weight:900;text-transform:uppercase;letter-spacing:.06em;font-size:11px;border-bottom:1px solid #d7ece2}
+    footer{margin-top:18px;font-size:11px;color:#94a3b8;text-align:center}
+    @media print{body{margin:14mm}@page{size:A4 portrait;margin:10mm}}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="brand">${this.escapeHtml(company.legalName || 'AudioMax')}</p>
+      <h1>Listino servizi</h1>
+      <p class="meta">
+        ${this.escapeHtml([company.address, company.postalCode, company.city, company.province].filter((value) => !!value).join(' '))}<br>
+        ${company.vatNumber ? `P.IVA ${this.escapeHtml(company.vatNumber)}` : ''}
+        ${company.phone ? ` · Tel. ${this.escapeHtml(company.phone)}` : ''}
+      </p>
+    </div>
+    <div class="box">
+      <span>Voci selezionate</span>
+      <strong>${selected.length}</strong>
+      <span>Totale listino € ${this.escapeHtml(this.formatCurrency(this.listinoSelectionTotal()))}</span>
+    </div>
+  </header>
+  <table>
+    <thead>
+      <tr>
+        <th>Voce</th>
+        <th>Tariffazione</th>
+        <th class="right">Prezzo</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <footer>Listino generato il ${this.escapeHtml(new Date().toLocaleDateString('it-IT'))}</footer>
+</body>
+</html>`);
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => {
+      popup.print();
+    }, 250);
+    this.pushToast('Listino pronto: usa "Salva come PDF" nella finestra di stampa.', 'success');
   }
 
   protected dismissToast(): void {
@@ -14178,7 +19469,7 @@ export class SectionPageComponent {
     this.cashMixedElectronicAmount.set(session.mixedElectronicAmount);
     this.cashMixedElectronicMethod.set(session.mixedElectronicMethod);
     this.cashDocumentType.set(session.documentType);
-    this.cashSalesMode.set(session.salesMode);
+    this.cashSalesMode.set(session.salesMode === 'storico' ? 'tutti' : session.salesMode);
     this.cashCurrentOperator.set(session.currentOperator);
     this.cashCart.set(session.cart.map((line) => ({ ...line })));
     this.selectedCashProductId.set(null);
@@ -14222,7 +19513,7 @@ export class SectionPageComponent {
     this.selectedCashProductId.set(null);
     this.selectedCashClientId.set(null);
     this.cashCustomerMode.set('walk-in');
-    this.cashSalesMode.set('servizi');
+    this.cashSalesMode.set('tutti');
   }
 
   private resetClientForm(): void {
@@ -14244,16 +19535,39 @@ export class SectionPageComponent {
         sdiCode: '',
         pec: '',
         billingAddress: '',
+        billingPostalCode: '',
+        billingProvince: '',
+        billingCountry: 'IT',
       });
     });
+  }
+
+  /** Operatore da proporre di default nel preventivo: quello attivo se presente in elenco. */
+  private defaultQuoteOperator(): string {
+    const current = this.cashCurrentOperator();
+    const operators = this.cashOperators();
+    if (current && operators.includes(current)) {
+      return current;
+    }
+    return operators[0] ?? '';
+  }
+
+  /** Scadenza proposta di default per un nuovo preventivo (oggi + 30 giorni). */
+  private defaultQuoteDueDate(): string {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    return date.toISOString().slice(0, 10);
   }
 
   private resetQuoteForm(): void {
     this.editingQuoteId.set(null);
     this.quoteClientLookup.set('');
+    this.quoteBillingOpen.set(false);
     this.runWithoutDraftSync('quote', () => {
       this.quoteForm.reset({
         issueDate: new Date().toISOString().slice(0, 10),
+        // Operatore precompilato con quello attivo (evita di doverlo scegliere ogni volta)
+        operatorName: this.defaultQuoteOperator(),
         customerName: '',
         isAnonymous: false,
         discountAmount: 0,
@@ -14274,7 +19588,8 @@ export class SectionPageComponent {
         paymentNotes: '',
         projectType: '',
         value: 0,
-        dueDate: '',
+        // Scadenza proposta a 30 giorni: modificabile, ma non più obbligatoria da digitare
+        dueDate: this.defaultQuoteDueDate(),
         stage: 'bozza',
         serviceId: '',
         units: 1,
@@ -14392,6 +19707,12 @@ export class SectionPageComponent {
             });
             return { ...line, description: '' };
           }
+          // Auto-compilazione: scegliendo un servizio o un articolo dal listino
+          // proponiamo subito il prezzo, così non va digitato a mano.
+          const listPrice = this.quoteLineListPrice(line.kind, value);
+          if (listPrice !== null) {
+            return { ...line, description: value, unitPrice: listPrice };
+          }
           return { ...line, description: value };
         }
 
@@ -14430,6 +19751,30 @@ export class SectionPageComponent {
         return { ...line, vatRate: Math.max(0, numeric) };
       }),
     );
+  }
+
+  /**
+   * Ricava il prezzo di listino per una descrizione scelta nel preventivo:
+   * servizio del listino cassa oppure articolo di magazzino (prezzo di vendita).
+   * Ritorna null se la voce non è collegata a nessun listino.
+   */
+  private quoteLineListPrice(kind: QuoteLineRecord['kind'], description: string): number | null {
+    const name = description.trim();
+    if (!name) {
+      return null;
+    }
+    if (kind === 'servizio') {
+      const service = this.services().find((entry) => entry.name === name);
+      return service ? service.price : null;
+    }
+    if (kind === 'materiale') {
+      const item = this.allInventoryItems().find((entry) => entry.name === name);
+      if (!item) {
+        return null;
+      }
+      return item.salePrice > 0 ? item.salePrice : item.unitCost;
+    }
+    return null;
   }
 
   protected addQuoteLineFromService(event: Event): void {
@@ -14862,6 +20207,7 @@ export class SectionPageComponent {
     this.registerFormDraft('ticket', this.ticketForm);
     this.registerFormDraft('expense', this.expenseForm);
     this.registerFormDraft('warehouse', this.warehouseReceiptForm);
+    this.registerFormDraft('ddt', this.ddtForm);
     this.registerFormDraft('service', this.cashProductForm);
   }
 
@@ -14999,6 +20345,9 @@ export class SectionPageComponent {
           sdiCode: quote.customerSdiCode ?? '',
           pec: quote.customerPec ?? '',
           billingAddress: quote.customerAddress ?? '',
+          billingPostalCode: '',
+          billingProvince: '',
+          billingCountry: 'IT',
         }
         : undefined;
 

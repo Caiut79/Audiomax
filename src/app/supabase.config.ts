@@ -18,4 +18,13 @@ export const supabaseConfig = {
     // ===== Portale Dipendenti v2 =====
     portalCommunications: 'crm_ep_portal_communications',
   },
+  remoteSyncEnabled: {
+    // Tutte le tabelle opzionali del portale sono ora presenti su Supabase.
+    // La sincronizzazione remota puo quindi restare attiva anche per queste sezioni.
+    cashOperators: true,
+    warehouseDdts: true,
+    pendingServices: true,
+    warehouseOrders: true,
+    portalCommunications: true,
+  },
 };
