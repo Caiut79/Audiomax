@@ -571,6 +571,24 @@
   display: flex;
 }
 
+// Contenitore dei comandi del piè di sidebar (tema + uscita)
+.sidebar-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.sidebar-logout-btn {
+  display: flex;
+
+  &:hover {
+    background: var(--danger-bg);
+    color: var(--danger);
+    border-color: var(--danger-border);
+  }
+}
+
 .mobile-theme-btn {
   display: none;
   margin-left: 0.25rem;
@@ -698,6 +716,72 @@
   align-items: center;
   gap: 0.35rem;
   margin-left: auto;
+}
+
+// ─── Sessione attiva nell'intestazione (azienda + uscita) ───
+.topbar-session {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.topbar-session-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.05rem;
+  min-width: 0;
+  max-width: 12rem;
+}
+
+.topbar-session-company {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.topbar-session-role {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+
+  &.topbar-session-role-super {
+    color: var(--purple);
+  }
+}
+
+.topbar-logout {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 650;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-card);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger);
+  }
 }
 
 .topbar-metric {
@@ -1051,6 +1135,19 @@
     display: none;
   }
 
+  // Su mobile la testata resta compatta: solo il pulsante Esci in forma iconica
+  .topbar-session-info {
+    display: none;
+  }
+
+  .topbar-logout span {
+    display: none;
+  }
+
+  .topbar-logout {
+    padding: 0.45rem;
+  }
+
   .workspace-body {
     padding: 1rem;
   }
@@ -1107,5 +1204,102 @@
 @media (min-width: 1024px) {
   .workspace-body {
     padding: 0.7rem 0.9rem 0.9rem;
+  }
+}
+
+// ─── Onboarding primo accesso · dati azienda ───
+.onboarding-overlay {
+  z-index: calc(var(--z-modal) + 5);
+}
+
+.onboarding-modal {
+  width: min(52rem, 100%);
+}
+
+.onboarding-head-text {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.onboarding-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.onboarding-subtitle {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.onboarding-feedback {
+  margin-bottom: 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.onboarding-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+.onboarding-field {
+  display: grid;
+  gap: 0.35rem;
+
+  &.wide {
+    grid-column: 1 / -1;
+  }
+
+  > span {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  input {
+    width: 100%;
+    min-height: var(--control-h-md);
+    padding: 0.55rem 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--input-bg);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+
+    &:focus {
+      outline: none;
+      border: 2px solid var(--action-bg);
+      padding: calc(0.55rem - 1px) calc(0.75rem - 1px);
+    }
+  }
+}
+
+.onboarding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 1.15rem;
+}
+
+@media (max-width: 640px) {
+  .onboarding-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .onboarding-actions {
+    flex-direction: column-reverse;
+
+    button {
+      width: 100%;
+    }
   }
 }

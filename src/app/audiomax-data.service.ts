@@ -47,8 +47,10 @@ import {
   PortalSettings,
   generatePortaleDipendentiCode,
   createClientPrivacyProfile,
+  createEmptyAudiomaxState,
   initialAudiomaxState,
 } from './crm-runtime-data';
+import { AuthService, SUPER_ADMIN_TENANT_ID } from './auth.service';
 import { BrowserStorageService } from './browser-storage.service';
 import { supabaseConfig } from './supabase.config';
 import { SupabaseService } from './supabase.service';
@@ -301,9 +303,42 @@ interface IndexedGlobalSearchResult extends GlobalSearchResult {
 })
 export class AudiomaxDataService {
   private readonly supabase = inject(SupabaseService);
+  private readonly auth = inject(AuthService);
   private readonly storage = inject(BrowserStorageService);
-  private readonly storageKey = 'audiomax-crm-state';
+  /** Chiave storica di localStorage: usata dal portale dipendente e come prefisso per le aziende. */
+  private readonly legacyStorageKey = 'audiomax-crm-state';
   private readonly localPersistDelayMs = 180;
+  /**
+   * Stato di partenza dei signal.
+   * - super admin (e fallback senza sessione, es. portale dipendente o account
+   *   database non ancora creato): dati di prova come sempre;
+   * - azienda cliente autenticata: gestionale vuoto, senza dati di esempio.
+   */
+  private readonly bootState: AudiomaxState = this.isClientTenant
+    ? createEmptyAudiomaxState()
+    : initialAudiomaxState;
+  /**
+   * True quando l'utente corrente è un'azienda cliente (non super admin).
+   * In questo caso i dati sono isolati, il seed demo è disattivato e lo stato
+   * LAN condiviso non viene usato. Senza sessione si mantiene il comportamento
+   * storico (ambiente principale / portale dipendente).
+   */
+  private get isClientTenant(): boolean {
+    const session = this.auth.session();
+    return !!session && session.role !== 'super-admin';
+  }
+  /**
+   * Chiave di localStorage isolata per azienda.
+   * - Super admin: mantiene la chiave storica (compatibilità col portale dipendente);
+   * - Altre aziende: chiave prefissata con il tenant, così i dati locali non si mescolano.
+   */
+  private get storageKey(): string {
+    const tenant = this.auth.tenantId();
+    if (!tenant || tenant === SUPER_ADMIN_TENANT_ID) {
+      return this.legacyStorageKey;
+    }
+    return `${this.legacyStorageKey}:${tenant}`;
+  }
   private localPersistTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPersistedState: string | null = null;
   private lastPersistedState = '';
@@ -317,52 +352,75 @@ export class AudiomaxDataService {
   readonly serverStateReady = signal<boolean>(false);
   readonly currentUserRole = signal<AppUserRole>('admin');
 
-  readonly clients = signal<ClientRecord[]>(initialAudiomaxState.clients);
-  readonly quotes = signal<QuoteRecord[]>(initialAudiomaxState.quotes);
-  readonly appointments = signal<AppointmentRecord[]>(initialAudiomaxState.appointments);
-  readonly inventoryItems = signal<InventoryItemRecord[]>(initialAudiomaxState.inventoryItems);
-  readonly warehouseLots = signal<WarehouseLotRecord[]>(initialAudiomaxState.warehouseLots);
-  readonly warehouseMovements = signal<WarehouseMovementRecord[]>(initialAudiomaxState.warehouseMovements);
-  readonly warehousePositions = signal<WarehousePositionRecord[]>(initialAudiomaxState.warehousePositions);
-  readonly warehousePurchases = signal<WarehousePurchaseRecord[]>(initialAudiomaxState.warehousePurchases);
+  readonly clients = signal<ClientRecord[]>(this.bootState.clients);
+  readonly quotes = signal<QuoteRecord[]>(this.bootState.quotes);
+  readonly appointments = signal<AppointmentRecord[]>(this.bootState.appointments);
+  readonly inventoryItems = signal<InventoryItemRecord[]>(this.bootState.inventoryItems);
+  readonly warehouseLots = signal<WarehouseLotRecord[]>(this.bootState.warehouseLots);
+  readonly warehouseMovements = signal<WarehouseMovementRecord[]>(this.bootState.warehouseMovements);
+  readonly warehousePositions = signal<WarehousePositionRecord[]>(this.bootState.warehousePositions);
+  readonly warehousePurchases = signal<WarehousePurchaseRecord[]>(this.bootState.warehousePurchases);
   readonly warehouseAdjustments = signal<WarehouseAdjustmentRecord[]>(
-    initialAudiomaxState.warehouseAdjustments,
+    this.bootState.warehouseAdjustments,
   );
-  readonly warehouseAuditLog = signal<WarehouseAuditRecord[]>(initialAudiomaxState.warehouseAuditLog);
-  readonly serviceCategories = signal<string[]>(initialAudiomaxState.serviceCategories);
-  readonly companyProfile = signal<CompanyProfileRecord>(initialAudiomaxState.companyProfile);
+  readonly warehouseAuditLog = signal<WarehouseAuditRecord[]>(this.bootState.warehouseAuditLog);
+  readonly serviceCategories = signal<string[]>(this.bootState.serviceCategories);
+  readonly companyProfile = signal<CompanyProfileRecord>(this.bootState.companyProfile);
+
+  // ========================================================================
+  // REGIME FISCALE · IVA sulle vendite
+  // ========================================================================
+  /**
+   * True quando il regime fiscale azzera l'IVA sulle vendite (es. forfettario).
+   * Gli acquisti (spese) restano invece sempre soggetti a IVA.
+   */
+  readonly salesVatExempt = computed(() => this.companyProfile().fiscalRegime === 'forfettario');
+  /**
+   * Aliquota IVA predefinita per le nuove righe di vendita, coerente con il
+   * regime fiscale dell'azienda (0 se il regime è esente).
+   */
+  defaultSalesVatRate(): number {
+    return this.salesVatExempt() ? 0 : Math.max(0, Number(this.companyProfile().defaultVatRate ?? 22));
+  }
+  /**
+   * Normalizza l'aliquota IVA di una riga di vendita in base al regime
+   * aziendale: se il regime è esente l'IVA viene forzata a zero.
+   */
+  resolveSalesVatRate(rate: number): number {
+    return this.salesVatExempt() ? 0 : Math.max(0, Number(rate) || 0);
+  }
   readonly productCategories = signal<string[]>(
     Array.from(
       new Set(
-        initialAudiomaxState.inventoryItems
+        this.bootState.inventoryItems
           .map((item) => item.category)
           .filter((category): category is string => !!category && category.trim().length > 0),
       ),
     ).sort((left, right) => left.localeCompare(right, 'it-IT')),
   );
-  readonly expenseCategories = signal<ExpenseCategoryRecord[]>(initialAudiomaxState.expenseCategories);
-  readonly expenseSuppliers = signal<ExpenseSupplierRecord[]>(initialAudiomaxState.expenseSuppliers);
+  readonly expenseCategories = signal<ExpenseCategoryRecord[]>(this.bootState.expenseCategories);
+  readonly expenseSuppliers = signal<ExpenseSupplierRecord[]>(this.bootState.expenseSuppliers);
   readonly expensePaymentMethods = signal<ExpensePaymentMethodRecord[]>(
-    initialAudiomaxState.expensePaymentMethods,
+    this.bootState.expensePaymentMethods,
   );
   // ⭐ Provider pagamento integrati (Stripe, Adyen, Satispay, Sepa DD via API, ecc.)
-  readonly paymentProviders = signal<PaymentProviderRecord[]>(initialAudiomaxState.paymentProviders);
-  readonly expenseRecords = signal<ExpenseRecord[]>(initialAudiomaxState.expenseRecords);
+  readonly paymentProviders = signal<PaymentProviderRecord[]>(this.bootState.paymentProviders);
+  readonly expenseRecords = signal<ExpenseRecord[]>(this.bootState.expenseRecords);
   readonly expenseInstallments = signal<ExpenseInstallmentRecord[]>(
-    initialAudiomaxState.expenseInstallments,
+    this.bootState.expenseInstallments,
   );
   readonly expenseNotifications = signal<ExpenseNotificationRecord[]>(
-    initialAudiomaxState.expenseNotifications,
+    this.bootState.expenseNotifications,
   );
-  readonly expenseAuditLog = signal<ExpenseAuditRecord[]>(initialAudiomaxState.expenseAuditLog);
-  readonly cashOperators = signal<CashOperatorRecord[]>(initialAudiomaxState.cashOperators);
-  readonly employeeLeaves = signal<EmployeeLeaveRecord[]>(initialAudiomaxState.employeeLeaves);
-  readonly employeeAttendanceRecords = signal<EmployeeAttendanceRecord[]>(initialAudiomaxState.employeeAttendanceRecords);
-  readonly cashProducts = signal<CashRegisterProductRecord[]>(initialAudiomaxState.cashProducts);
-  readonly cashTransactions = signal<CashTransactionRecord[]>(initialAudiomaxState.cashTransactions);
-  readonly cashShifts = signal<CashShiftRecord[]>(initialAudiomaxState.cashShifts);
-  readonly cashFiscalSettings = signal<CashFiscalSettings>(initialAudiomaxState.cashFiscalSettings);
-  readonly serviceTickets = signal<ServiceTicketRecord[]>(initialAudiomaxState.serviceTickets);
+  readonly expenseAuditLog = signal<ExpenseAuditRecord[]>(this.bootState.expenseAuditLog);
+  readonly cashOperators = signal<CashOperatorRecord[]>(this.bootState.cashOperators);
+  readonly employeeLeaves = signal<EmployeeLeaveRecord[]>(this.bootState.employeeLeaves);
+  readonly employeeAttendanceRecords = signal<EmployeeAttendanceRecord[]>(this.bootState.employeeAttendanceRecords);
+  readonly cashProducts = signal<CashRegisterProductRecord[]>(this.bootState.cashProducts);
+  readonly cashTransactions = signal<CashTransactionRecord[]>(this.bootState.cashTransactions);
+  readonly cashShifts = signal<CashShiftRecord[]>(this.bootState.cashShifts);
+  readonly cashFiscalSettings = signal<CashFiscalSettings>(this.bootState.cashFiscalSettings);
+  readonly serviceTickets = signal<ServiceTicketRecord[]>(this.bootState.serviceTickets);
   /**
    * Flag che diventa vero solo dopo che loadRemoteState() ha terminato
    * tutti i merge con il server. Serve a proteggere da race-condition tra
@@ -373,17 +431,17 @@ export class AudiomaxDataService {
    */
   readonly isRemoteLoaded = signal(false);
   // ===== NUOVI Task 1: negozio chiusure settimanali, aperture straordinarie, chiusure collettive =====
-  readonly storeClosingDaysWeekly = signal<Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>>(initialAudiomaxState.storeClosingDaysWeekly);
-  readonly storeExtraOpeningDates = signal<Array<{ id: string; date: string; note?: string }>>(initialAudiomaxState.storeExtraOpeningDates);
-  readonly storeBulkClosures = signal<Array<{ id: string; startDate: string; endDate: string; reason: string }>>(initialAudiomaxState.storeBulkClosures);
+  readonly storeClosingDaysWeekly = signal<Record<'lun' | 'mar' | 'mer' | 'gio' | 'ven' | 'sab' | 'dom', boolean>>(this.bootState.storeClosingDaysWeekly);
+  readonly storeExtraOpeningDates = signal<Array<{ id: string; date: string; note?: string }>>(this.bootState.storeExtraOpeningDates);
+  readonly storeBulkClosures = signal<Array<{ id: string; startDate: string; endDate: string; reason: string }>>(this.bootState.storeBulkClosures);
   // ===== Portale Dipendenti v1: nuove collection =====
-  readonly warehouseDdts = signal<WarehouseDdtRecord[]>(initialAudiomaxState.warehouseDdts);
-  readonly pendingServices = signal<PendingServiceRecord[]>(initialAudiomaxState.pendingServices);
-  readonly warehouseOrders = signal<WarehouseOrderRecord[]>(initialAudiomaxState.warehouseOrders);
+  readonly warehouseDdts = signal<WarehouseDdtRecord[]>(this.bootState.warehouseDdts);
+  readonly pendingServices = signal<PendingServiceRecord[]>(this.bootState.pendingServices);
+  readonly warehouseOrders = signal<WarehouseOrderRecord[]>(this.bootState.warehouseOrders);
   // ===== Portale Dipendenti v2: comunicazioni dal titolare ai tecnici =====
-  readonly portalCommunications = signal<PortalCommunicationRecord[]>(initialAudiomaxState.portalCommunications);
+  readonly portalCommunications = signal<PortalCommunicationRecord[]>(this.bootState.portalCommunications);
   // ===== Impostazioni Portale Dipendenti (configurabili dal CRM) =====
-  readonly portalSettings = signal<PortalSettings>(initialAudiomaxState.portalSettings);
+  readonly portalSettings = signal<PortalSettings>(this.bootState.portalSettings);
 
   /** Aggiorna le impostazioni del portale dipendenti */
   updatePortalSettings(patch: Partial<PortalSettings>): void {
@@ -3224,7 +3282,7 @@ export class AudiomaxDataService {
       this.restoreCollectionState(this.inventoryItems, parsedState.inventoryItems);
       this.restoreCollectionState(this.serviceCategories, parsedState.serviceCategories);
       this.restoreValueState(this.companyProfile, parsedState.companyProfile);
-      this.companyProfile.update((current) => ({ ...initialAudiomaxState.companyProfile, ...current }));
+      this.companyProfile.update((current) => ({ ...this.bootState.companyProfile, ...current }));
       this.restoreCollectionState(this.warehouseLots, parsedState.warehouseLots);
       this.restoreCollectionState(this.warehouseMovements, parsedState.warehouseMovements);
       this.restoreCollectionState(this.warehousePositions, parsedState.warehousePositions);
@@ -3265,7 +3323,7 @@ export class AudiomaxDataService {
       this.restoreCollectionState(this.cashTransactions, parsedState.cashTransactions);
       this.restoreCollectionState(this.cashShifts, parsedState.cashShifts);
       this.restoreValueState(this.cashFiscalSettings, parsedState.cashFiscalSettings);
-      this.cashFiscalSettings.update((current) => ({ ...initialAudiomaxState.cashFiscalSettings, ...current }));
+      this.cashFiscalSettings.update((current) => ({ ...this.bootState.cashFiscalSettings, ...current }));
       this.restoreCollectionState(this.serviceTickets, parsedState.serviceTickets);
       // ===== Portale Dipendenti v1 =====
       this.restoreCollectionState(this.warehouseDdts, parsedState.warehouseDdts);
@@ -3286,14 +3344,14 @@ export class AudiomaxDataService {
       // ===== Impostazioni Portale Dipendenti (con fallback ai default per retrocompatibilità) =====
       this.restoreValueState(this.portalSettings, parsedState.portalSettings);
       this.portalSettings.update((current) => ({
-        ...initialAudiomaxState.portalSettings,
+        ...this.bootState.portalSettings,
         ...(current ?? ({} as PortalSettings)),
       }));
       // ===== NUOVI Task 1: ripristina impostazioni negozio + fallback defaults per retrocompatibilità =====
       this.restoreCollectionState(this.storeExtraOpeningDates, parsedState.storeExtraOpeningDates);
       this.restoreCollectionState(this.storeBulkClosures, parsedState.storeBulkClosures);
       this.restoreValueState(this.storeClosingDaysWeekly, parsedState.storeClosingDaysWeekly);
-      this.storeClosingDaysWeekly.update((current) => ({ ...initialAudiomaxState.storeClosingDaysWeekly, ...(current ?? ({} as any)) }));
+      this.storeClosingDaysWeekly.update((current) => ({ ...this.bootState.storeClosingDaysWeekly, ...(current ?? ({} as any)) }));
       this.migrateLegacyWarehouseCablingState();
       this.lastPersistedState = rawState;
     } catch {
@@ -3308,6 +3366,12 @@ export class AudiomaxDataService {
    * In produzione (Vercel) questo flag è falso e vengono usati solo i dati locali.
    */
   private get isLanSyncEnabled(): boolean {
+    // Lo stato LAN è unico e condiviso tra i dispositivi: se un'azienda cliente
+    // lo usasse riceverebbe i dati dell'ambiente principale. Resta quindi attivo
+    // solo per il super admin e per il portale dipendente (accesso senza sessione).
+    if (this.isClientTenant) {
+      return false;
+    }
     const host = location.hostname;
     return (
       host === 'localhost' ||
@@ -3598,6 +3662,14 @@ export class AudiomaxDataService {
 
     this.supabase.connectionState.set('syncing');
 
+    // Isolamento multi-azienda: le aziende "normali" vedono solo le proprie righe.
+    // Il super admin mantiene il comportamento storico (nessun filtro) per non
+    // dipendere dalla presenza della colonna tenant_id prima della migrazione.
+    const tenantId = this.auth.tenantId();
+    const scopeByTenant = !!tenantId && tenantId !== SUPER_ADMIN_TENANT_ID;
+    const scope = <T>(query: T): T =>
+      scopeByTenant ? (query as unknown as { eq: (c: string, v: string) => T }).eq('tenant_id', tenantId!) : query;
+
     const [
       clientsResult,
       quotesResult,
@@ -3612,66 +3684,66 @@ export class AudiomaxDataService {
       warehouseOrdersResult,
     ] =
       await Promise.all([
-        client
+        scope(client
           .from(supabaseConfig.tables.clients)
           .select(
             'id, name, phone, email, city, address, segment, preferred_contact, notes, favorite_brands, last_contact, status, privacy_profile',
           )
-          .order('last_contact', { ascending: false }),
-        client
+          .order('last_contact', { ascending: false })),
+        scope(client
           .from(supabaseConfig.tables.quotes)
           .select('id, customer_name, project_type, value, stage, due_date')
-          .order('due_date', { ascending: true }),
-        client
+          .order('due_date', { ascending: true })),
+        scope(client
           .from(supabaseConfig.tables.appointments)
           .select(
             'id, title, customer_name, appointment_type, location_type, scheduled_at, duration_minutes, technician, linked_quote_id, status',
           )
-          .order('scheduled_at', { ascending: true }),
-        client
+          .order('scheduled_at', { ascending: true })),
+        scope(client
           .from(supabaseConfig.tables.inventoryItems)
           .select('id, sku, name, category, stock, min_stock, unit_cost, supplier, location, status')
-          .order('name', { ascending: true }),
-        client
+          .order('name', { ascending: true })),
+        scope(client
           .from(supabaseConfig.tables.cashProducts)
           .select('id, name, category, price, shortcut, pricing_mode, linked_inventory_item_id')
-          .order('name', { ascending: true }),
-        client
+          .order('name', { ascending: true })),
+        scope(client
           .from(supabaseConfig.tables.cashTransactions)
           .select(
             'id, reference, client_id, customer_name, payment_method, status, created_at, notes, received_amount, total, change_amount, lines',
           )
-          .order('created_at', { ascending: false }),
-        client
+          .order('created_at', { ascending: false })),
+        scope(client
           .from(supabaseConfig.tables.cashShifts)
           .select(
             'id, label, opened_at, closed_at, transactions_count, paid_total, suspended_total, by_method',
           )
-          .order('closed_at', { ascending: false }),
-        client
+          .order('closed_at', { ascending: false })),
+        scope(client
           .from(supabaseConfig.tables.serviceTickets)
           .select(
             'id, title, customer_name, service_type, location_type, priority, status, technician, linked_quote_id, linked_appointment_id, material_summary, material_cost, material_lines, work_summary, resolution_status, closed_at, created_at',
           )
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false })),
         // ===== Portale Dipendenti v1 =====
         this.isRemoteTableEnabled('warehouseDdts')
-          ? client
+          ? scope(client
             .from(supabaseConfig.tables.warehouseDdts)
             .select('*')
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: false }))
           : Promise.resolve({ data: [], error: null }),
         this.isRemoteTableEnabled('pendingServices')
-          ? client
+          ? scope(client
             .from(supabaseConfig.tables.pendingServices)
             .select('*')
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: false }))
           : Promise.resolve({ data: [], error: null }),
         this.isRemoteTableEnabled('warehouseOrders')
-          ? client
+          ? scope(client
             .from(supabaseConfig.tables.warehouseOrders)
             .select('*')
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: false }))
           : Promise.resolve({ data: [], error: null }),
       ]);
 
@@ -3745,7 +3817,11 @@ export class AudiomaxDataService {
       !remoteCashShifts.length &&
       !remoteServiceTickets.length
     ) {
-      await this.seedRemoteTables();
+      // Il seed dei dati dimostrativi va eseguito solo per il super admin
+      // (e per l'ambiente senza sessione): le aziende clienti restano vuote.
+      if (!this.isClientTenant) {
+        await this.seedRemoteTables();
+      }
       this.isRemoteLoaded.set(true);
       return;
     }
@@ -4025,59 +4101,65 @@ export class AudiomaxDataService {
 
     this.supabase.connectionState.set('syncing');
 
+    // Marca le righe con l'azienda di appartenenza: necessario solo per le
+    // aziende "normali" (il super admin resta senza filtro per retrocompatibilità).
+    const tenantId = this.auth.tenantId();
+    const tag = <T extends object>(row: T): T =>
+      tenantId && tenantId !== SUPER_ADMIN_TENANT_ID ? ({ ...row, tenant_id: tenantId } as T) : row;
+
     const result =
       kind === 'client'
         ? await client
           .from(supabaseConfig.tables.clients)
-          .upsert(this.toClientRow(payload as ClientRecord))
+          .upsert(tag(this.toClientRow(payload as ClientRecord)))
         : kind === 'quote'
           ? await client
             .from(supabaseConfig.tables.quotes)
-            .upsert(this.toQuoteRow(payload as QuoteRecord))
+            .upsert(tag(this.toQuoteRow(payload as QuoteRecord)))
           : kind === 'inventory'
             ? await client
               .from(supabaseConfig.tables.inventoryItems)
-              .upsert(this.toInventoryItemRow(payload as InventoryItemRecord))
+              .upsert(tag(this.toInventoryItemRow(payload as InventoryItemRecord)))
             : kind === 'cash-product'
               ? await client
                 .from(supabaseConfig.tables.cashProducts)
-                .upsert(this.toCashProductRow(payload as CashRegisterProductRecord))
+                .upsert(tag(this.toCashProductRow(payload as CashRegisterProductRecord)))
               : kind === 'cash-transaction'
                 ? await client
                   .from(supabaseConfig.tables.cashTransactions)
-                  .upsert(this.toCashTransactionRow(payload as CashTransactionRecord))
+                  .upsert(tag(this.toCashTransactionRow(payload as CashTransactionRecord)))
                 : kind === 'cash-shift'
                   ? await client
                     .from(supabaseConfig.tables.cashShifts)
-                    .upsert(this.toCashShiftRow(payload as CashShiftRecord))
+                    .upsert(tag(this.toCashShiftRow(payload as CashShiftRecord)))
                   : kind === 'appointment'
                     ? await client
                       .from(supabaseConfig.tables.appointments)
-                      .upsert(this.toAppointmentRow(payload as AppointmentRecord))
+                      .upsert(tag(this.toAppointmentRow(payload as AppointmentRecord)))
                     : kind === 'ticket'
                       ? await client
                         .from(supabaseConfig.tables.serviceTickets)
-                        .upsert(this.toServiceTicketRow(payload as ServiceTicketRecord))
+                        .upsert(tag(this.toServiceTicketRow(payload as ServiceTicketRecord)))
                       : kind === 'warehouse-ddt'
                         ? await client
                           .from(supabaseConfig.tables.warehouseDdts)
-                          .upsert(this.toWarehouseDdtRow(payload as WarehouseDdtRecord))
+                          .upsert(tag(this.toWarehouseDdtRow(payload as WarehouseDdtRecord)))
                         : kind === 'pending-service'
                           ? await client
                             .from(supabaseConfig.tables.pendingServices)
-                            .upsert(this.toPendingServiceRow(payload as PendingServiceRecord))
+                            .upsert(tag(this.toPendingServiceRow(payload as PendingServiceRecord)))
                           : kind === 'warehouse-order'
                             ? await client
                               .from(supabaseConfig.tables.warehouseOrders)
-                              .upsert(this.toWarehouseOrderRow(payload as WarehouseOrderRecord))
+                              .upsert(tag(this.toWarehouseOrderRow(payload as WarehouseOrderRecord)))
                             : kind === 'cash-operator'
                               ? await client
                                 .from(supabaseConfig.tables.cashOperators)
-                                .upsert(this.toCashOperatorRow(payload as CashOperatorRecord))
+                                .upsert(tag(this.toCashOperatorRow(payload as CashOperatorRecord)))
                               : // portal-communication
                               await client
                                 .from(supabaseConfig.tables.portalCommunications)
-                                .upsert(this.toPortalCommunicationRow(payload as PortalCommunicationRecord));
+                                .upsert(tag(this.toPortalCommunicationRow(payload as PortalCommunicationRecord)));
 
     if (result.error) {
       this.supabase.connectionState.set(

@@ -1,0 +1,214 @@
+<div class="auth-shell">
+  <!-- Pannello identità: marchio e funzionalità -->
+  <section class="auth-brand-pane" aria-label="Audiomax CRM">
+    <div class="auth-brand-head">
+      <span class="auth-brand-mark">AM</span>
+      <div class="auth-brand-copy">
+        <strong>Audiomax CRM</strong>
+        <small>Gestionale audio professionale</small>
+      </div>
+    </div>
+
+    <div class="auth-brand-body">
+      <h1>Un unico gestionale per tutta l'azienda.</h1>
+      <p>
+        Contatti, preventivi, agenda tecnica, cassa, magazzino e portale dipendenti
+        in un ambiente dedicato alla tua azienda.
+      </p>
+
+      <ul class="auth-feature-list">
+        @for (feature of features; track feature.title) {
+        <li class="auth-feature">
+          <span class="auth-feature-icon" aria-hidden="true">{{ feature.icon }}</span>
+          <span class="auth-feature-text">
+            <strong>{{ feature.title }}</strong>
+            <small>{{ feature.detail }}</small>
+          </span>
+        </li>
+        }
+      </ul>
+    </div>
+
+    <div class="auth-brand-foot">
+      <span class="auth-brand-chip">Dati separati per azienda</span>
+      <span class="auth-brand-chip auth-brand-chip-muted">Accesso sicuro con password cifrata</span>
+    </div>
+  </section>
+
+  <!-- Pannello form -->
+  <section class="auth-form-pane" aria-label="Accesso">
+    <button class="auth-theme-btn" type="button" (click)="toggleTheme()"
+      [attr.aria-label]="currentTheme() === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'">
+      @if (currentTheme() === 'dark') {
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5" />
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+      </svg>
+      } @else {
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+      </svg>
+      }
+    </button>
+
+    <div class="auth-card">
+      <div class="auth-mobile-brand">
+        <span class="auth-brand-mark">AM</span>
+        <strong>Audiomax CRM</strong>
+      </div>
+
+      <div class="auth-switch" role="tablist" aria-label="Modalità di accesso">
+        <button type="button" role="tab" class="auth-switch-btn" [class.active]="mode() === 'login'"
+          [attr.aria-selected]="mode() === 'login'" (click)="setMode('login')">
+          Accedi
+        </button>
+        <button type="button" role="tab" class="auth-switch-btn" [class.active]="mode() === 'register'"
+          [attr.aria-selected]="mode() === 'register'" (click)="setMode('register')">
+          Registrati
+        </button>
+      </div>
+
+      @if (backendMissing()) {
+      <div class="auth-banner auth-banner-warning" role="status">
+        <strong>Database account non inizializzato.</strong>
+        <span>
+          Esegui lo script <code>supabase/audiomax_multi_tenant.sql</code> su Supabase per attivare
+          registrazione e login. Nel frattempo puoi continuare a usare il gestionale in locale.
+        </span>
+        <button type="button" class="btn-ghost btn-tiny" (click)="enterWithoutAccountDatabase()">
+          Continua senza account →
+        </button>
+      </div>
+      }
+
+      @if (errorMessage()) {
+      <div class="auth-banner auth-banner-error" role="alert">
+        <strong>Operazione non riuscita</strong>
+        <span>{{ errorMessage() }}</span>
+      </div>
+      }
+
+      @if (successMessage()) {
+      <div class="auth-banner auth-banner-success" role="status">
+        <span>{{ successMessage() }}</span>
+      </div>
+      }
+
+      <!-- ─────────── LOGIN ─────────── -->
+      @if (mode() === 'login') {
+      <form class="auth-form" (submit)="$event.preventDefault(); submitLogin()">
+        <div class="auth-heading">
+          <h2>Bentornato</h2>
+          <p>Inserisci le credenziali della tua azienda.</p>
+        </div>
+
+        <label class="auth-field">
+          <span>Email di riferimento</span>
+          <input type="email" autocomplete="username" placeholder="nome@azienda.it" [value]="loginEmail()"
+            (input)="loginEmail.set($any($event.target).value)" required>
+        </label>
+
+        <label class="auth-field">
+          <span>Password</span>
+          <div class="auth-input-group">
+            <input [type]="loginPasswordVisible() ? 'text' : 'password'" autocomplete="current-password"
+              placeholder="La tua password" [value]="loginPassword()"
+              (input)="loginPassword.set($any($event.target).value)" required>
+            <button type="button" class="auth-eye" (click)="toggleLoginPassword()"
+              [attr.aria-label]="loginPasswordVisible() ? 'Nascondi password' : 'Mostra password'">
+              {{ loginPasswordVisible() ? 'Nascondi' : 'Mostra' }}
+            </button>
+          </div>
+        </label>
+
+        <button type="submit" class="auth-submit" [disabled]="submitting()">
+          @if (submitting()) { Accesso in corso… } @else { Accedi al gestionale }
+        </button>
+
+        <p class="auth-foot-note">
+          Non hai ancora un account?
+          <button type="button" class="auth-link" (click)="setMode('register')">Registra la tua azienda</button>
+        </p>
+      </form>
+      }
+
+      <!-- ─────────── REGISTRAZIONE ─────────── -->
+      @if (mode() === 'register') {
+      <form class="auth-form" (submit)="$event.preventDefault(); submitRegister()">
+        <div class="auth-heading">
+          <h2>Crea il tuo spazio di lavoro</h2>
+          <p>Nessuna verifica email: l'account è attivo subito, con il gestionale vuoto e pronto all'uso.</p>
+        </div>
+
+        <label class="auth-field">
+          <span>Nome azienda</span>
+          <input type="text" autocomplete="organization" placeholder="Es. Audiomax S.r.l."
+            [value]="companyName()" (input)="companyName.set($any($event.target).value)" required>
+        </label>
+
+        <label class="auth-field">
+          <span>Email di riferimento</span>
+          <input type="email" autocomplete="email" placeholder="nome@azienda.it" [value]="registerEmail()"
+            (input)="registerEmail.set($any($event.target).value)" required>
+        </label>
+
+        <div class="auth-field-row">
+          <label class="auth-field">
+            <span>Password</span>
+            <div class="auth-input-group">
+              <input [type]="registerPasswordVisible() ? 'text' : 'password'" autocomplete="new-password"
+                placeholder="Minimo 8 caratteri" [value]="registerPassword()"
+                (input)="registerPassword.set($any($event.target).value)" required>
+              <button type="button" class="auth-eye" (click)="toggleRegisterPassword()"
+                [attr.aria-label]="registerPasswordVisible() ? 'Nascondi password' : 'Mostra password'">
+                {{ registerPasswordVisible() ? 'Nascondi' : 'Mostra' }}
+              </button>
+            </div>
+          </label>
+
+          <label class="auth-field">
+            <span>Conferma password</span>
+            <input type="password" autocomplete="new-password" placeholder="Ripeti la password"
+              [value]="confirmPassword()" (input)="confirmPassword.set($any($event.target).value)" required>
+          </label>
+        </div>
+
+        <div class="auth-inline-status">
+          <span class="auth-strength" [attr.data-level]="passwordStrength().level">
+            Robustezza: <strong>{{ passwordStrength().label }}</strong>
+          </span>
+          @if (confirmPassword().length) {
+          <span class="auth-match" [class.ok]="passwordsMatch()">
+            {{ passwordsMatch() ? 'Le password coincidono' : 'Le password non coincidono' }}
+          </span>
+          }
+        </div>
+
+        <div class="auth-captcha">
+          <div class="auth-captcha-copy">
+            <span class="auth-captcha-label">Verifica anti-bot</span>
+            <p>Riscrivi il codice a 4 cifre mostrato qui accanto.</p>
+          </div>
+          <div class="auth-captcha-code" aria-live="polite">
+            <span>{{ humanCode() }}</span>
+            <button type="button" class="auth-captcha-refresh" (click)="regenerateHumanCode()"
+              aria-label="Genera un nuovo codice">↻</button>
+          </div>
+          <input class="auth-captcha-input" type="text" inputmode="numeric" maxlength="4" autocomplete="off"
+            placeholder="____" [value]="humanInput()" (input)="humanInput.set($any($event.target).value)"
+            aria-label="Inserisci il codice di verifica" required>
+        </div>
+
+        <button type="submit" class="auth-submit" [disabled]="submitting()">
+          @if (submitting()) { Creazione account… } @else { Crea account e accedi }
+        </button>
+
+        <p class="auth-foot-note">
+          Hai già un account?
+          <button type="button" class="auth-link" (click)="setMode('login')">Torna al login</button>
+        </p>
+      </form>
+      }
+    </div>
+  </section>
+</div>

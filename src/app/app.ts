@@ -3,7 +3,9 @@ import { ActivatedRoute, NavigationEnd, Router, RouterLink, RouterLinkActive, Ro
 import { filter } from 'rxjs';
 
 import { AudiomaxDataService } from './audiomax-data.service';
+import { AuthService } from './auth.service';
 import { BrowserStorageService } from './browser-storage.service';
+import { CompanyProfileRecord } from './crm-runtime-data';
 import { crmSections } from './crm-sections';
 import { SupabaseService } from './supabase.service';
 import { ThemeService } from './theme.service';
@@ -17,6 +19,7 @@ import { ThemeService } from './theme.service';
 })
 export class App {
   private readonly data = inject(AudiomaxDataService);
+  private readonly auth = inject(AuthService);
   private readonly storage = inject(BrowserStorageService);
   private readonly supabase = inject(SupabaseService);
   private readonly themeService = inject(ThemeService);
@@ -108,6 +111,41 @@ export class App {
   protected readonly connectionState = this.supabase.connectionState;
   protected readonly currentTheme = this.themeService.theme;
 
+  // ===== Sessione attiva: azienda, ruolo e uscita =====
+  protected readonly companyName = this.auth.companyName;
+  protected readonly accountEmail = this.auth.accountEmail;
+  protected readonly roleLabel = this.auth.roleLabel;
+  protected readonly isSuperAdmin = this.auth.isSuperAdmin;
+
+  // ========================================================================
+  // ONBOARDING PRIMO ACCESSO · dati azienda
+  // ========================================================================
+  /** Profilo azienda (anagrafica usata anche per la fatturazione). */
+  protected readonly companyProfile = this.data.companyProfile;
+  /** Chiave di persistenza dell'onboarding, isolata per azienda (tenant). */
+  private readonly onboardingStorageKey = 'audiomax-onboarding-dismissed';
+  private readonly onboardingKey = computed(() => {
+    const tenant = this.auth.tenantId();
+    return tenant ? `${this.onboardingStorageKey}:${tenant}` : this.onboardingStorageKey;
+  });
+  /** True se l'utente ha scelto "Inserisci successivamente" per questa azienda. */
+  protected readonly onboardingDismissed = signal(
+    this.storage.getItem(this.onboardingKey()) === '1',
+  );
+  protected readonly onboardingFeedback = signal('');
+  /**
+   * Mostra il pop-up dei dati aziendali al primo accesso di un'azienda cliente
+   * (non super admin) finché la ragione sociale non è stata inserita.
+   */
+  protected readonly showCompanyOnboarding = computed(
+    () =>
+      !this.hideCrmShell() &&
+      this.auth.isAuthenticated() &&
+      !this.auth.isSuperAdmin() &&
+      !this.onboardingDismissed() &&
+      !this.companyProfile().legalName.trim(),
+  );
+
   protected readonly globalSearchOpen = signal(false);
   protected readonly globalSearchQuery = signal('');
   protected readonly globalSearchSelectedIndex = signal(0);
@@ -146,6 +184,52 @@ export class App {
         }
         this.hideCrmShell.set(standalone);
       });
+
+    // Verifica in background che l'account collegato sia ancora attivo:
+    // se il super admin lo ha sospeso o eliminato, la sessione viene chiusa.
+    if (this.auth.isAuthenticated()) {
+      void this.auth.refreshCurrentAccount().then((valid) => {
+        if (!valid) {
+          void this.router.navigateByUrl('/login');
+        }
+      });
+    }
+  }
+
+  /** Chiude la sessione e riporta alla pagina di accesso. */
+  protected logout(): void {
+    this.auth.logout();
+    window.location.assign('/login');
+  }
+
+  /** Aggiorna un campo testuale del profilo azienda dal pop-up di onboarding. */
+  protected updateOnboardingField(field: keyof CompanyProfileRecord, event: Event): void {
+    const target = event.target as HTMLInputElement | HTMLTextAreaElement | null;
+    if (!target) return;
+    this.data.updateCompanyProfile({ [field]: target.value });
+  }
+
+  /** Salva i dati aziendali inseriti nel pop-up di primo accesso. */
+  protected saveCompanyOnboarding(): void {
+    if (!this.companyProfile().legalName.trim()) {
+      this.onboardingFeedback.set('Inserisci almeno la ragione sociale per salvare i dati aziendali.');
+      return;
+    }
+    this.onboardingFeedback.set('');
+    this.dismissCompanyOnboarding();
+  }
+
+  /** Rimanda la compilazione: porta l'utente in Impostazioni → Dati Azienda. */
+  protected skipCompanyOnboarding(): void {
+    this.dismissCompanyOnboarding();
+    this.storage.setItem('audiomax_settings_last_tab', 'azienda');
+    void this.router.navigateByUrl('/impostazioni');
+  }
+
+  /** Memorizza la scelta dell'utente per non riproporre il pop-up. */
+  private dismissCompanyOnboarding(): void {
+    this.storage.setItem(this.onboardingKey(), '1');
+    this.onboardingDismissed.set(true);
   }
 
   protected toggleTheme(): void {

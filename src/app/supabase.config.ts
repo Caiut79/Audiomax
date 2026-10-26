@@ -2,6 +2,8 @@ export const supabaseConfig = {
   url: 'https://xcwzjjxzazoummpezrdx.supabase.co',
   publishableKey: 'sb_publishable_ZqHEyRxNUSCJg5WpPNKoCw_Ja7MmyAF',
   tables: {
+    // ===== Account e licenze (multi-azienda) =====
+    accounts: 'app_accounts',
     clients: 'crm_clients',
     quotes: 'crm_quotes',
     appointments: 'crm_appointments',

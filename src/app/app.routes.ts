@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 
+import { authGuard, guestGuard } from './auth.guard';
 import { crmSections } from './crm-sections';
 
 export const routes: Routes = [
@@ -8,11 +9,23 @@ export const routes: Routes = [
     pathMatch: 'full',
     redirectTo: 'dashboard',
   },
+  // ✅ Pagina di accesso: fuori dalla shell CRM (standalonePortal) e senza guardia.
+  {
+    path: 'login',
+    loadComponent: () =>
+      import('./login-page').then((module) => module.LoginPageComponent),
+    title: 'Audiomax CRM | Accesso',
+    canActivate: [guestGuard],
+    data: {
+      standalonePortal: true,
+    },
+  },
   {
     path: 'dashboard',
     loadComponent: () =>
       import('./dashboard-page').then((module) => module.DashboardPageComponent),
     title: 'Audiomax CRM | Dashboard',
+    canActivate: [authGuard],
   },
   {
     path: 'privacy-consent/:clientId',
@@ -41,6 +54,7 @@ export const routes: Routes = [
       loadComponent: () =>
         import('./section-page').then((module) => module.SectionPageComponent),
       title: `Audiomax CRM | ${section.label}`,
+      canActivate: [authGuard],
       data: {
         sectionId: section.id,
         standalonePortal: false,

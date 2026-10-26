@@ -6582,6 +6582,20 @@
   }
 }
 
+/* Variante "avviso" del detail-note: regime fiscale in evidenza. */
+.detail-note-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+
+  span {
+    color: var(--warning);
+  }
+
+  p {
+    color: var(--text-secondary);
+  }
+}
+
 .detail-related {
   display: grid;
   gap: 0.55rem;
@@ -17959,6 +17973,64 @@ h2.op-card-title {
   }
 }
 
+/* Barra azioni delle schede Impostazioni: salvataggio esplicito con annulla. */
+.settings-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-subtle);
+
+  .settings-form-status {
+    margin-right: auto;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-soft);
+
+    &.is-dirty {
+      color: var(--warning);
+    }
+  }
+
+  .btn-primary,
+  .btn-ghost {
+    min-height: var(--control-h-md, 2.5rem);
+    padding: 0 1.1rem;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    font-weight: 750;
+    justify-content: center;
+  }
+
+  .btn-primary:disabled,
+  .btn-ghost:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-form-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+
+    .settings-form-status {
+      margin-right: 0;
+      text-align: center;
+      order: 3;
+    }
+
+    .btn-primary,
+    .btn-ghost {
+      width: 100%;
+    }
+  }
+}
+
 @keyframes settingsFadeIn {
   from {
     opacity: 0;
@@ -24125,6 +24197,145 @@ h2.op-card-title {
       .ep-quick-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
       }
+    }
+  }
+}
+
+/* ─── Super admin · Gestione Profili azienda ─── */
+.account-feedback {
+  margin: 0 0 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius-md);
+  font-size: 0.84rem;
+  font-weight: 600;
+
+  &-error {
+    color: var(--danger, #b91c1c);
+    border: 1px solid var(--danger-border);
+    background: var(--danger-bg);
+  }
+
+  &-success {
+    color: var(--success, #15803d);
+    border: 1px solid var(--success-border);
+    background: var(--success-bg);
+  }
+}
+
+.account-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.85rem;
+
+  .account-search {
+    flex: 1 1 16rem;
+    min-width: 12rem;
+
+    input {
+      width: 100%;
+      min-height: 2.3rem;
+      padding: 0.4rem 0.7rem;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-1);
+      color: var(--text-primary);
+    }
+  }
+}
+
+.account-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.account-card {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-card);
+
+  &-suspended {
+    border-color: var(--warning-border);
+    background: var(--warning-bg);
+  }
+
+  &-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  &-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+  }
+
+  &-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.45rem;
+  }
+}
+
+.account-identity {
+  display: grid;
+  gap: 0.12rem;
+
+  strong {
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  span {
+    font-size: 0.78rem;
+  }
+}
+
+.account-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.account-license-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+
+  label {
+    display: grid;
+    gap: 0.2rem;
+    flex: 1 1 11rem;
+    min-width: 9rem;
+
+    span {
+      color: var(--text-soft);
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    input {
+      min-height: 2.2rem;
+      padding: 0.35rem 0.6rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-2);
+      color: var(--text-primary);
     }
   }
 }

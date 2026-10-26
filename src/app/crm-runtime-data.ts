@@ -594,6 +594,14 @@ export interface EmployeeAttendanceRecord {
   manualOverride: boolean;
 }
 
+/**
+ * Regime fiscale aziendale.
+ * - 'ordinario':   IVA applicata normalmente su tutto (vendite e acquisti);
+ * - 'forfettario': IVA a zero su tutte le vendite (servizi/beni emessi),
+ *                  mentre resta gestita normalmente sugli acquisti.
+ */
+export type FiscalRegime = 'ordinario' | 'forfettario';
+
 export interface CompanyProfileRecord {
   legalName: string;
   vatNumber: string;
@@ -611,6 +619,10 @@ export interface CompanyProfileRecord {
   iban: string;
   invoiceFooterNote: string;
   invoiceTransmission: InvoiceTransmissionSettings;
+  /** Regime fiscale adottato dall'azienda (pilota l'IVA sulle vendite). */
+  fiscalRegime: FiscalRegime;
+  /** Aliquota IVA predefinita per le nuove righe di vendita (ignorata se il regime è esente). */
+  defaultVatRate: number;
   logoUrl?: string | null;
   letterheadFont?: string;
   letterheadColor?: string;
@@ -1009,6 +1021,9 @@ export const initialAudiomaxState: AudiomaxState = {
       taxRegime: 'RF01',
       issuingCountryCode: 'IT',
     },
+    // Regime ordinario + IVA 22% come default Italia.
+    fiscalRegime: 'ordinario',
+    defaultVatRate: 22,
     letterheadFont: 'Inter, sans-serif',
     letterheadColor: '#182233',
   },
@@ -1992,3 +2007,64 @@ export const initialAudiomaxState: AudiomaxState = {
   storeExtraOpeningDates: [],
   storeBulkClosures: [],
 };
+
+/**
+ * Stato iniziale per una nuova azienda: nessun dato di prova.
+ *
+ * Regola: svuotiamo tutte le anagrafiche e le registrazioni, mentre restano i
+ * valori di configurazione necessari al funzionamento delle sezioni
+ * (impostazioni fiscali, categorie di spesa, metodi di pagamento, categorie servizi).
+ * L'azienda nuova trova quindi il gestionale vuoto ma già utilizzabile.
+ */
+export function createEmptyAudiomaxState(): AudiomaxState {
+  return {
+    ...initialAudiomaxState,
+    // ── Anagrafiche e registrazioni: nessun dato ──
+    clients: [],
+    quotes: [],
+    appointments: [],
+    inventoryItems: [],
+    warehouseLots: [],
+    warehouseMovements: [],
+    warehousePositions: [],
+    warehousePurchases: [],
+    warehouseAdjustments: [],
+    warehouseAuditLog: [],
+    expenseRecords: [],
+    expenseInstallments: [],
+    expenseNotifications: [],
+    expenseAuditLog: [],
+    cashOperators: [],
+    employeeLeaves: [],
+    employeeAttendanceRecords: [],
+    cashProducts: [],
+    cashTransactions: [],
+    cashShifts: [],
+    serviceTickets: [],
+    warehouseDdts: [],
+    pendingServices: [],
+    warehouseOrders: [],
+    portalCommunications: [],
+    expenseSuppliers: [],
+    paymentProviders: [],
+    // ── Anagrafica aziendale: da compilare in Impostazioni ──
+    companyProfile: {
+      ...initialAudiomaxState.companyProfile,
+      legalName: '',
+      vatNumber: '',
+      taxCode: '',
+      address: '',
+      postalCode: '',
+      city: '',
+      province: '',
+      sdiCode: '',
+      pec: '',
+      phone: '',
+      email: '',
+      website: '',
+      iban: '',
+      invoiceFooterNote: '',
+      logoUrl: null,
+    },
+  };
+}

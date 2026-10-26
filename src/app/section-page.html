@@ -469,6 +469,74 @@
         </div>
         }
 
+        <div class="detail-section client-detail-section">
+          <span class="detail-section-title client-detail-section-title">Privacy e consensi</span>
+          <div class="detail-fields client-detail-highlight">
+            <div class="detail-field"><span>Informativa</span><strong>{{
+                client.privacyProfile.noticeAcknowledged ? 'Registrata' : 'Mancante' }}</strong></div>
+            <div class="detail-field"><span>Versione informativa</span><strong>{{
+                client.privacyProfile.noticeVersion }}</strong></div>
+            <div class="detail-field"><span>Base giuridica</span><strong class="capitalize-text">{{
+                client.privacyProfile.lawfulBasis }}</strong></div>
+            <div class="detail-field"><span>Consenso remoto</span><strong class="capitalize-text">{{
+                client.privacyProfile.remoteConsentStatus }}</strong></div>
+            <div class="detail-field"><span>Marketing email</span><strong>{{
+                client.privacyProfile.emailMarketing.granted ? 'Concesso' : 'Non concesso' }}</strong></div>
+            <div class="detail-field"><span>Marketing WhatsApp</span><strong>{{
+                client.privacyProfile.whatsappMarketing.granted ? 'Concesso' : 'Non concesso' }}</strong></div>
+            <div class="detail-field"><span>Profilazione fidelity</span><strong>{{
+                client.privacyProfile.fidelityProfiling.granted ? 'Concesso' : 'Non concesso' }}</strong></div>
+            @if (client.privacyProfile.remoteConsentUrl) {
+            <div class="detail-field"><span>Link consenso</span>
+              <a class="btn-sm" [routerLink]="client.privacyProfile.remoteConsentUrl">Apri</a>
+            </div>
+            }
+          </div>
+
+          @if (client.privacyProfile.dataRetentionNote) {
+          <p class="text-muted client-detail-empty">{{ client.privacyProfile.dataRetentionNote }}</p>
+          }
+
+          <span class="detail-subtitle">Documenti archiviati</span>
+          <div class="record-list compact">
+            @for (entry of selectedClientPrivacyArchive(); track entry.id) {
+            <div class="record-row">
+              <div class="record-info">
+                <strong>{{ entry.title }}</strong>
+                <span class="capitalize-text">{{ entry.type }} · {{ entry.channel }}</span>
+              </div>
+              <div class="record-actions">
+                <span class="badge badge-info">{{ entry.status }}</span>
+                @if (entry.url) {
+                <a class="btn-sm" [routerLink]="entry.url">Apri</a>
+                }
+                <span class="text-muted">{{ entry.createdAt.slice(0, 10) }}</span>
+              </div>
+            </div>
+            } @empty {
+            <p class="text-muted client-detail-empty">Nessun documento privacy archiviato per questo contatto.</p>
+            }
+          </div>
+
+          <span class="detail-subtitle">Registro attività</span>
+          <div class="record-list compact">
+            @for (audit of selectedClientPrivacyAudit(); track audit.id) {
+            <div class="record-row">
+              <div class="record-info">
+                <strong class="capitalize-text">{{ audit.action.replace('-', ' ') }}</strong>
+                <span>{{ audit.detail }}</span>
+              </div>
+              <div class="record-actions">
+                <span class="text-muted">{{ audit.operator }} · {{ audit.createdAt.slice(0, 16).replace('T', ' ')
+                  }}</span>
+              </div>
+            </div>
+            } @empty {
+            <p class="text-muted client-detail-empty">Nessuna attività privacy registrata.</p>
+            }
+          </div>
+        </div>
+
         <div class="detail-section">
           @if (selectedContactDetailKind() === 'azienda') {
           <span class="detail-section-title client-detail-section-title">Storico preventivi</span>
@@ -10242,14 +10310,14 @@
           </div>
         </div>
         <div class="settings-hero-metrics">
-          <span class="module-inline-chip module-inline-chip-accent">{{ SETTINGS_TABS.length }} aree</span>
+          <span class="module-inline-chip module-inline-chip-accent">{{ settingsTabs().length }} aree</span>
           <span class="module-inline-chip">{{ operatorsListVisible().length }} operatori visibili</span>
         </div>
       </div>
     </div>
 
     <nav class="settings-tabs-nav" aria-label="Navigazione impostazioni">
-      @for (t of SETTINGS_TABS; track t.key) {
+      @for (t of settingsTabs(); track t.key) {
       <button type="button" class="settings-tab-btn" [class.active]="activeSettingsTab() === t.key"
         (click)="setActiveSettingsTab(t.key)">
         <span>{{ t.icon }}</span>{{ t.label }}
@@ -10263,15 +10331,116 @@
       @case ('azienda') {
       <div class="op-card">
         <h2 class="op-card-title">🏢 Dati Azienda</h2>
-        <div class="op-form">
-          <label><span>Ragione sociale</span><input type="text" placeholder="Audiomax S.r.l."
-              value="Audiomax S.r.l."></label>
-          <label><span>P.IVA</span><input type="text" placeholder="IT00000000000"></label>
-          <label><span>Sede</span><input type="text" placeholder="Indirizzo sede"></label>
-          <label><span>Telefono</span><input type="text" placeholder="Telefono azienda"></label>
-          <label><span>Email</span><input type="email" placeholder="info@audiomax.it"></label>
-          <label><span>Sito web</span><input type="text" placeholder="www.audiomax.it"></label>
-          <div class="form-actions"><button class="btn-primary">Salva dati</button></div>
+        <p class="text-muted">Anagrafica completa dell'azienda: gli stessi dati vengono utilizzati per la fatturazione
+          elettronica e per l'intestazione dei documenti. Le modifiche restano in sospeso finché non confermi con
+          <strong>Salva modifiche</strong>.</p>
+        <div class="op-form op-form-spaced">
+          <label>
+            <span>Ragione sociale</span>
+            <input type="text" [value]="companyProfileDraft().legalName"
+              (change)="updateCompanyProfileSetting('legalName', $event)" placeholder="Es. Audiomax S.r.l.">
+          </label>
+          <label>
+            <span>Partita IVA</span>
+            <input type="text" [value]="companyProfileDraft().vatNumber"
+              (change)="updateCompanyProfileSetting('vatNumber', $event)" placeholder="Es. IT01234567890">
+          </label>
+          <label>
+            <span>Codice fiscale</span>
+            <input type="text" [value]="companyProfileDraft().taxCode"
+              (change)="updateCompanyProfileSetting('taxCode', $event)" placeholder="Codice fiscale azienda">
+          </label>
+          <label class="wide">
+            <span>Indirizzo sede</span>
+            <input type="text" [value]="companyProfileDraft().address"
+              (change)="updateCompanyProfileSetting('address', $event)" placeholder="Via e numero civico">
+          </label>
+          <label>
+            <span>CAP</span>
+            <input type="text" [value]="companyProfileDraft().postalCode"
+              (change)="updateCompanyProfileSetting('postalCode', $event)" placeholder="Es. 10121">
+          </label>
+          <label>
+            <span>Città</span>
+            <input type="text" [value]="companyProfileDraft().city"
+              (change)="updateCompanyProfileSetting('city', $event)" placeholder="Comune sede">
+          </label>
+          <label>
+            <span>Provincia</span>
+            <input type="text" [value]="companyProfileDraft().province"
+              (change)="updateCompanyProfileSetting('province', $event)" placeholder="Es. TO">
+          </label>
+          <label>
+            <span>Nazione</span>
+            <input type="text" [value]="companyProfileDraft().country"
+              (change)="updateCompanyProfileSetting('country', $event)" placeholder="Italia o IT">
+          </label>
+          <label>
+            <span>Codice SDI</span>
+            <input type="text" [value]="companyProfileDraft().sdiCode"
+              (change)="updateCompanyProfileSetting('sdiCode', $event)" placeholder="Codice SDI emittente">
+          </label>
+          <label>
+            <span>PEC</span>
+            <input type="email" [value]="companyProfileDraft().pec" (change)="updateCompanyProfileSetting('pec', $event)"
+              placeholder="amministrazione@pec.it">
+          </label>
+          <label>
+            <span>Email azienda</span>
+            <input type="email" [value]="companyProfileDraft().email"
+              (change)="updateCompanyProfileSetting('email', $event)" placeholder="Email contabile">
+          </label>
+          <label>
+            <span>Telefono</span>
+            <input type="text" [value]="companyProfileDraft().phone"
+              (change)="updateCompanyProfileSetting('phone', $event)" placeholder="Telefono azienda">
+          </label>
+          <label>
+            <span>Sito web</span>
+            <input type="text" [value]="companyProfileDraft().website"
+              (change)="updateCompanyProfileSetting('website', $event)" placeholder="www.audiomax.it">
+          </label>
+          <label>
+            <span>IBAN</span>
+            <input type="text" [value]="companyProfileDraft().iban" (change)="updateCompanyProfileSetting('iban', $event)"
+              placeholder="IBAN per bonifici">
+          </label>
+        </div>
+
+        <div class="pos-inline-label pos-inline-label-full pos-company-check">
+          <span>Logo azienda</span>
+          <div class="settings-logo-preview-box">
+            @if (companyProfileDraft().logoUrl) {
+            <img class="company-logo-preview" [src]="companyProfileDraft().logoUrl || ''" alt="Logo azienda">
+            }
+            <div class="settings-logo-actions">
+              <label class="btn-sm btn-ghost settings-logo-action">
+                <span>{{ companyProfileDraft().logoUrl ? 'Sostituisci logo' : 'Carica logo' }}</span>
+                <input type="file" accept="image/*" (change)="onCompanyLogoSelected($event)" hidden>
+              </label>
+              @if (companyProfileDraft().logoUrl) {
+              <button type="button" class="btn-sm btn-ghost settings-logo-remove"
+                (click)="removeCompanyLogo()">Rimuovi logo</button>
+              }
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-note">
+          <span>Nota</span>
+          <p>Il regime fiscale e l'IVA predefinita si configurano in <strong>Impostazioni → Preferenze</strong>.</p>
+        </div>
+
+        <div class="settings-form-actions">
+          @if (companyProfileDirty()) {
+          <span class="settings-form-status is-dirty">● Modifiche non salvate</span>
+          } @else {
+          <span class="settings-form-status">Nessuna modifica in sospeso</span>
+          }
+          <button type="button" class="btn-ghost" [disabled]="!companyProfileDirty()"
+            (click)="cancelCompanyProfileEdits()">Annulla</button>
+          <button type="button" class="btn-primary" [disabled]="!companyProfileDirty()"
+            (click)="saveCompanyProfile()">Salva modifiche</button>
         </div>
       </div>
       }
@@ -10688,75 +10857,16 @@
       </div>
 
       <div class="op-card">
-        <h2 class="op-card-title">🏢 Profilo azienda per fattura XML</h2>
-        <p class="text-muted">Questi dati vengono usati per generare la fattura elettronica XML e per l'eventuale invio
-          verso provider esterni.</p>
-        <div class="op-form op-form-spaced">
-          <label>
-            <span>Ragione sociale</span>
-            <input type="text" [value]="companyProfile().legalName"
-              (change)="updateCompanyProfileSetting('legalName', $event)" placeholder="Es. Audiomax S.r.l.">
-          </label>
-          <label>
-            <span>Partita IVA</span>
-            <input type="text" [value]="companyProfile().vatNumber"
-              (change)="updateCompanyProfileSetting('vatNumber', $event)" placeholder="Es. IT01234567890">
-          </label>
-          <label>
-            <span>Codice fiscale</span>
-            <input type="text" [value]="companyProfile().taxCode"
-              (change)="updateCompanyProfileSetting('taxCode', $event)" placeholder="Codice fiscale azienda">
-          </label>
-          <label class="wide">
-            <span>Indirizzo sede</span>
-            <input type="text" [value]="companyProfile().address"
-              (change)="updateCompanyProfileSetting('address', $event)" placeholder="Via e numero civico">
-          </label>
-          <label>
-            <span>CAP</span>
-            <input type="text" [value]="companyProfile().postalCode"
-              (change)="updateCompanyProfileSetting('postalCode', $event)" placeholder="Es. 10121">
-          </label>
-          <label>
-            <span>Città</span>
-            <input type="text" [value]="companyProfile().city"
-              (change)="updateCompanyProfileSetting('city', $event)" placeholder="Comune sede">
-          </label>
-          <label>
-            <span>Provincia</span>
-            <input type="text" [value]="companyProfile().province"
-              (change)="updateCompanyProfileSetting('province', $event)" placeholder="Es. TO">
-          </label>
-          <label>
-            <span>Nazione</span>
-            <input type="text" [value]="companyProfile().country"
-              (change)="updateCompanyProfileSetting('country', $event)" placeholder="Italia o IT">
-          </label>
-          <label>
-            <span>Codice SDI azienda</span>
-            <input type="text" [value]="companyProfile().sdiCode"
-              (change)="updateCompanyProfileSetting('sdiCode', $event)" placeholder="Codice SDI emittente">
-          </label>
-          <label>
-            <span>PEC azienda</span>
-            <input type="email" [value]="companyProfile().pec" (change)="updateCompanyProfileSetting('pec', $event)"
-              placeholder="amministrazione@pec.it">
-          </label>
-          <label>
-            <span>Email azienda</span>
-            <input type="email" [value]="companyProfile().email"
-              (change)="updateCompanyProfileSetting('email', $event)" placeholder="Email contabile">
-          </label>
-          <label>
-            <span>Telefono</span>
-            <input type="text" [value]="companyProfile().phone"
-              (change)="updateCompanyProfileSetting('phone', $event)" placeholder="Telefono azienda">
-          </label>
-          <label>
-            <span>IBAN</span>
-            <input type="text" [value]="companyProfile().iban" (change)="updateCompanyProfileSetting('iban', $event)"
-              placeholder="IBAN per bonifici">
-          </label>
+        <h2 class="op-card-title">🏢 Anagrafica azienda</h2>
+        <p class="text-muted">I dati anagrafici dell'azienda (ragione sociale, P.IVA, sede, SDI, PEC, IBAN e logo) usati
+          per generare la fattura elettronica si gestiscono in <strong>Impostazioni → Dati Azienda</strong>.</p>
+        <div class="detail-note">
+          <span>Riepilogo</span>
+          <p>
+            <strong>{{ companyProfileDraft().legalName || 'Ragione sociale non impostata' }}</strong>
+            @if (companyProfileDraft().vatNumber) { · P.IVA {{ companyProfileDraft().vatNumber }} }
+            @if (companyProfileDraft().sdiCode) { · SDI {{ companyProfileDraft().sdiCode }} }
+          </p>
         </div>
       </div>
 
@@ -10767,7 +10877,7 @@
         <div class="op-form op-form-spaced">
           <label>
             <span>Provider</span>
-            <select [value]="companyProfile().invoiceTransmission.providerCode"
+            <select [value]="companyProfileDraft().invoiceTransmission.providerCode"
               (change)="updateInvoiceTransmissionSetting('providerCode', $event)">
               <option value="nessuno">Nessuno (solo XML)</option>
               <option value="webhook">API / Webhook generico</option>
@@ -10775,13 +10885,13 @@
           </label>
           <label>
             <span>Etichetta provider</span>
-            <input type="text" [value]="companyProfile().invoiceTransmission.providerLabel"
+            <input type="text" [value]="companyProfileDraft().invoiceTransmission.providerLabel"
               (change)="updateInvoiceTransmissionSetting('providerLabel', $event)"
               placeholder="Es. Fatture in Cloud, ponte middleware, ERP">
           </label>
           <label>
             <span>Modalità</span>
-            <select [value]="companyProfile().invoiceTransmission.mode"
+            <select [value]="companyProfileDraft().invoiceTransmission.mode"
               (change)="updateInvoiceTransmissionSetting('mode', $event)">
               <option value="xml">Solo XML</option>
               <option value="api">Invio API</option>
@@ -10789,30 +10899,29 @@
           </label>
           <label class="wide">
             <span>URL API / Webhook</span>
-            <input type="url" [value]="companyProfile().invoiceTransmission.apiUrl"
+            <input type="url" [value]="companyProfileDraft().invoiceTransmission.apiUrl"
               (change)="updateInvoiceTransmissionSetting('apiUrl', $event)"
               placeholder="https://provider.example.it/api/invoices">
           </label>
           <label>
             <span>API key</span>
-            <input type="password" [value]="companyProfile().invoiceTransmission.apiKey"
+            <input type="password" [value]="companyProfileDraft().invoiceTransmission.apiKey"
               (change)="updateInvoiceTransmissionSetting('apiKey', $event)"
               placeholder="Chiave privata provider">
           </label>
           <label>
-            <span>Regime fiscale</span>
-            <input type="text" [value]="companyProfile().invoiceTransmission.taxRegime"
-              (change)="updateInvoiceTransmissionSetting('taxRegime', $event)" placeholder="Es. RF01">
+            <span>Regime fiscale (codice XML)</span>
+            <input type="text" [value]="companyProfileDraft().invoiceTransmission.taxRegime" readonly>
           </label>
           <label>
             <span>Paese emittente</span>
-            <input type="text" [value]="companyProfile().invoiceTransmission.issuingCountryCode"
+            <input type="text" [value]="companyProfileDraft().invoiceTransmission.issuingCountryCode"
               (change)="updateInvoiceTransmissionSetting('issuingCountryCode', $event)" placeholder="IT">
           </label>
           <div class="pos-inline-label pos-inline-label-full pos-company-check">
             <span>Fallback operativo</span>
             <label class="pos-check-row">
-              <input type="checkbox" [checked]="companyProfile().invoiceTransmission.fallbackToXmlDownload"
+              <input type="checkbox" [checked]="companyProfileDraft().invoiceTransmission.fallbackToXmlDownload"
                 (change)="updateInvoiceTransmissionBoolean('fallbackToXmlDownload', $event)">
               <span>Se l'API non è configurata o fallisce, scarica comunque l'XML</span>
             </label>
@@ -10824,6 +10933,18 @@
           <p>Se non configuri nessun provider, la fattura resta comunque esportabile come XML valido dall'archivio
             documenti della cassa. Se attivi un endpoint API, il gestionale proverà a inviarla e, se abilitato, userà
             il fallback XML automatico.</p>
+        </div>
+
+        <div class="settings-form-actions">
+          @if (companyProfileDirty()) {
+          <span class="settings-form-status is-dirty">● Modifiche non salvate</span>
+          } @else {
+          <span class="settings-form-status">Trasmissione allineata</span>
+          }
+          <button type="button" class="btn-ghost" [disabled]="!companyProfileDirty()"
+            (click)="cancelCompanyProfileEdits()">Annulla</button>
+          <button type="button" class="btn-primary" [disabled]="!companyProfileDirty()"
+            (click)="saveCompanyProfile()">Salva modifiche</button>
         </div>
       </div>
       }
@@ -10844,32 +10965,139 @@
             </select></label>
         </div>
       </div>
+
+      <div class="op-card">
+        <h2 class="op-card-title">🧾 Regime fiscale e IVA</h2>
+        <p class="text-muted">Il regime fiscale determina come viene calcolata l'IVA sulle vendite. Sugli acquisti
+          (spese e carichi di magazzino) l'IVA resta sempre gestita normalmente.</p>
+        <div class="op-form op-form-spaced">
+          <label>
+            <span>Regime fiscale</span>
+            <select [value]="companyProfileDraft().fiscalRegime" (change)="updateFiscalRegimeSetting($event)">
+              <option value="ordinario">Ordinario (IVA sulle vendite)</option>
+              <option value="forfettario">Forfettario (IVA zero sulle vendite)</option>
+            </select>
+          </label>
+          <label>
+            <span>Aliquota IVA predefinita vendite (%)</span>
+            <input type="number" min="0" step="1" [value]="companyProfileDraft().defaultVatRate"
+              [disabled]="draftSalesVatExempt()" (change)="updateCompanyProfileNumberSetting('defaultVatRate', $event)"
+              placeholder="22">
+          </label>
+        </div>
+        @if (draftSalesVatExempt()) {
+        <div class="detail-note detail-note-warning">
+          <span>Regime forfettario attivo</span>
+          <p>L'IVA viene forzata a zero su tutte le vendite (servizi e beni emessi) e in fattura viene indicata la
+            natura <strong>N2.2</strong>. L'IVA sugli acquisti resta invariata.</p>
+        </div>
+        } @else {
+        <div class="detail-note">
+          <span>Regime ordinario attivo</span>
+          <p>L'IVA viene applicata alle vendite con l'aliquota predefinita indicata sopra (modificabile riga per riga
+            in preventivi e cassa).</p>
+        </div>
+        }
+
+        <div class="settings-form-actions">
+          @if (companyProfileDirty()) {
+          <span class="settings-form-status is-dirty">● Regime e aliquota in sospeso: conferma con Salva modifiche</span>
+          } @else {
+          <span class="settings-form-status">Configurazione allineata</span>
+          }
+          <button type="button" class="btn-ghost" [disabled]="!companyProfileDirty()"
+            (click)="cancelCompanyProfileEdits()">Annulla</button>
+          <button type="button" class="btn-primary" [disabled]="!companyProfileDirty()"
+            (click)="saveCompanyProfile()">Salva modifiche</button>
+        </div>
+      </div>
       }
 
-      @case ('privacy') {
+      @case ('account') {
       <div class="op-card">
-        <h2 class="op-card-title">🔒 Archivio privacy</h2>
-        <div class="record-list compact">
-          @for (entry of privacyArchiveIndex(); track entry.id) {
-          <div class="record-row">
-            <div class="record-info">
-              <strong>{{ entry.title }}</strong>
-              <span>{{ entry.clientName }} · {{ entry.type }} · {{ entry.channel }}</span>
+        <h2 class="op-card-title">
+          🛡️ Profili azienda
+          <span class="op-card-title-right">
+            <button type="button" class="btn-sm btn-ghost" (click)="loadAccountProfiles()"
+              [disabled]="accountsLoading()">Aggiorna elenco</button>
+          </span>
+        </h2>
+
+        @if (accountsError()) {
+        <p class="account-feedback account-feedback-error" role="alert">{{ accountsError() }}</p>
+        }
+        @if (accountsFeedback()) {
+        <p class="account-feedback account-feedback-success" role="status">{{ accountsFeedback() }}</p>
+        }
+
+        <div class="account-toolbar">
+          <label class="account-search">
+            <span class="visually-hidden">Cerca profilo</span>
+            <input type="search" placeholder="Cerca per azienda o email…" [value]="accountSearch()"
+              (input)="onAccountSearchInput($event)">
+          </label>
+          <span class="module-inline-chip">{{ visibleAccountProfiles().length }} profili</span>
+        </div>
+
+        @if (accountsLoading()) {
+        <p class="text-muted">Caricamento profili…</p>
+        } @else if (!visibleAccountProfiles().length) {
+        <div class="detail-note">
+          <span>Nessun profilo</span>
+          <p>Non ci sono ancora aziende registrate che corrispondano alla ricerca.</p>
+        </div>
+        } @else {
+        <div class="account-list">
+          @for (account of visibleAccountProfiles(); track account.id) {
+          <div class="account-card" [class.account-card-suspended]="account.status === 'sospesa'">
+            <div class="account-card-head">
+              <div class="account-identity">
+                <strong>{{ account.companyName }}</strong>
+                <span class="text-muted">{{ account.email }}</span>
+              </div>
+              <div class="account-badges">
+                <span class="badge" [class.badge-success]="account.status === 'attiva'"
+                  [class.badge-warning]="account.status === 'sospesa'">{{ accountStatusLabel(account.status) }}</span>
+                <span class="badge" [class.badge-warning]="accountIsLicenseExpired(account)"
+                  [class.badge-neutral]="!accountIsLicenseExpired(account)">{{ accountLicenseLabel(account) }}</span>
+              </div>
             </div>
-            <div class="record-actions">
-              <span class="badge badge-info">{{ entry.status }}</span>
-              @if (entry.url) {
-              <a class="btn-sm" [routerLink]="entry.url">Apri</a>
+
+            <div class="account-card-meta">
+              <span>{{ account.loginCount }} accessi</span>
+              <span>Ultimo accesso: {{ accountLastLoginLabel(account) }}</span>
+              <span>Registrata il {{ account.createdAt.slice(0, 10) }}</span>
+            </div>
+
+            <div class="account-license-form">
+              <label>
+                <span>Scadenza licenza</span>
+                <input type="date" #licenseDate [value]="accountLicenseInputValue(account)">
+              </label>
+              <label>
+                <span>Note licenza</span>
+                <input type="text" #licenseNotes placeholder="Es. rinnovo annuale"
+                  [value]="account.licenseNotes ?? ''">
+              </label>
+              <button type="button" class="btn-sm btn-primary-sm"
+                (click)="saveAccountLicense(account, licenseDate.value, licenseNotes.value)">Salva
+                licenza</button>
+            </div>
+
+            <div class="account-card-actions">
+              @if (account.status === 'sospesa') {
+              <button type="button" class="btn-sm btn-primary-sm"
+                (click)="setAccountStatus(account, 'attiva')">Riattiva</button>
+              } @else {
+              <button type="button" class="btn-sm" (click)="setAccountStatus(account, 'sospesa')">Sospendi</button>
               }
-              <span class="text-muted">{{ entry.createdAt.slice(0, 10) }}</span>
+              <button type="button" class="btn-sm btn-danger-sm"
+                (click)="removeAccountProfile(account)">Elimina</button>
             </div>
           </div>
           }
         </div>
-        <div class="detail-note">
-          <span>Archivio gestionale</span>
-          <p>Storico interno di informative, link remoti, conferme e revoche privacy per ogni cliente.</p>
-        </div>
+        }
       </div>
       }
       }

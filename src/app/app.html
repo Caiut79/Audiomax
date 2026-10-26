@@ -280,20 +280,31 @@
         <span class="status-dot"></span>
         <span class="status-label">{{ connectionLabel() }}</span>
       </div>
-      <button class="theme-btn sidebar-theme-btn" (click)="toggleTheme()" type="button"
-        [attr.aria-label]="currentTheme() === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'">
-        @if (currentTheme() === 'dark') {
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="5" />
-          <path
-            d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-        </svg>
-        } @else {
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-        }
-      </button>
+      <div class="sidebar-footer-actions">
+        <button class="theme-btn sidebar-theme-btn" (click)="toggleTheme()" type="button"
+          [attr.aria-label]="currentTheme() === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'">
+          @if (currentTheme() === 'dark') {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5" />
+            <path
+              d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+          </svg>
+          } @else {
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+          }
+        </button>
+        <button class="theme-btn sidebar-logout-btn" (click)="logout()" type="button"
+          aria-label="Esci dal gestionale">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <path d="m16 17 5-5-5-5" />
+            <path d="M21 12H9" />
+          </svg>
+        </button>
+      </div>
     </div>
   </aside>
 
@@ -346,6 +357,26 @@
         </div>
         }
       </div>
+
+      <!-- Azienda collegata + uscita dalla sessione -->
+      <div class="topbar-session">
+        <div class="topbar-session-info">
+          <span class="topbar-session-company" [title]="accountEmail()">{{ companyName() }}</span>
+          <span class="topbar-session-role" [class.topbar-session-role-super]="isSuperAdmin()">
+            {{ roleLabel() }}
+          </span>
+        </div>
+        <button class="topbar-logout" type="button" (click)="logout()"
+          [attr.aria-label]="'Esci dal gestionale (' + (accountEmail() || 'sessione corrente') + ')'">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <path d="m16 17 5-5-5-5" />
+            <path d="M21 12H9" />
+          </svg>
+          <span>Esci</span>
+        </button>
+      </div>
     </header>
 
     <main class="workspace-body">
@@ -396,6 +427,103 @@
         Nessun risultato
       </div>
       }
+    </div>
+  </div>
+</div>
+}
+@if (showCompanyOnboarding()) {
+<div class="ui-modal-overlay onboarding-overlay">
+  <div class="ui-modal onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <div class="ui-modal-head onboarding-head">
+      <div class="onboarding-head-text">
+        <h2 class="onboarding-title" id="onboarding-title">🏢 Completa i dati aziendali</h2>
+        <p class="onboarding-subtitle">Gli stessi dati verranno usati per la fatturazione elettronica e per
+          l'intestazione dei documenti.</p>
+      </div>
+    </div>
+
+    <div class="ui-modal-body">
+      @if (onboardingFeedback()) {
+      <div class="onboarding-feedback" role="alert">{{ onboardingFeedback() }}</div>
+      }
+
+      <div class="onboarding-form">
+        <label class="onboarding-field wide">
+          <span>Ragione sociale</span>
+          <input type="text" [value]="companyProfile().legalName"
+            (change)="updateOnboardingField('legalName', $event)" placeholder="Es. Audiomax S.r.l.">
+        </label>
+        <label class="onboarding-field">
+          <span>Partita IVA</span>
+          <input type="text" [value]="companyProfile().vatNumber"
+            (change)="updateOnboardingField('vatNumber', $event)" placeholder="Es. IT01234567890">
+        </label>
+        <label class="onboarding-field">
+          <span>Codice fiscale</span>
+          <input type="text" [value]="companyProfile().taxCode"
+            (change)="updateOnboardingField('taxCode', $event)" placeholder="Codice fiscale azienda">
+        </label>
+        <label class="onboarding-field wide">
+          <span>Indirizzo sede</span>
+          <input type="text" [value]="companyProfile().address"
+            (change)="updateOnboardingField('address', $event)" placeholder="Via e numero civico">
+        </label>
+        <label class="onboarding-field">
+          <span>CAP</span>
+          <input type="text" [value]="companyProfile().postalCode"
+            (change)="updateOnboardingField('postalCode', $event)" placeholder="Es. 10121">
+        </label>
+        <label class="onboarding-field">
+          <span>Città</span>
+          <input type="text" [value]="companyProfile().city"
+            (change)="updateOnboardingField('city', $event)" placeholder="Comune sede">
+        </label>
+        <label class="onboarding-field">
+          <span>Provincia</span>
+          <input type="text" [value]="companyProfile().province"
+            (change)="updateOnboardingField('province', $event)" placeholder="Es. TO">
+        </label>
+        <label class="onboarding-field">
+          <span>Nazione</span>
+          <input type="text" [value]="companyProfile().country"
+            (change)="updateOnboardingField('country', $event)" placeholder="Italia o IT">
+        </label>
+        <label class="onboarding-field">
+          <span>Codice SDI</span>
+          <input type="text" [value]="companyProfile().sdiCode"
+            (change)="updateOnboardingField('sdiCode', $event)" placeholder="Codice SDI emittente">
+        </label>
+        <label class="onboarding-field">
+          <span>PEC</span>
+          <input type="email" [value]="companyProfile().pec" (change)="updateOnboardingField('pec', $event)"
+            placeholder="amministrazione@pec.it">
+        </label>
+        <label class="onboarding-field">
+          <span>Email azienda</span>
+          <input type="email" [value]="companyProfile().email" (change)="updateOnboardingField('email', $event)"
+            placeholder="Email contabile">
+        </label>
+        <label class="onboarding-field">
+          <span>Telefono</span>
+          <input type="text" [value]="companyProfile().phone" (change)="updateOnboardingField('phone', $event)"
+            placeholder="Telefono azienda">
+        </label>
+        <label class="onboarding-field">
+          <span>Sito web</span>
+          <input type="text" [value]="companyProfile().website" (change)="updateOnboardingField('website', $event)"
+            placeholder="www.audiomax.it">
+        </label>
+        <label class="onboarding-field">
+          <span>IBAN</span>
+          <input type="text" [value]="companyProfile().iban" (change)="updateOnboardingField('iban', $event)"
+            placeholder="IBAN per bonifici">
+        </label>
+      </div>
+
+      <div class="onboarding-actions">
+        <button type="button" class="btn-ghost" (click)="skipCompanyOnboarding()">Inserisci successivamente</button>
+        <button type="button" class="btn-primary" (click)="saveCompanyOnboarding()">Salva dati azienda</button>
+      </div>
     </div>
   </div>
 </div>

@@ -19,6 +19,7 @@ import { map, merge, startWith } from 'rxjs';
 import { BrowserStorageService } from './browser-storage.service';
 
 import { AudiomaxDataService } from './audiomax-data.service';
+import { AppAccountRecord, AuthService } from './auth.service';
 import { EpScannerService } from './ep-scanner.service';
 import { crmModuleContent } from './crm-module-content';
 import { FormDraftService } from './form-draft.service';
@@ -40,6 +41,7 @@ import {
   EmployeeLeaveRecord,
   ExpenseRecord,
   ExpenseSupplierRecord,
+  FiscalRegime,
   InventoryItemRecord,
   PaymentProviderKind,
   PaymentExecutionMode,
@@ -515,6 +517,8 @@ export class SectionPageComponent {
   // invece di localStorage diretto in 4 punti del component.
   private readonly storage = inject(BrowserStorageService);
   protected readonly epScanner = inject(EpScannerService);
+  // Autenticazione: serve al pannello "Profili" riservato al super admin.
+  protected readonly auth = inject(AuthService);
 
   protected readonly section = toSignal(
     this.route.data.pipe(
@@ -819,7 +823,7 @@ export class SectionPageComponent {
       description: '',
       quantity: 1,
       unitPrice: 0,
-      vatRate: 22,
+      vatRate: this.data.defaultSalesVatRate(),
     },
   ]);
   /**
@@ -1388,7 +1392,7 @@ export class SectionPageComponent {
   });
 
   // ========================================================================
-  // TASK 4: IMPOSTAZIONI · TABS ORIZZONTALI 7 CATEGORIE
+  // TASK 4: IMPOSTAZIONI · TABS ORIZZONTALI 6 CATEGORIE
   // ========================================================================
   protected readonly SETTINGS_TABS = [
     { key: 'azienda', label: 'Dati Azienda', icon: '🏢' },
@@ -1397,8 +1401,17 @@ export class SectionPageComponent {
     { key: 'orari-negozio', label: 'Orari Negozio', icon: '🏪' },
     { key: 'fiscale', label: 'Fiscale', icon: '🧾' },
     { key: 'preferenze', label: 'Preferenze', icon: '⚙️' },
-    { key: 'privacy', label: 'Privacy', icon: '🔒' },
   ] as const;
+  /**
+   * Tab effettivamente visibili: il super admin vede in più la gestione
+   * dei profili (licenze, sospensione, eliminazione delle aziende clienti).
+   */
+  protected readonly settingsTabs = computed<ReadonlyArray<{ key: string; label: string; icon: string }>>(
+    () =>
+      this.auth.isSuperAdmin()
+        ? [...this.SETTINGS_TABS, { key: 'account', label: 'Profili', icon: '🛡️' }]
+        : [...this.SETTINGS_TABS],
+  );
   protected readonly activeSettingsTab: WritableSignal<string> = signal(
     this.SETTINGS_TABS.some((tab) => tab.key === this.storage.getItem('audiomax_settings_last_tab'))
       ? (this.storage.getItem('audiomax_settings_last_tab') as string)
@@ -1407,6 +1420,167 @@ export class SectionPageComponent {
   protected setActiveSettingsTab(key: string): void {
     this.activeSettingsTab.set(key);
     this.storage.setItem('audiomax_settings_last_tab', key);
+    if (key === 'account') {
+      void this.loadAccountProfiles();
+    }
+  }
+
+  // ========================================================================
+  // SUPER ADMIN · GESTIONE PROFILI AZIENDA (licenze, sospensione, eliminazione)
+  // ========================================================================
+  protected readonly accountProfiles = signal<AppAccountRecord[]>([]);
+  protected readonly accountsLoading = signal(false);
+  protected readonly accountsError = signal('');
+  protected readonly accountSearch = signal('');
+  protected readonly accountsFeedback = signal('');
+  /** Solo le aziende clienti: il profilo super admin non è gestibile da qui. */
+  protected readonly visibleAccountProfiles = computed(() => {
+    const term = this.accountSearch().trim().toLowerCase();
+    return this.accountProfiles()
+      .filter((account) => account.role !== 'super-admin')
+      .filter(
+        (account) =>
+          !term ||
+          account.companyName.toLowerCase().includes(term) ||
+          account.email.toLowerCase().includes(term),
+      );
+  });
+
+  /** Carica l'elenco dei profili registrati (solo super admin). */
+  protected async loadAccountProfiles(): Promise<void> {
+    if (!this.auth.isSuperAdmin()) {
+      return;
+    }
+    this.accountsLoading.set(true);
+    this.accountsError.set('');
+    try {
+      const accounts = await this.auth.listAccounts();
+      this.accountProfiles.set(accounts);
+    } catch {
+      this.accountsError.set('Impossibile caricare i profili registrati.');
+    } finally {
+      this.accountsLoading.set(false);
+    }
+  }
+
+  protected onAccountSearchInput(event: Event): void {
+    this.accountSearch.set((event.target as HTMLInputElement).value ?? '');
+  }
+
+  protected setAccountStatus(account: AppAccountRecord, status: 'attiva' | 'sospesa'): void {
+    void this.applyAccountStatus(account, status);
+  }
+
+  private async applyAccountStatus(
+    account: AppAccountRecord,
+    status: 'attiva' | 'sospesa',
+  ): Promise<void> {
+    const result =
+      status === 'sospesa'
+        ? await this.auth.suspendAccount(account.id)
+        : await this.auth.resumeAccount(account.id);
+
+    if (!result.ok) {
+      this.accountsError.set(result.message ?? 'Operazione non riuscita.');
+      return;
+    }
+
+    this.accountsError.set('');
+    this.accountsFeedback.set(
+      status === 'sospesa'
+        ? `Profilo "${account.companyName}" sospeso.`
+        : `Profilo "${account.companyName}" riattivato.`,
+    );
+    await this.loadAccountProfiles();
+  }
+
+  protected async removeAccountProfile(account: AppAccountRecord): Promise<void> {
+    const confirmed =
+      typeof window === 'undefined' ||
+      window.confirm(
+        `Eliminare definitivamente il profilo "${account.companyName}"?\nTutti i dati associati verranno rimossi.`,
+      );
+    if (!confirmed) {
+      return;
+    }
+
+    const result = await this.auth.deleteAccount(account.id);
+    if (!result.ok) {
+      this.accountsError.set(result.message ?? 'Eliminazione non riuscita.');
+      return;
+    }
+
+    this.accountsError.set('');
+    this.accountsFeedback.set(`Profilo "${account.companyName}" eliminato.`);
+    await this.loadAccountProfiles();
+  }
+
+  /** Salva scadenza licenza e note del profilo selezionato. */
+  protected async saveAccountLicense(
+    account: AppAccountRecord,
+    expiresAt: string,
+    notes: string,
+  ): Promise<void> {
+    const result = await this.auth.updateLicense(account.id, {
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+      notes: notes.trim() ? notes.trim() : null,
+    });
+
+    if (!result.ok) {
+      this.accountsError.set(result.message ?? 'Aggiornamento licenza non riuscito.');
+      return;
+    }
+
+    this.accountsError.set('');
+    this.accountsFeedback.set(`Licenza di "${account.companyName}" aggiornata.`);
+    await this.loadAccountProfiles();
+  }
+
+  protected accountStatusLabel(status: AppAccountRecord['status']): string {
+    if (status === 'attiva') {
+      return 'Attiva';
+    }
+    if (status === 'sospesa') {
+      return 'Sospesa';
+    }
+    return 'Eliminata';
+  }
+
+  protected accountLicenseLabel(account: AppAccountRecord): string {
+    if (!account.licenseExpiresAt) {
+      return 'Senza scadenza';
+    }
+    const expiry = new Date(account.licenseExpiresAt);
+    if (Number.isNaN(expiry.getTime())) {
+      return account.licenseExpiresAt;
+    }
+    const expired = expiry.getTime() < Date.now();
+    const formatted = expiry.toLocaleDateString('it-IT');
+    return expired ? `Scaduta il ${formatted}` : `Attiva fino al ${formatted}`;
+  }
+
+  protected accountIsLicenseExpired(account: AppAccountRecord): boolean {
+    if (!account.licenseExpiresAt) {
+      return false;
+    }
+    const expiry = new Date(account.licenseExpiresAt);
+    return !Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now();
+  }
+
+  /** Valore per l'input date (formato yyyy-MM-dd). */
+  protected accountLicenseInputValue(account: AppAccountRecord): string {
+    return account.licenseExpiresAt ? account.licenseExpiresAt.slice(0, 10) : '';
+  }
+
+  protected accountLastLoginLabel(account: AppAccountRecord): string {
+    if (!account.lastLoginAt) {
+      return 'Mai effettuato';
+    }
+    const last = new Date(account.lastLoginAt);
+    if (Number.isNaN(last.getTime())) {
+      return account.lastLoginAt;
+    }
+    return last.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
   }
 
   // ========================================================================
@@ -2571,7 +2745,8 @@ export class SectionPageComponent {
       const subtotal = line.quantity * line.unitPrice;
       const discount = line.discountPercent ? subtotal * (line.discountPercent / 100) : 0;
       const net = subtotal - discount;
-      return total + net * (line.vatRate / 100);
+      // Il regime fiscale aziendale può azzerare l'IVA sulle vendite (es. forfettario).
+      return total + net * (this.data.resolveSalesVatRate(line.vatRate) / 100);
     }, 0),
   );
   protected readonly quoteDraftGrandTotal = computed(() => {
@@ -4043,18 +4218,6 @@ export class SectionPageComponent {
     this.selectedClient()?.privacyProfile.archive.slice().sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt),
     ) ?? [],
-  );
-  protected readonly privacyArchiveIndex = computed(() =>
-    this.allClients()
-      .flatMap((client) =>
-        client.privacyProfile.archive.map((entry) => ({
-          ...entry,
-          clientId: client.id,
-          clientName: client.name,
-        })),
-      )
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .slice(0, 12),
   );
   protected readonly inactiveCashOperators = computed(() =>
     this.allCashOperators().filter((operator) => !operator.active),
@@ -8135,7 +8298,7 @@ export class SectionPageComponent {
         description: kind === 'materiale' ? 'Nuovo materiale' : kind === 'servizio' ? 'Nuovo servizio' : 'Altro',
         quantity: 1,
         unitPrice: 0,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
       },
     ]);
   }
@@ -10115,7 +10278,7 @@ ${customerPec ? `      <PECDestinatario>${this.escapeXml(customerPec)}</PECDesti
         <Anagrafica>
           <Denominazione>${this.escapeXml(companyName)}</Denominazione>
         </Anagrafica>
-        <RegimeFiscale>${this.escapeXml(transmission.taxRegime || 'RF01')}</RegimeFiscale>
+        <RegimeFiscale>${this.escapeXml(transmission.taxRegime || (this.data.salesVatExempt() ? 'RF19' : 'RF01'))}</RegimeFiscale>
       </DatiAnagrafici>
       <Sede>
         <Indirizzo>${this.escapeXml(companyAddress)}</Indirizzo>
@@ -11437,7 +11600,7 @@ ${paymentXml}
         quantity: qty,
         unitPrice: price,
         originalUnitPrice: price,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
         total,
         pricingMode: 'fisso',
         operatorName: lineOperator,
@@ -12073,6 +12236,12 @@ ${paymentXml}
     this.setupFormDraftSync();
     this.applyCashHandoffFromNavigation();
     this.setupWarehouseReceiptDerivedSync();
+    // Uscendo da Impostazioni le modifiche non salvate ai dati azienda vengono scartate.
+    effect(() => {
+      if (this.section().id !== 'impostazioni') {
+        this.companyProfileDraftPatch.set(null);
+      }
+    });
     effect(() => {
       if (this.section().id !== 'orari' || this.employeePanelView() !== 'turni') {
         return;
@@ -12359,7 +12528,8 @@ ${paymentXml}
         description: line.description.trim(),
         quantity: Math.max(0, Number(line.quantity) || 0),
         unitPrice: Math.max(0, Number(line.unitPrice) || 0),
-        vatRate: Math.max(0, Number(line.vatRate) || 0),
+        // Il regime fiscale aziendale normalizza l'IVA sulle vendite (es. forfettario → 0).
+        vatRate: this.data.resolveSalesVatRate(line.vatRate),
       }))
       .filter((line) => line.description && line.quantity > 0);
 
@@ -14093,7 +14263,7 @@ ${paymentXml}
         quantity: line.quantity,
         unitPrice: parseFloat(finalUnitPrice.toFixed(2)),
         originalUnitPrice: line.unitPrice,
-        vatRate: Math.max(0, Number(line.vatRate) || 22),
+        vatRate: this.data.resolveSalesVatRate(Math.max(0, Number(line.vatRate) || 22)),
         discountPercentage: discount,
         total: line.quantity * parseFloat(finalUnitPrice.toFixed(2)),
         pricingMode: line.kind === 'servizio' ? 'ora' : 'fisso',
@@ -14110,7 +14280,7 @@ ${paymentXml}
         quantity: 1,
         unitPrice: quote.value,
         originalUnitPrice: quote.value,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
         total: quote.value,
         pricingMode: 'fisso',
         operatorName: this.cashCurrentOperator(),
@@ -14159,7 +14329,7 @@ ${paymentXml}
         quantity: 1,
         unitPrice: 0,
         originalUnitPrice: 0,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
         total: 0,
         pricingMode: 'fisso',
         operatorName,
@@ -14176,7 +14346,7 @@ ${paymentXml}
           quantity: line.quantity,
           unitPrice: line.unitCost,
           originalUnitPrice: line.unitCost,
-          vatRate: 22,
+          vatRate: this.data.defaultSalesVatRate(),
           total: line.totalCost,
           pricingMode: 'fisso',
           operatorName,
@@ -14191,7 +14361,7 @@ ${paymentXml}
         quantity: 1,
         unitPrice: ticket.materialCost,
         originalUnitPrice: ticket.materialCost,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
         total: ticket.materialCost,
         pricingMode: 'fisso',
         operatorName,
@@ -14246,7 +14416,7 @@ ${paymentXml}
             quantity: 1,
             unitPrice: productPrice,
             originalUnitPrice: productPrice,
-            vatRate: 22,
+            vatRate: this.data.defaultSalesVatRate(),
             total: productPrice,
             pricingMode: product.pricingMode,
             operatorName: this.cashCurrentOperator(),
@@ -15183,10 +15353,129 @@ ${paymentXml}
     }
   }
 
+  // ========================================================================
+  // DATI AZIENDA · bozza locale con "Salva modifiche" / "Annulla"
+  // ========================================================================
+  /**
+   * Modifiche ai dati azienda non ancora confermate.
+   * `null` = nessuna modifica in sospeso: i form mostrano i dati salvati.
+   */
+  private readonly companyProfileDraftPatch = signal<Partial<CompanyProfileRecord> | null>(null);
+
+  /** Profilo azienda mostrato nei form: dati salvati + eventuali modifiche in sospeso. */
+  protected readonly companyProfileDraft = computed<CompanyProfileRecord>(() => {
+    const saved = this.data.companyProfile();
+    const patch = this.companyProfileDraftPatch();
+
+    if (!patch) {
+      return saved;
+    }
+
+    return {
+      ...saved,
+      ...patch,
+      invoiceTransmission: patch.invoiceTransmission ?? saved.invoiceTransmission,
+    };
+  });
+
+  /** True quando ci sono modifiche ai dati azienda non ancora salvate. */
+  protected readonly companyProfileDirty = computed(() => {
+    if (!this.companyProfileDraftPatch()) {
+      return false;
+    }
+
+    return this.serializeCompanyProfile(this.companyProfileDraft())
+      !== this.serializeCompanyProfile(this.data.companyProfile());
+  });
+
+  /** True se la bozza (o i dati salvati) prevede l'IVA a zero sulle vendite. */
+  protected readonly draftSalesVatExempt = computed(() => this.companyProfileDraft().fiscalRegime === 'forfettario');
+
+  /**
+   * Serializzazione usata solo per il confronto bozza/salvato: il logo (base64)
+   * viene ridotto a un flag per non confrontare stringhe molto grandi.
+   */
+  private serializeCompanyProfile(profile: CompanyProfileRecord): string {
+    const { logoUrl, ...rest } = profile;
+    return JSON.stringify({ ...rest, logoUrl: logoUrl ? 'logo' : '' });
+  }
+
+  /** Accumula una modifica nella bozza senza persisterla. */
+  private patchCompanyProfile(patch: Partial<CompanyProfileRecord>): void {
+    this.companyProfileDraftPatch.update((current) => ({ ...(current ?? {}), ...patch }));
+  }
+
   protected updateCompanyProfileSetting(field: keyof CompanyProfileRecord, event: Event): void {
     const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
     if (!target) return;
-    this.data.updateCompanyProfile({ [field]: target.value });
+    // Modifica solo in bozza: viene salvata con "Salva modifiche".
+    this.patchCompanyProfile({ [field]: target.value });
+  }
+
+  /** Aggiorna un campo numerico della bozza (es. aliquota IVA predefinita). */
+  protected updateCompanyProfileNumberSetting(field: 'defaultVatRate', event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    if (!target) return;
+    this.patchCompanyProfile({ [field]: Math.max(0, Number(target.value) || 0) });
+  }
+
+  /**
+   * Cambia il regime fiscale nella bozza.
+   * - 'forfettario' → IVA a zero su tutte le vendite (servizi/beni emessi);
+   * - 'ordinario'   → IVA applicata normalmente.
+   * Resta invariata la gestione dell'IVA sugli acquisti (spese).
+   * Il codice `taxRegime` usato dalla fattura XML viene allineato al regime scelto.
+   */
+  protected updateFiscalRegimeSetting(event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    if (!target) return;
+    const regime: FiscalRegime = target.value === 'forfettario' ? 'forfettario' : 'ordinario';
+    this.patchCompanyProfile({
+      fiscalRegime: regime,
+      invoiceTransmission: {
+        ...this.companyProfileDraft().invoiceTransmission,
+        // RF19 = regime forfettario, RF01 = regime ordinario (standard fattura elettronica).
+        taxRegime: regime === 'forfettario' ? 'RF19' : 'RF01',
+      },
+    });
+  }
+
+  /** Conferma e persiste le modifiche ai dati azienda. */
+  protected saveCompanyProfile(): void {
+    const draft = this.companyProfileDraft();
+
+    if (!draft.legalName.trim()) {
+      this.pushToast('Inserisci la ragione sociale per salvare i dati azienda.', 'error');
+      return;
+    }
+
+    const wasExempt = this.data.salesVatExempt();
+    const fiscalRegime: FiscalRegime = draft.fiscalRegime === 'forfettario' ? 'forfettario' : 'ordinario';
+
+    this.data.updateCompanyProfile({
+      ...draft,
+      legalName: draft.legalName.trim(),
+      fiscalRegime,
+      invoiceTransmission: {
+        ...draft.invoiceTransmission,
+        taxRegime: fiscalRegime === 'forfettario' ? 'RF19' : 'RF01',
+      },
+    });
+
+    // Passaggio al regime esente: azzera l'IVA sulle righe di vendita già in bozza/carrello.
+    if (!wasExempt && fiscalRegime === 'forfettario') {
+      this.quoteDraftLines.update((lines) => lines.map((line) => ({ ...line, vatRate: 0 })));
+      this.epQuoteLineDraft.update((lines) => lines.map((line) => ({ ...line, vatRate: 0 })));
+      this.cashCart.update((lines) => lines.map((line) => ({ ...line, vatRate: 0 })));
+    }
+
+    this.companyProfileDraftPatch.set(null);
+    this.pushToast('Dati azienda aggiornati.', 'success');
+  }
+
+  /** Scarta le modifiche non salvate e ripristina i dati azienda salvati. */
+  protected cancelCompanyProfileEdits(): void {
+    this.companyProfileDraftPatch.set(null);
   }
 
   protected updateInvoiceTransmissionSetting(
@@ -15195,9 +15484,9 @@ ${paymentXml}
   ): void {
     const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
     if (!target) return;
-    this.data.updateCompanyProfile({
+    this.patchCompanyProfile({
       invoiceTransmission: {
-        ...this.companyProfile().invoiceTransmission,
+        ...this.companyProfileDraft().invoiceTransmission,
         [field]: target.value,
       },
     });
@@ -15209,9 +15498,9 @@ ${paymentXml}
   ): void {
     const target = event.target as HTMLInputElement | null;
     if (!target) return;
-    this.data.updateCompanyProfile({
+    this.patchCompanyProfile({
       invoiceTransmission: {
-        ...this.companyProfile().invoiceTransmission,
+        ...this.companyProfileDraft().invoiceTransmission,
         [field]: target.checked,
       },
     });
@@ -15232,14 +15521,15 @@ ${paymentXml}
       const reader = new FileReader();
       reader.onload = (e) => {
         const base64Logo = e.target?.result as string;
-        this.data.updateCompanyProfile({ logoUrl: base64Logo });
+        // Il logo entra nella bozza: si salva con "Salva modifiche".
+        this.patchCompanyProfile({ logoUrl: base64Logo });
       };
       reader.readAsDataURL(file);
     }
   }
 
   protected removeCompanyLogo(): void {
-    this.data.updateCompanyProfile({ logoUrl: null });
+    this.patchCompanyProfile({ logoUrl: null });
   }
 
   protected closeEmployeeModal(): void {
@@ -18026,7 +18316,8 @@ ${paymentXml}
     if (payload.paymentMethod === 'sul_posto') {
       // Registra in cassa
       const total = payload.amount;
-      const vatRate = 22; // Assumiamo 22% default
+      // Aliquota coerente con il regime fiscale aziendale (0 se esente, es. forfettario).
+      const vatRate = this.data.defaultSalesVatRate();
       const net = total / (1 + vatRate / 100);
       const tax = total - net;
 
@@ -18051,7 +18342,7 @@ ${paymentXml}
             quantity: 1,
             unitPrice: total,
             originalUnitPrice: total,
-            vatRate: 22,
+            vatRate: this.data.defaultSalesVatRate(),
             total: total,
             pricingMode: 'fisso',
             operatorName: payload.operatorName,
@@ -19603,7 +19894,7 @@ ${paymentXml}
         description: '',
         quantity: 1,
         unitPrice: 0,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
       },
     ]);
     this.quoteQuickServiceId.set('');
@@ -19638,7 +19929,7 @@ ${paymentXml}
         description: '',
         quantity: 1,
         unitPrice: 0,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
       },
     ]);
   }
@@ -19799,7 +20090,7 @@ ${paymentXml}
         description: service.name,
         quantity: 1,
         unitPrice: service.price,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
       },
     ]);
     this.quoteQuickServiceId.set('');
@@ -19827,7 +20118,7 @@ ${paymentXml}
         description: product.name,
         quantity: 1,
         unitPrice: product.unitCost,
-        vatRate: 22,
+        vatRate: this.data.defaultSalesVatRate(),
       },
     ]);
     this.quoteQuickProductId.set('');
@@ -19843,7 +20134,7 @@ ${paymentXml}
     const subtotal = line.quantity * line.unitPrice;
     const discount = line.discountPercent ? subtotal * (line.discountPercent / 100) : 0;
     const net = subtotal - discount;
-    return net + net * (line.vatRate / 100);
+    return net + net * (this.data.resolveSalesVatRate(line.vatRate) / 100);
   }
 
   private resetAppointmentForm(): void {
