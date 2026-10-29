@@ -26,6 +26,7 @@ import {
   PaymentProviderKind,
   PaymentProviderRecord,
   InventoryItemRecord,
+  QuoteHistoryEntry,
   QuoteRecord,
   ServiceTicketMaterialLine,
   ServiceTicketRecord,
@@ -80,6 +81,8 @@ interface QuoteRow {
   due_date: string;
   discount_amount?: number | string | null;
   is_anonymous?: boolean | null;
+  /** Storico operativo del preventivo: colonna jsonb opzionale (migrazione richiesta). */
+  history?: QuoteHistoryEntry[] | null;
 }
 
 interface AppointmentRow {
@@ -3181,10 +3184,7 @@ export class AudiomaxDataService {
       settledAt,
     };
 
-    this.cashTransactions.update((items) =>
-      items.map((item) => (item.id === transactionId ? updated : item)),
-    );
-    this.queueRemoteSync('cash-transaction', updated);
+    this.updateCashTransaction(updated);
 
     if (updated.clientId) {
       const matchedClient = this.clients().find((client) => client.id === updated.clientId) ?? null;
@@ -3197,6 +3197,56 @@ export class AudiomaxDataService {
       }
     }
 
+    return updated;
+  }
+
+  annulCashTransaction(transactionId: string): CashTransactionRecord | null {
+    const transaction = this.cashTransactions().find((item) => item.id === transactionId);
+    if (!transaction || transaction.status === 'annullato') {
+      return transaction ?? null;
+    }
+
+    const productMap = new Map(this.cashProducts().map((item) => [item.id, item]));
+    const inventoryRestores = new Map<string, number>();
+
+    for (const line of transaction.lines) {
+      const product = productMap.get(line.productId);
+      const inventoryItemId = product?.linkedInventoryItemId;
+      if (!inventoryItemId) {
+        continue;
+      }
+
+      inventoryRestores.set(
+        inventoryItemId,
+        (inventoryRestores.get(inventoryItemId) ?? 0) + line.quantity,
+      );
+    }
+
+    inventoryRestores.forEach((quantity, inventoryItemId) => {
+      const item = this.inventoryItems().find((entry) => entry.id === inventoryItemId);
+      if (!item) {
+        return;
+      }
+
+      this.adjustInventoryQuantity({
+        inventoryItemId,
+        actualQuantity: item.stock + quantity,
+        reason: `Annullamento documento ${transaction.reference}`,
+        operator: 'Cassa',
+      });
+    });
+
+    const annullamentoTag = `Documento annullato il ${new Date().toISOString().slice(0, 10)}`;
+    const updated: CashTransactionRecord = {
+      ...transaction,
+      status: 'annullato',
+      settledAt: null,
+      notes: transaction.notes.includes(annullamentoTag)
+        ? transaction.notes
+        : [transaction.notes.trim(), annullamentoTag].filter(Boolean).join(' · '),
+    };
+
+    this.updateCashTransaction(updated);
     return updated;
   }
 
@@ -3592,6 +3642,64 @@ export class AudiomaxDataService {
     return merged;
   }
 
+  private mergeRemoteQuotesWithLocalDetails(
+    remoteRows: QuoteRecord[],
+    currentLocal: QuoteRecord[],
+  ): QuoteRecord[] {
+    if (!remoteRows.length) {
+      return currentLocal;
+    }
+
+    const localById = new Map(currentLocal.map((item) => [item.id, item]));
+    const merged = remoteRows.map((remoteRow) => {
+      const localRow = localById.get(remoteRow.id);
+      if (!localRow) {
+        return remoteRow;
+      }
+
+      return {
+        ...localRow,
+        ...remoteRow,
+        // Lo storico è additivo: uniamo remoto e locale per non perdere eventi
+        // registrati su un altro dispositivo (o ancora non ancora risaliti).
+        history: this.mergeQuoteHistory(remoteRow.history, localRow.history),
+      };
+    });
+
+    for (const localRow of currentLocal) {
+      if (!remoteRows.some((remoteRow) => remoteRow.id === localRow.id)) {
+        merged.push(localRow);
+      }
+    }
+
+    return merged;
+  }
+
+  /**
+   * Unisce due storici operativi di preventivo senza duplicati (dedup per id),
+   * ordinati dal più recente al più vecchio e limitati alle ultime 200 voci
+   * per non far crescere la colonna jsonb in modo indefinito.
+   */
+  private mergeQuoteHistory(
+    remoteHistory: QuoteHistoryEntry[] | undefined,
+    localHistory: QuoteHistoryEntry[] | undefined,
+  ): QuoteHistoryEntry[] | undefined {
+    const byId = new Map<string, QuoteHistoryEntry>();
+    for (const entry of [...(remoteHistory ?? []), ...(localHistory ?? [])]) {
+      if (entry?.id) {
+        byId.set(entry.id, entry);
+      }
+    }
+
+    if (!byId.size) {
+      return undefined;
+    }
+
+    return [...byId.values()]
+      .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+      .slice(0, 200);
+  }
+
   /**
    * Riconosce gli errori di "tabella inesistente" restituiti da Supabase.
    * PostgREST restituisce `PGRST205` (tabella assente dalla cache dello schema),
@@ -3692,7 +3800,7 @@ export class AudiomaxDataService {
           .order('last_contact', { ascending: false })),
         scope(client
           .from(supabaseConfig.tables.quotes)
-          .select('id, customer_name, project_type, value, stage, due_date')
+          .select('*')
           .order('due_date', { ascending: true })),
         scope(client
           .from(supabaseConfig.tables.appointments)
@@ -3832,7 +3940,7 @@ export class AudiomaxDataService {
     }
 
     if (remoteQuotes.length) {
-      this.quotes.set(this.mergeRemoteWithLocalUpdates(remoteQuotes, this.quotes()));
+      this.quotes.set(this.mergeRemoteQuotesWithLocalDetails(remoteQuotes, this.quotes()));
     }
 
     if (remoteAppointments.length) {
@@ -4162,6 +4270,23 @@ export class AudiomaxDataService {
                                 .upsert(tag(this.toPortalCommunicationRow(payload as PortalCommunicationRecord)));
 
     if (result.error) {
+      // Preventivo + storico: se la colonna `history` non esiste ancora sul
+      // database remoto (migrazione non applicata) ritentiamo l'upsert senza
+      // storico, così il resto del preventivo continua a sincronizzarsi e
+      // segnaliamo comunque che lo schema va aggiornato.
+      if (kind === 'quote' && this.isMissingTableError(result.error)) {
+        const { history, ...rowWithoutHistory } = this.toQuoteRow(payload as QuoteRecord);
+        if (history) {
+          const retry = await client
+            .from(supabaseConfig.tables.quotes)
+            .upsert(tag(rowWithoutHistory));
+          if (!retry.error) {
+            this.supabase.connectionState.set('schema-required');
+            return;
+          }
+        }
+      }
+
       this.supabase.connectionState.set(
         this.isMissingTableError(result.error) ? 'schema-required' : 'error',
       );
@@ -4268,6 +4393,9 @@ export class AudiomaxDataService {
       due_date: item.dueDate,
       discount_amount: item.discountAmount,
       is_anonymous: item.isAnonymous,
+      // Se lo storico è vuoto non inviamo la chiave: così i preventivi continuano
+      // a sincronizzarsi anche su database non ancora migrati.
+      history: item.history?.length ? item.history : undefined,
     };
   }
 
@@ -4647,6 +4775,7 @@ export class AudiomaxDataService {
       dueDate: row.due_date,
       discountAmount: row.discount_amount != null ? Number(row.discount_amount) : undefined,
       isAnonymous: row.is_anonymous != null ? Boolean(row.is_anonymous) : undefined,
+      history: Array.isArray(row.history) && row.history.length ? row.history : undefined,
     };
   }
 

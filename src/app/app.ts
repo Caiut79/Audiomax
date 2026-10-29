@@ -7,7 +7,6 @@ import { AuthService } from './auth.service';
 import { BrowserStorageService } from './browser-storage.service';
 import { CompanyProfileRecord } from './crm-runtime-data';
 import { crmSections } from './crm-sections';
-import { SupabaseService } from './supabase.service';
 import { ThemeService } from './theme.service';
 
 @Component({
@@ -21,7 +20,6 @@ export class App {
   private readonly data = inject(AudiomaxDataService);
   private readonly auth = inject(AuthService);
   private readonly storage = inject(BrowserStorageService);
-  private readonly supabase = inject(SupabaseService);
   private readonly themeService = inject(ThemeService);
   private readonly router = inject(Router);
   private readonly rootRoute = inject(ActivatedRoute);
@@ -81,12 +79,27 @@ export class App {
       key: 'system',
       label: 'Portale e sistema',
       icon: 'SY',
-      ids: ['portal-comms-admin', 'employee-portal', 'impostazioni'],
-      sections: ['portal-comms-admin', 'employee-portal', 'impostazioni'].flatMap(
+      // ✅ Il portale dipendenti è accessibile solo dal link pubblico (/portale-dipendenti),
+      //    non dalla navigazione del gestionale: evita di restare "intrappolati" nel portale.
+      ids: ['registro', 'portal-comms-admin', 'impostazioni'],
+      sections: ['registro', 'portal-comms-admin', 'impostazioni'].flatMap(
         (id) => crmSections.filter((s) => s.id === id),
       ),
     },
   ];
+
+  /**
+   * Gruppi di navigazione effettivamente visibili all'utente collegato.
+   * Il registro attività è riservato al titolare: il profilo operativo non lo vede.
+   */
+  protected readonly visibleNavGroups = computed(() =>
+    this.navGroups
+      .map((group) => ({
+        ...group,
+        sections: group.sections.filter((section) => this.canAccessSection(section.id)),
+      }))
+      .filter((group) => group.sections.length > 0),
+  );
 
   protected readonly topMetrics = computed(() => [
     {
@@ -107,8 +120,6 @@ export class App {
     },
   ]);
 
-  protected readonly connectionLabel = this.supabase.connectionLabel;
-  protected readonly connectionState = this.supabase.connectionState;
   protected readonly currentTheme = this.themeService.theme;
 
   // ===== Sessione attiva: azienda, ruolo e uscita =====
@@ -116,6 +127,19 @@ export class App {
   protected readonly accountEmail = this.auth.accountEmail;
   protected readonly roleLabel = this.auth.roleLabel;
   protected readonly isSuperAdmin = this.auth.isSuperAdmin;
+  /** True se l'accesso è del titolare (o super admin): vede anche il registro attività. */
+  protected readonly canViewAuditRegister = this.auth.canViewAuditRegister;
+
+  /**
+   * Decide se la voce di menu può essere mostrata all'utente collegato.
+   * Al momento l'unica sezione riservata è il registro attività (solo titolare).
+   */
+  private canAccessSection(sectionId: string): boolean {
+    if (sectionId === 'registro') {
+      return this.canViewAuditRegister();
+    }
+    return true;
+  }
 
   // ========================================================================
   // ONBOARDING PRIMO ACCESSO · dati azienda

@@ -32,8 +32,10 @@
 
     .nav-item {
       justify-content: center;
-      // ✅ Padding verticale IDENTICO alla modalità expanded per evitare shift verticali
-      padding: 0.6rem 0;
+      // ✅ Solo padding ORIZZONTALE: il padding verticale resta quello della modalità
+      //    expanded (definito una sola volta in `.sidebar .nav-item`), così le icone
+      //    non si spostano di posizione durante il collapse/expand.
+      padding-inline: 0;
       // Rimuove il gap con animazione sincronizzata alla larghezza
       gap: 0;
     }
@@ -42,9 +44,9 @@
       margin: 0;
     }
 
-    // ✅ Resetta margini laterali, mantiene margin-bottom IDENTICO all'expanded (0.28rem)
+    // ✅ Solo margine orizzontale: il margin-bottom resta quello dell'expanded (0.28rem)
     .nav-home {
-      margin: 0 0 0.28rem;
+      margin-inline: 0;
     }
 
     .nav-group {
@@ -53,8 +55,8 @@
 
     .nav-group-label {
       justify-content: center;
-      // ✅ Padding verticale IDENTICO alla modalità expanded (0.5rem top / 0.24rem bottom)
-      padding: 0.5rem 0 0.24rem;
+      // ✅ Solo padding orizzontale: la spaziatura verticale resta identica all'expanded
+      padding-inline: 0;
     }
 
     .nav-group-icon {
@@ -63,7 +65,8 @@
 
     .sidebar-header {
       justify-content: center;
-      padding: 1rem 0.5rem;
+      // ✅ Solo padding orizzontale: l'altezza dell'header resta identica all'expanded
+      padding-inline: 0.5rem;
     }
 
     .sidebar-footer {
@@ -88,18 +91,19 @@
   .app-shell.sidebar-collapsed {
     grid-template-columns: 5.35rem minmax(0, 1fr);
 
-    // ✅ Allineamento padding verticale IDENTICO alla modalità expanded @1280px+
+    // ✅ Solo geometria orizzontale: i valori verticali arrivano dalle regole comuni
+    //    della sidebar, quindi le icone non cambiano posizione durante l'animazione.
     .nav-item {
-      padding: 0.62rem 0;
+      padding-inline: 0;
       gap: 0;
     }
 
     .nav-group-label {
-      padding: 0.55rem 0 0.32rem;
+      padding-inline: 0;
     }
 
     .nav-home {
-      margin: 0 0 0.28rem;
+      margin-inline: 0;
     }
   }
 
@@ -210,11 +214,6 @@
   .nav-item {
     padding: 0.62rem 0.7rem;
     border-radius: 0.9rem;
-    transition:
-      border-color 0.2s ease,
-      background 0.2s ease,
-      box-shadow 0.2s ease,
-      transform 0.2s ease;
   }
 
   .nav-item:hover {
@@ -328,7 +327,7 @@
 
   // ✅ Separatore colorato: ogni capo categoria viene introdotto dal proprio colore,
   //    così i gruppi restano distinguibili anche scorrendo velocemente il menu.
-  + .nav-group {
+  +.nav-group {
     margin-top: 0.24rem;
     padding-top: 0.3rem;
     border-top: 1px solid var(--nav-group-accent-border);
@@ -401,12 +400,15 @@
   font-size: 0.92rem;
   font-weight: 650;
   white-space: nowrap;
-  // ✅ Aggiunte padding e gap alle transizioni con stessa durata/curva della grid
-  //    (stesse proprietà hanno override dentro .sidebar-collapsed, quindi si animano senza scalino)
+  // ✅ Unica definizione di transizione della voce di menu (nessun override nei
+  //    breakpoint): gli stati visivi durano 0.18s, la geometria segue la larghezza
+  //    della sidebar con la stessa curva/durata della griglia → nessuno scalino.
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
     color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease,
     padding 0.38s cubic-bezier(0.22, 1, 0.36, 1),
     gap 0.38s cubic-bezier(0.22, 1, 0.36, 1),
     justify-content 0.38s cubic-bezier(0.22, 1, 0.36, 1);
@@ -502,7 +504,7 @@
 .sidebar-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.65rem 0.82rem;
   border-top: 1px solid var(--sidebar-border);
@@ -996,6 +998,7 @@
 // design system (--surface-*, --border-*, --shadow-*): qui restano solo le
 // differenze realmente specifiche di questo modulo, senza colori hardcoded.
 :host-context([data-theme='dark']) {
+
   // Nel menu scuro le etichette di categoria usano il colore del gruppo
   .nav-group-label {
     color: var(--nav-group-accent);
@@ -1054,6 +1057,7 @@
 }
 
 @media (max-width: 768px) {
+
   .app-shell,
   .app-shell.sidebar-collapsed {
     grid-template-columns: minmax(0, 1fr);
@@ -1259,7 +1263,7 @@
     grid-column: 1 / -1;
   }
 
-  > span {
+  >span {
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--text-secondary);

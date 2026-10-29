@@ -108,6 +108,18 @@ export interface QuoteRecord {
   attachmentName?: string;
   notes?: string;
   lines?: QuoteLineRecord[];
+  history?: QuoteHistoryEntry[];
+}
+
+export interface QuoteHistoryEntry {
+  id: string;
+  title: string;
+  actor: string;
+  how: string;
+  why: string;
+  badge: string;
+  tone: 'info' | 'success' | 'warning' | 'neutral';
+  createdAt: string;
 }
 
 export interface QuoteLineRecord {
@@ -492,7 +504,7 @@ export interface CashTransactionRecord {
   electronicMethod?: 'bancomat' | 'carta' | null;
   electronicFeePercent?: number;
   electronicFeeAmount?: number;
-  status: 'pagato' | 'sospeso' | 'insoluto';
+  status: 'pagato' | 'sospeso' | 'insoluto' | 'annullato';
   createdAt: string;
   notes: string;
   receivedAmount: number;

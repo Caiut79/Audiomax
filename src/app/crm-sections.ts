@@ -14,6 +14,7 @@ export type CrmSectionId =
   | 'tecnico'
   | 'ecommerce'
   | 'impostazioni'
+  | 'registro'
   | 'report';
 
 export interface CrmSection {
@@ -286,6 +287,22 @@ export const crmSections: CrmSection[] = [
       'Andamento clienti e servizi',
     ],
     metricLabel: 'Report',
+    metricValue: '—',
+  },
+  {
+    id: 'registro',
+    route: 'registro-attivita',
+    label: 'Registro attività',
+    icon: '📋',
+    summary: 'Tracciamento di chi ha fatto cosa, quando, come e perché.',
+    description:
+      'Registro operativo centralizzato: raccoglie le attività di tutta l’azienda con operatore, data, ora, modalità e motivo, con filtri per periodo, operatore e tipo di attività.',
+    highlights: [
+      'Chi ha fatto cosa, a che ora e perché',
+      'Filtri per periodo, operatore e categoria',
+      'Visibile solo al titolare dell’azienda',
+    ],
+    metricLabel: 'Eventi tracciati',
     metricValue: '—',
   },
 ];

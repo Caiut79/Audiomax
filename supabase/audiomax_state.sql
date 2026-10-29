@@ -47,6 +47,12 @@ create table if not exists public.crm_quotes (
   updated_at timestamptz not null default now()
 );
 
+-- ⭐ Storico operativo del preventivo: registro "chi fa cosa, a che ora, come e perché".
+-- Colonna jsonb additiva: se assente l'app continua a sincronizzare il preventivo
+-- senza storico e segnala lo stato "schema richiesto".
+alter table public.crm_quotes
+  add column if not exists history jsonb not null default '[]'::jsonb;
+
 create table if not exists public.crm_appointments (
   id text primary key,
   title text not null,

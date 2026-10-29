@@ -47,7 +47,7 @@
       </a>
 
       <!-- Grouped navigation -->
-      @for (group of navGroups; track group.label) {
+      @for (group of visibleNavGroups(); track group.label) {
       <div class="nav-group" [attr.data-group]="group.key">
         <span class="nav-group-label">
           <span class="nav-group-icon">
@@ -251,6 +251,16 @@
                 d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.2a1 1 0 0 0 .6.9h.1a1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.2a1 1 0 0 0-.9.6z" />
             </svg>
             }
+            @case ('registro') {
+            <!-- Icona "Registro attività": documento con righe e spunta -->
+            <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+              <path d="M14 3v5h5" />
+              <path d="M8.5 13h7" />
+              <path d="M8.5 16.5h4.5" />
+            </svg>
+            }
             @case ('report') {
             <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
               stroke-linecap="round" stroke-linejoin="round">
@@ -276,10 +286,6 @@
     </nav>
 
     <div class="sidebar-footer">
-      <div class="sidebar-status" [class.connected]="connectionState() === 'connected'">
-        <span class="status-dot"></span>
-        <span class="status-label">{{ connectionLabel() }}</span>
-      </div>
       <div class="sidebar-footer-actions">
         <button class="theme-btn sidebar-theme-btn" (click)="toggleTheme()" type="button"
           [attr.aria-label]="currentTheme() === 'dark' ? 'Passa al tema chiaro' : 'Passa al tema scuro'">
@@ -295,8 +301,7 @@
           </svg>
           }
         </button>
-        <button class="theme-btn sidebar-logout-btn" (click)="logout()" type="button"
-          aria-label="Esci dal gestionale">
+        <button class="theme-btn sidebar-logout-btn" (click)="logout()" type="button" aria-label="Esci dal gestionale">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -450,23 +455,23 @@
       <div class="onboarding-form">
         <label class="onboarding-field wide">
           <span>Ragione sociale</span>
-          <input type="text" [value]="companyProfile().legalName"
-            (change)="updateOnboardingField('legalName', $event)" placeholder="Es. Audiomax S.r.l.">
+          <input type="text" [value]="companyProfile().legalName" (change)="updateOnboardingField('legalName', $event)"
+            placeholder="Es. Audiomax S.r.l.">
         </label>
         <label class="onboarding-field">
           <span>Partita IVA</span>
-          <input type="text" [value]="companyProfile().vatNumber"
-            (change)="updateOnboardingField('vatNumber', $event)" placeholder="Es. IT01234567890">
+          <input type="text" [value]="companyProfile().vatNumber" (change)="updateOnboardingField('vatNumber', $event)"
+            placeholder="Es. IT01234567890">
         </label>
         <label class="onboarding-field">
           <span>Codice fiscale</span>
-          <input type="text" [value]="companyProfile().taxCode"
-            (change)="updateOnboardingField('taxCode', $event)" placeholder="Codice fiscale azienda">
+          <input type="text" [value]="companyProfile().taxCode" (change)="updateOnboardingField('taxCode', $event)"
+            placeholder="Codice fiscale azienda">
         </label>
         <label class="onboarding-field wide">
           <span>Indirizzo sede</span>
-          <input type="text" [value]="companyProfile().address"
-            (change)="updateOnboardingField('address', $event)" placeholder="Via e numero civico">
+          <input type="text" [value]="companyProfile().address" (change)="updateOnboardingField('address', $event)"
+            placeholder="Via e numero civico">
         </label>
         <label class="onboarding-field">
           <span>CAP</span>
@@ -475,23 +480,23 @@
         </label>
         <label class="onboarding-field">
           <span>Città</span>
-          <input type="text" [value]="companyProfile().city"
-            (change)="updateOnboardingField('city', $event)" placeholder="Comune sede">
+          <input type="text" [value]="companyProfile().city" (change)="updateOnboardingField('city', $event)"
+            placeholder="Comune sede">
         </label>
         <label class="onboarding-field">
           <span>Provincia</span>
-          <input type="text" [value]="companyProfile().province"
-            (change)="updateOnboardingField('province', $event)" placeholder="Es. TO">
+          <input type="text" [value]="companyProfile().province" (change)="updateOnboardingField('province', $event)"
+            placeholder="Es. TO">
         </label>
         <label class="onboarding-field">
           <span>Nazione</span>
-          <input type="text" [value]="companyProfile().country"
-            (change)="updateOnboardingField('country', $event)" placeholder="Italia o IT">
+          <input type="text" [value]="companyProfile().country" (change)="updateOnboardingField('country', $event)"
+            placeholder="Italia o IT">
         </label>
         <label class="onboarding-field">
           <span>Codice SDI</span>
-          <input type="text" [value]="companyProfile().sdiCode"
-            (change)="updateOnboardingField('sdiCode', $event)" placeholder="Codice SDI emittente">
+          <input type="text" [value]="companyProfile().sdiCode" (change)="updateOnboardingField('sdiCode', $event)"
+            placeholder="Codice SDI emittente">
         </label>
         <label class="onboarding-field">
           <span>PEC</span>

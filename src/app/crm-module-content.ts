@@ -550,6 +550,18 @@ export const crmModuleContent: Record<CrmSectionId, CrmModuleContent> = {
     checklist: [],
     integrations: [],
   },
+  registro: {
+    sectionId: 'registro',
+    operationalStatus: 'Registro attività: chi ha fatto cosa, quando, come e perché.',
+    owner: 'Titolare',
+    primaryAction: 'Azzera filtri',
+    secondaryAction: 'Esporta registro',
+    metrics: [],
+    workflow: [],
+    queue: [],
+    checklist: [],
+    integrations: ['Preventivi', 'Cassa', 'Magazzino', 'Spese'],
+  },
   ecommerce: {
     sectionId: 'ecommerce',
     operationalStatus: 'Canale e-commerce predisposto per catalogo, lead e ordini.',
