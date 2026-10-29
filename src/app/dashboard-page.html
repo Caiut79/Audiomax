@@ -1,22 +1,25 @@
 <section class="dashboard dashboard-simple">
   <ng-template #dashboardIcon let-key>
-    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       @switch (key) {
       @case ('contatti') {
-        <circle cx="9" cy="7" r="3" /><path d="M3 21v-3a5 5 0 0 1 10 0v3M16 4a3 3 0 0 1 0 6M17 14a4 4 0 0 1 4 4v3" />
+      <circle cx="9" cy="7" r="3" />
+      <path d="M3 21v-3a5 5 0 0 1 10 0v3M16 4a3 3 0 0 1 0 6M17 14a4 4 0 0 1 4 4v3" />
       }
       @case ('preventivi') {
-        <path d="M14 3H5v18h14V8l-5-5ZM14 3v5h5M8 12h8M8 16h5" />
+      <path d="M14 3H5v18h14V8l-5-5ZM14 3v5h5M8 12h8M8 16h5" />
       }
       @case ('agenda') {
-        <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M8 3v4M16 3v4M3 11h18M8 15h2M14 15h2" />
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M8 3v4M16 3v4M3 11h18M8 15h2M14 15h2" />
       }
       @case ('cassa') {
-        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h4" />
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18M7 15h4" />
       }
       @default {
-        <path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z" />
+      <path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z" />
       }
       }
     </svg>
@@ -30,11 +33,12 @@
     </div>
     <div class="dash-hero-side">
       <div class="dash-hero-actions">
-        <span class="dash-conn-pill" [class.connected]="connectionLabel() === 'Supabase connesso'">
-          <span class="dash-conn-dot"></span>
-          {{ connectionLabel() }}
+        <span class="dash-conn-pill" [attr.data-state]="connectionState()" [attr.aria-label]="connectionLabel()"
+          [attr.title]="connectionLabel()">
+          <span class="dash-conn-dot" aria-hidden="true"></span>
         </span>
-        <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Pianifica appuntamento</button>
+        <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Pianifica
+          appuntamento</button>
         <a class="btn-ghost" routerLink="/clienti">Apri contatti</a>
       </div>
       <div class="dash-hero-stats">
@@ -55,49 +59,49 @@
   </div>
 
   <div class="search-bar">
-    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <circle cx="11" cy="11" r="8"/>
-      <path d="m21 21-4.35-4.35"/>
+    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
     </svg>
-    <input
-      class="search-input"
-      type="search"
+    <input class="search-input" type="search"
       aria-label="Cerca globale in dashboard: clienti, preventivi, appuntamenti, ticket"
-      placeholder="Cerca cliente, preventivo, appuntamento, ticket…"
-      [value]="searchTerm()"
-      (input)="updateSearchTerm($event)"
-    >
+      placeholder="Cerca cliente, preventivo, appuntamento, ticket…" [value]="searchTerm()"
+      (input)="updateSearchTerm($event)">
   </div>
 
   @if (searchTerm().trim()) {
-    <div class="search-results-panel">
-      @if (searchResults().length) {
-        <div class="search-results-grid">
-          @for (result of searchResults(); track result.id + result.category) {
-            <a class="search-result" [routerLink]="result.route">
-              <span class="result-category">{{ result.category }}</span>
-              <strong>{{ result.title }}</strong>
-              <p>{{ result.detail }}</p>
-              <span class="badge badge-info">{{ result.status }}</span>
-            </a>
-          }
-        </div>
-      } @else {
-        <p class="empty-state">Nessun risultato per "{{ searchTerm() }}"</p>
+  <div class="search-results-panel">
+    @if (searchResults().length) {
+    <div class="search-results-grid">
+      @for (result of searchResults(); track result.id + result.category) {
+      <a class="search-result" [routerLink]="result.route">
+        <span class="result-category">{{ result.category }}</span>
+        <strong>{{ result.title }}</strong>
+        <p>{{ result.detail }}</p>
+        <span class="badge badge-info">{{ result.status }}</span>
+      </a>
       }
     </div>
+    } @else {
+    <p class="empty-state">Nessun risultato per "{{ searchTerm() }}"</p>
+    }
+  </div>
   }
 
   <div class="kpi-row kpi-row-compact">
     @for (metric of overviewMetrics(); track metric.label) {
-      <a class="kpi-card" [class.kpi-blue]="metric.tone === 'kpi-blue'" [class.kpi-green]="metric.tone === 'kpi-green'" [class.kpi-orange]="metric.tone === 'kpi-orange'" [class.kpi-purple]="metric.tone === 'kpi-purple'" [routerLink]="metric.route">
-        <span class="kpi-icon"><ng-container [ngTemplateOutlet]="dashboardIcon" [ngTemplateOutletContext]="{ $implicit: metric.icon }" /></span>
-        <div class="kpi-body">
-          <span class="kpi-value">{{ metric.value }}</span>
-          <span class="kpi-label">{{ metric.label }}</span>
-          <span class="kpi-detail">{{ metric.detail }}</span>
-        </div>
-      </a>
+    <a class="kpi-card" [class.kpi-blue]="metric.tone === 'kpi-blue'" [class.kpi-green]="metric.tone === 'kpi-green'"
+      [class.kpi-orange]="metric.tone === 'kpi-orange'" [class.kpi-purple]="metric.tone === 'kpi-purple'"
+      [routerLink]="metric.route">
+      <span class="kpi-icon"><ng-container [ngTemplateOutlet]="dashboardIcon"
+          [ngTemplateOutletContext]="{ $implicit: metric.icon }" /></span>
+      <div class="kpi-body">
+        <span class="kpi-value">{{ metric.value }}</span>
+        <span class="kpi-label">{{ metric.label }}</span>
+        <span class="kpi-detail">{{ metric.detail }}</span>
+      </div>
+    </a>
     }
   </div>
 
@@ -108,14 +112,21 @@
           <h2 class="section-title">Calendario operativo</h2>
           <div class="calendar-head-meta">
             <span class="calendar-meta-pill">Vista {{ calendarViewMode() }}</span>
-            <span class="calendar-meta-pill">Selezione {{ dashboardSelectedDateAppointments().length }} appuntamenti</span>
+            <span class="calendar-meta-pill">Selezione {{ dashboardSelectedDateAppointments().length }}
+              appuntamenti</span>
           </div>
         </div>
         <div class="calendar-head-actions">
           <div class="btn-group calendar-toolbar-group">
-            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('giorno')" [class.active]="calendarViewMode() === 'giorno'" [attr.aria-pressed]="calendarViewMode() === 'giorno'">Giorno</button>
-            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('settimana')" [class.active]="calendarViewMode() === 'settimana'" [attr.aria-pressed]="calendarViewMode() === 'settimana'">Settimana</button>
-            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('mese')" [class.active]="calendarViewMode() === 'mese'" [attr.aria-pressed]="calendarViewMode() === 'mese'">Mese</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('giorno')"
+              [class.active]="calendarViewMode() === 'giorno'"
+              [attr.aria-pressed]="calendarViewMode() === 'giorno'">Giorno</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('settimana')"
+              [class.active]="calendarViewMode() === 'settimana'"
+              [attr.aria-pressed]="calendarViewMode() === 'settimana'">Settimana</button>
+            <button class="btn-ghost btn-sm" (click)="calendarViewMode.set('mese')"
+              [class.active]="calendarViewMode() === 'mese'"
+              [attr.aria-pressed]="calendarViewMode() === 'mese'">Mese</button>
           </div>
           <div class="btn-group calendar-toolbar-group">
             <button class="btn-ghost btn-sm" (click)="prevCalendarPeriod()">‹</button>
@@ -123,7 +134,7 @@
             <button class="btn-ghost btn-sm" (click)="nextCalendarPeriod()">›</button>
           </div>
           <button type="button" class="btn-ghost"
-                  (click)="openMiniHrDashboard(dashboardSelectedDate() || todayIso(), 'ferie')">
+            (click)="openMiniHrDashboard(dashboardSelectedDate() || todayIso(), 'ferie')">
             Gestisci presenze
           </button>
           <button type="button" class="btn-primary" (click)="openDashboardAppointmentModal(todayIso())">Nuovo</button>
@@ -145,59 +156,52 @@
           </div>
 
           @if (calendarViewMode() !== 'giorno') {
-            <div class="month-weekdays">
-              @for (label of calendarWeekdays; track label) {
-                <span>{{ label }}</span>
-              }
-            </div>
+          <div class="month-weekdays">
+            @for (label of calendarWeekdays; track label) {
+            <span>{{ label }}</span>
+            }
+          </div>
           }
 
-          <div class="month-grid" [class.view-giorno]="calendarViewMode() === 'giorno'" [class.view-settimana]="calendarViewMode() === 'settimana'">
+          <div class="month-grid" [class.view-giorno]="calendarViewMode() === 'giorno'"
+            [class.view-settimana]="calendarViewMode() === 'settimana'">
             @for (day of appointmentCalendarCells(); track day.isoDate) {
-              <button
-                type="button"
-                class="month-day"
-                [class.is-today]="day.isToday"
-                [class.is-selected]="day.isoDate === dashboardSelectedDate()"
-                [class.is-outside]="!day.inCurrentMonth"
-                [class.is-sunday]="day.isSunday"
-                [class.is-holiday]="!!day.holidayLabel"
-                [attr.aria-label]="_longItalianDate(day.isoDate) + ' · ' + day.items.length + ' appuntamenti'"
-                (click)="handleDashboardCalendarDateClick(day.isoDate, day.items.length)"
-              >
-                <span class="month-day-head">
-                  <span class="day-head-left">
-                    @if (calendarViewMode() === 'giorno') {
-                      <span class="day-weekday">{{ day.weekdayLabel }}</span>
-                    }
-                    <strong>{{ day.dayNumber }}</strong>
-                  </span>
-                  <span>{{ day.items.length }}</span>
+            <button type="button" class="month-day" [class.is-today]="day.isToday"
+              [class.is-selected]="day.isoDate === dashboardSelectedDate()" [class.is-outside]="!day.inCurrentMonth"
+              [class.is-sunday]="day.isSunday" [class.is-holiday]="!!day.holidayLabel"
+              [attr.aria-label]="_longItalianDate(day.isoDate) + ' · ' + day.items.length + ' appuntamenti'"
+              (click)="handleDashboardCalendarDateClick(day.isoDate, day.items.length)">
+              <span class="month-day-head">
+                <span class="day-head-left">
+                  @if (calendarViewMode() === 'giorno') {
+                  <span class="day-weekday">{{ day.weekdayLabel }}</span>
+                  }
+                  <strong>{{ day.dayNumber }}</strong>
                 </span>
-                @if (day.holidayLabel) {
-                  <span class="month-holiday-label">{{ day.holidayLabel }}</span>
+                <span>{{ day.items.length }}</span>
+              </span>
+              @if (day.holidayLabel) {
+              <span class="month-holiday-label">{{ day.holidayLabel }}</span>
+              }
+              @if (day.items.length) {
+              <span class="month-day-events">
+                @for (appointment of day.items.slice(0, 2); track appointment.id) {
+                <span class="month-event-pill"
+                  [class.type-negozio]="appointmentTypeClass(appointment.appointmentType) === 'negozio'"
+                  [class.type-uscita]="appointmentTypeClass(appointment.appointmentType) === 'uscita'"
+                  [class.type-installazione]="appointmentTypeClass(appointment.appointmentType) === 'installazione'"
+                  [class.type-assistenza]="appointmentTypeClass(appointment.appointmentType) === 'assistenza'"
+                  [class.type-sopralluogo]="appointmentTypeClass(appointment.appointmentType) === 'sopralluogo'">
+                  <strong>{{ appointment.scheduledAt.slice(11, 16) }}</strong>
+                  <span>{{ appointment.appointmentType }}</span>
+                </span>
                 }
-                @if (day.items.length) {
-                  <span class="month-day-events">
-                    @for (appointment of day.items.slice(0, 2); track appointment.id) {
-                      <span
-                        class="month-event-pill"
-                        [class.type-negozio]="appointmentTypeClass(appointment.appointmentType) === 'negozio'"
-                        [class.type-uscita]="appointmentTypeClass(appointment.appointmentType) === 'uscita'"
-                        [class.type-installazione]="appointmentTypeClass(appointment.appointmentType) === 'installazione'"
-                        [class.type-assistenza]="appointmentTypeClass(appointment.appointmentType) === 'assistenza'"
-                        [class.type-sopralluogo]="appointmentTypeClass(appointment.appointmentType) === 'sopralluogo'"
-                      >
-                        <strong>{{ appointment.scheduledAt.slice(11, 16) }}</strong>
-                        <span>{{ appointment.appointmentType }}</span>
-                      </span>
-                    }
-                    @if (day.items.length > 2) {
-                      <span class="month-more">+{{ day.items.length - 2 }} altri</span>
-                    }
-                  </span>
+                @if (day.items.length > 2) {
+                <span class="month-more">+{{ day.items.length - 2 }} altri</span>
                 }
-              </button>
+              </span>
+              }
+            </button>
             }
           </div>
         </div>
@@ -214,18 +218,20 @@
           <span class="badge badge-neutral dash-panel-count">{{ dashboardAlerts().length }}</span>
         </div>
         @if (dashboardAlerts().length) {
-          <div class="dashboard-alerts">
-            @for (alert of dashboardAlerts(); track alert.id) {
-              <a class="dashboard-alert" [class.alert-warning]="alert.tone === 'warning'" [class.alert-danger]="alert.tone === 'danger'" [class.alert-info]="alert.tone === 'info'" [routerLink]="alert.route">
-                <span class="dashboard-alert-kicker">{{ alert.kicker }}</span>
-                <strong>{{ alert.title }}</strong>
-                <p>{{ alert.detail }}</p>
-                <span class="dashboard-alert-link">{{ alert.cta }}</span>
-              </a>
-            }
-          </div>
+        <div class="dashboard-alerts">
+          @for (alert of dashboardAlerts(); track alert.id) {
+          <a class="dashboard-alert" [class.alert-warning]="alert.tone === 'warning'"
+            [class.alert-danger]="alert.tone === 'danger'" [class.alert-info]="alert.tone === 'info'"
+            [routerLink]="alert.route">
+            <span class="dashboard-alert-kicker">{{ alert.kicker }}</span>
+            <strong>{{ alert.title }}</strong>
+            <p>{{ alert.detail }}</p>
+            <span class="dashboard-alert-link">{{ alert.cta }}</span>
+          </a>
+          }
+        </div>
         } @else {
-          <div class="dash-focus-empty">Nessun alert operativo aperto.</div>
+        <div class="dash-focus-empty">Nessun alert operativo aperto.</div>
         }
       </section>
 
@@ -238,11 +244,12 @@
         </div>
         <div class="actions-grid">
           @for (action of quickActions; track action.label) {
-            <a class="action-btn" [class.action-btn-primary]="action === quickActions[0]" [routerLink]="action.route">
-              <span class="action-icon"><ng-container [ngTemplateOutlet]="dashboardIcon" [ngTemplateOutletContext]="{ $implicit: action.icon }" /></span>
-              <strong class="action-label">{{ action.label }}</strong>
-              <small class="action-caption">{{ action.caption }}</small>
-            </a>
+          <a class="action-btn" [class.action-btn-primary]="action === quickActions[0]" [routerLink]="action.route">
+            <span class="action-icon"><ng-container [ngTemplateOutlet]="dashboardIcon"
+                [ngTemplateOutletContext]="{ $implicit: action.icon }" /></span>
+            <strong class="action-label">{{ action.label }}</strong>
+            <small class="action-caption">{{ action.caption }}</small>
+          </a>
           }
         </div>
       </section>
@@ -260,12 +267,12 @@
         </div>
         <div class="dash-focus-list">
           @for (quote of urgentQuotes(); track quote.id) {
-            <div class="dash-focus-item">
-              <strong>{{ quote.customerName }} · {{ quote.projectType }}</strong>
-              <span>{{ quoteDueStatus(quote.daysToDue) }} · € {{ quote.value.toLocaleString('it-IT') }}</span>
-            </div>
+          <div class="dash-focus-item">
+            <strong>{{ quote.customerName }} · {{ quote.projectType }}</strong>
+            <span>{{ quoteDueStatus(quote.daysToDue) }} · € {{ quote.value.toLocaleString('it-IT') }}</span>
+          </div>
           } @empty {
-            <div class="dash-focus-empty">Nessun preventivo urgente da seguire.</div>
+          <div class="dash-focus-empty">Nessun preventivo urgente da seguire.</div>
           }
         </div>
       </section>
@@ -283,12 +290,12 @@
         </div>
         <div class="dash-focus-list">
           @for (client of followUpClients(); track client.id) {
-            <div class="dash-focus-item">
-              <strong>{{ client.name }}</strong>
-              <span>{{ client.city }} · {{ client.status }}</span>
-            </div>
+          <div class="dash-focus-item">
+            <strong>{{ client.name }}</strong>
+            <span>{{ client.city }} · {{ client.status }}</span>
+          </div>
           } @empty {
-            <div class="dash-focus-empty">Nessun cliente prioritario al momento.</div>
+          <div class="dash-focus-empty">Nessun cliente prioritario al momento.</div>
           }
         </div>
       </section>
@@ -296,322 +303,302 @@
   </div>
 
   @if (dashboardAppointmentModalOpen()) {
-    <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDashboardAppointmentModal()">
-      <div class="ui-modal dashboard-appointment-modal dashboard-split-modal" (click)="$event.stopPropagation()">
-        <div class="ui-modal-head dashboard-modal-head">
-          <div>
-            <span class="detail-subtitle">Gestione Agenda</span>
-            <h2 class="op-card-title">{{ dashboardSelectedDateLabel() }}</h2>
-            <p class="dashboard-modal-copy">Visualizza gli appuntamenti della giornata o creane uno nuovo rapidamente.</p>
-          </div>
-          <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Chiudi</button>
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
+    <div class="ui-modal dashboard-appointment-modal dashboard-split-modal" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head dashboard-modal-head">
+        <div>
+          <span class="detail-subtitle">Gestione Agenda</span>
+          <h2 class="op-card-title">{{ dashboardSelectedDateLabel() }}</h2>
+          <p class="dashboard-modal-copy">Visualizza gli appuntamenti della giornata o creane uno nuovo rapidamente.</p>
         </div>
-        <div class="ui-modal-body dashboard-appointment-body">
-          <div class="dashboard-modal-split">
-            <!-- SEZIONE SINISTRA: Visualizzazione Appuntamenti -->
-            <aside class="dashboard-split-side" aria-label="Appuntamenti del giorno">
-              <div class="split-side-head">
-                <span class="detail-subtitle">In programma</span>
-                <strong>Appuntamenti del giorno</strong>
-                <span class="badge badge-info">{{ dashboardSelectedDateAppointments().length }}</span>
+        <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Chiudi</button>
+      </div>
+      <div class="ui-modal-body dashboard-appointment-body">
+        <div class="dashboard-modal-split">
+          <!-- SEZIONE SINISTRA: Visualizzazione Appuntamenti -->
+          <aside class="dashboard-split-side" aria-label="Appuntamenti del giorno">
+            <div class="split-side-head">
+              <span class="detail-subtitle">In programma</span>
+              <strong>Appuntamenti del giorno</strong>
+              <span class="badge badge-info">{{ dashboardSelectedDateAppointments().length }}</span>
+            </div>
+            <div class="split-side-list">
+              @for (appointment of dashboardSelectedDateAppointments(); track appointment.id) {
+              <div class="split-item">
+                <div class="split-item-time">
+                  <strong>{{ appointment.scheduledAt.slice(11, 16) }}</strong>
+                  <span class="badge badge-purple">{{ appointment.appointmentType }}</span>
+                </div>
+                <div class="split-item-details">
+                  <strong>{{ appointment.title }}</strong>
+                  <span>{{ appointment.customerName }}</span>
+                  <span>Operatore: {{ appointment.technician }}</span>
+                </div>
               </div>
-              <div class="split-side-list">
-                @for (appointment of dashboardSelectedDateAppointments(); track appointment.id) {
-                  <div class="split-item">
-                    <div class="split-item-time">
-                      <strong>{{ appointment.scheduledAt.slice(11, 16) }}</strong>
-                      <span class="badge badge-purple">{{ appointment.appointmentType }}</span>
-                    </div>
-                    <div class="split-item-details">
-                      <strong>{{ appointment.title }}</strong>
-                      <span>{{ appointment.customerName }}</span>
-                      <span>Operatore: {{ appointment.technician }}</span>
-                    </div>
-                  </div>
-                } @empty {
-                  <div class="split-empty">
-                    Nessun appuntamento presente. La giornata è libera.
-                  </div>
+              } @empty {
+              <div class="split-empty">
+                Nessun appuntamento presente. La giornata è libera.
+              </div>
+              }
+            </div>
+          </aside>
+
+          <!-- SEZIONE DESTRA: Nuovo Appuntamento -->
+          <form class="dashboard-form-main split-form-main" [formGroup]="dashboardAppointmentForm"
+            (ngSubmit)="saveDashboardAppointment()">
+            <div class="split-side-head">
+              <span class="detail-subtitle">Nuovo inserimento</span>
+              <strong>Crea un nuovo appuntamento</strong>
+            </div>
+
+            <div class="dashboard-form-panel">
+              <div class="dashboard-panel-head">
+                <span class="detail-subtitle">Tipo appuntamento</span>
+                <strong>Scegli il flusso</strong>
+              </div>
+              <div class="dashboard-type-grid">
+                @for (type of dashboardAppointmentTypes; track type.value) {
+                <button type="button" class="dashboard-type-card"
+                  [class.is-active]="isDashboardAppointmentTypeActive(type.value)"
+                  (click)="setDashboardAppointmentType(type.value)">
+                  <strong>{{ type.label }}</strong>
+                  <span>{{ type.detail }}</span>
+                </button>
                 }
               </div>
-            </aside>
+            </div>
 
-            <!-- SEZIONE DESTRA: Nuovo Appuntamento -->
-            <form class="dashboard-form-main split-form-main" [formGroup]="dashboardAppointmentForm" (ngSubmit)="saveDashboardAppointment()">
-              <div class="split-side-head">
-                <span class="detail-subtitle">Nuovo inserimento</span>
-                <strong>Crea un nuovo appuntamento</strong>
+            <div class="dashboard-form-panel">
+              <div class="dashboard-panel-head">
+                <span class="detail-subtitle">Cliente</span>
+                <strong>Anagrafica o inserimento rapido</strong>
               </div>
+              <div class="dashboard-appointment-grid">
+                <label class="dashboard-field wide">
+                  <span>Cliente registrato</span>
+                  <select (change)="selectDashboardClient($event)">
+                    <option value="">Seleziona dall'anagrafica</option>
+                    @for (client of dashboardQuickClients(); track client.id) {
+                    <option [value]="client.id">{{ client.name }} · {{ client.city }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="dashboard-field">
+                  <span>Cliente o referente</span>
+                  <input type="text" formControlName="customerName" placeholder="Cliente o referente">
+                </label>
+                <label class="dashboard-field wide">
+                  <span>Oggetto appuntamento</span>
+                  <input type="text" formControlName="title" placeholder="Es. installazione living, demo showroom">
+                </label>
+              </div>
+            </div>
 
-              <div class="dashboard-form-panel">
-                <div class="dashboard-panel-head">
-                  <span class="detail-subtitle">Tipo appuntamento</span>
-                  <strong>Scegli il flusso</strong>
-                </div>
-                <div class="dashboard-type-grid">
-                  @for (type of dashboardAppointmentTypes; track type.value) {
-                    <button
-                      type="button"
-                      class="dashboard-type-card"
-                      [class.is-active]="isDashboardAppointmentTypeActive(type.value)"
-                      (click)="setDashboardAppointmentType(type.value)"
-                    >
-                      <strong>{{ type.label }}</strong>
-                      <span>{{ type.detail }}</span>
-                    </button>
-                  }
-                </div>
+            <div class="dashboard-form-panel">
+              <div class="dashboard-panel-head">
+                <span class="detail-subtitle">Pianificazione</span>
+                <strong>Ora, durata e operatore</strong>
               </div>
-
-              <div class="dashboard-form-panel">
-                <div class="dashboard-panel-head">
-                  <span class="detail-subtitle">Cliente</span>
-                  <strong>Anagrafica o inserimento rapido</strong>
-                </div>
-                <div class="dashboard-appointment-grid">
-                  <label class="dashboard-field wide">
-                    <span>Cliente registrato</span>
-                    <select (change)="selectDashboardClient($event)">
-                      <option value="">Seleziona dall'anagrafica</option>
-                      @for (client of dashboardQuickClients(); track client.id) {
-                        <option [value]="client.id">{{ client.name }} · {{ client.city }}</option>
-                      }
-                    </select>
-                  </label>
-                  <label class="dashboard-field">
-                    <span>Cliente o referente</span>
-                    <input type="text" formControlName="customerName" placeholder="Cliente o referente">
-                  </label>
-                  <label class="dashboard-field wide">
-                    <span>Oggetto appuntamento</span>
-                    <input type="text" formControlName="title" placeholder="Es. installazione living, demo showroom">
-                  </label>
-                </div>
+              <div class="dashboard-time-slots">
+                @for (slot of dashboardQuickSlots; track slot.value) {
+                <button type="button" class="dashboard-slot" [class.is-active]="isDashboardTimeSlotActive(slot.value)"
+                  (click)="applyDashboardTimeSlot(slot.value)">
+                  {{ slot.label }}
+                </button>
+                }
               </div>
-
-              <div class="dashboard-form-panel">
-                <div class="dashboard-panel-head">
-                  <span class="detail-subtitle">Pianificazione</span>
-                  <strong>Ora, durata e operatore</strong>
-                </div>
-                <div class="dashboard-time-slots">
-                  @for (slot of dashboardQuickSlots; track slot.value) {
-                    <button
-                      type="button"
-                      class="dashboard-slot"
-                      [class.is-active]="isDashboardTimeSlotActive(slot.value)"
-                      (click)="applyDashboardTimeSlot(slot.value)"
-                    >
-                      {{ slot.label }}
-                    </button>
-                  }
-                </div>
-                <div class="dashboard-appointment-grid">
-                  <label class="dashboard-field">
-                    <span>Data e ora</span>
-                    <input type="datetime-local" formControlName="scheduledAt">
-                  </label>
-                  <label class="dashboard-field">
-                    <span>Durata</span>
-                    <select formControlName="durationMinutes">
-                      <option [value]="30">30 min</option>
-                      <option [value]="60">1 ora</option>
-                      <option [value]="90">1,5 ore</option>
-                      <option [value]="120">2 ore</option>
-                      <option [value]="180">3 ore</option>
-                      <option [value]="240">4 ore</option>
-                    </select>
-                  </label>
-                  <label class="dashboard-field">
-                    <span>Luogo</span>
-                    <select formControlName="locationType">
-                      <option value="showroom">Showroom</option>
-                      <option value="domicilio">Domicilio</option>
-                      <option value="officina">Officina</option>
-                    </select>
-                  </label>
-                  <label class="dashboard-field">
-                    <span>Operatore</span>
-                    <select formControlName="technician">
-                      @for (operator of dashboardOperators(); track operator) {
-                        <option [value]="operator">{{ operator }}</option>
-                      }
-                    </select>
-                  </label>
-                  @if (dashboardAppointmentForm.controls.appointmentType.value === 'installazione') {
-                    <label class="dashboard-field wide">
-                      <span>Preventivo associato</span>
-                      <select formControlName="linkedQuoteId" (change)="selectDashboardQuote($event)">
-                        <option value="">Seleziona preventivo ordine</option>
-                        @for (quote of dashboardQuickQuotes(); track quote.id) {
-                          <option [value]="quote.id">{{ quote.customerName }} · {{ quote.projectType }} · € {{ quote.value.toLocaleString('it-IT') }}</option>
-                        }
-                      </select>
-                    </label>
-                  }
-                </div>
+              <div class="dashboard-appointment-grid">
+                <label class="dashboard-field">
+                  <span>Data e ora</span>
+                  <input type="datetime-local" formControlName="scheduledAt">
+                </label>
+                <label class="dashboard-field">
+                  <span>Durata</span>
+                  <select formControlName="durationMinutes">
+                    <option [value]="30">30 min</option>
+                    <option [value]="60">1 ora</option>
+                    <option [value]="90">1,5 ore</option>
+                    <option [value]="120">2 ore</option>
+                    <option [value]="180">3 ore</option>
+                    <option [value]="240">4 ore</option>
+                  </select>
+                </label>
+                <label class="dashboard-field">
+                  <span>Luogo</span>
+                  <select formControlName="locationType">
+                    <option value="showroom">Showroom</option>
+                    <option value="domicilio">Domicilio</option>
+                    <option value="officina">Officina</option>
+                  </select>
+                </label>
+                <label class="dashboard-field">
+                  <span>Operatore</span>
+                  <select formControlName="technician">
+                    @for (operator of dashboardOperators(); track operator) {
+                    <option [value]="operator">{{ operator }}</option>
+                    }
+                  </select>
+                </label>
+                @if (dashboardAppointmentForm.controls.appointmentType.value === 'installazione') {
+                <label class="dashboard-field wide">
+                  <span>Preventivo associato</span>
+                  <select formControlName="linkedQuoteId" (change)="selectDashboardQuote($event)">
+                    <option value="">Seleziona preventivo ordine</option>
+                    @for (quote of dashboardQuickQuotes(); track quote.id) {
+                    <option [value]="quote.id">{{ quote.customerName }} · {{ quote.projectType }} · € {{
+                      quote.value.toLocaleString('it-IT') }}</option>
+                    }
+                  </select>
+                </label>
+                }
               </div>
-              <div class="form-actions split-actions">
-                <button type="submit" class="btn-primary">Salva appuntamento</button>
-                <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Annulla</button>
-              </div>
-            </form>
-          </div>
+            </div>
+            <div class="form-actions split-actions">
+              <button type="submit" class="btn-primary">Salva appuntamento</button>
+              <button type="button" class="btn-ghost" (click)="closeDashboardAppointmentModal()">Annulla</button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
+  </div>
   }
 
   <!-- ===================== TOAST LOCALE DASHBOARD ===================== -->
   @if (toastMessage()) {
-    <div class="ui-toast ui-toast-float"
-         role="status"
-         aria-live="polite"
-         [class.ui-toast-error]="toastTone() === 'error'"
-         [class.ui-toast-success]="toastTone() === 'success'">
-      <span>{{ toastMessage() }}</span>
-    </div>
+  <div class="ui-toast ui-toast-float" role="status" aria-live="polite" [class.ui-toast-error]="toastTone() === 'error'"
+    [class.ui-toast-success]="toastTone() === 'success'">
+    <span>{{ toastMessage() }}</span>
+  </div>
   }
 
   <!-- ===================== MINI-MODALE HR DASHBOARD ⚡ Operazioni Dipendenti ===================== -->
   @if (miniHrDashOpen()) {
-    <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="miniHrDashOpen.set(false)">
-      <div class="ui-modal mini-hr-modal mini-hr-modal-dash" (click)="$event.stopPropagation()">
-        <div class="ui-modal-head mini-hr-head">
-          <div>
-            <span class="detail-subtitle">Gestione Risorse Umane</span>
-            <h2 class="op-card-title">⚡ Operazioni Dipendenti</h2>
-            <p class="text-muted small" style="margin-top: 0.25rem;">
-              Inserisci rapidamente Straordinari, Ferie, Malattie o Permessi. I dati vengono sincronizzati
-              in planner e nel report paghe PDF.
-            </p>
-          </div>
-          <button type="button" class="btn-ghost" (click)="miniHrDashOpen.set(false)">Chiudi</button>
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
+    <div class="ui-modal mini-hr-modal mini-hr-modal-dash" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head mini-hr-head">
+        <div>
+          <span class="detail-subtitle">Gestione Risorse Umane</span>
+          <h2 class="op-card-title">⚡ Operazioni Dipendenti</h2>
+          <p class="text-muted small" style="margin-top: 0.25rem;">
+            Inserisci rapidamente Straordinari, Ferie, Malattie o Permessi. I dati vengono sincronizzati
+            in planner e nel report paghe PDF.
+          </p>
+        </div>
+        <button type="button" class="btn-ghost" (click)="miniHrDashOpen.set(false)">Chiudi</button>
+      </div>
+
+      <div class="ui-modal-body mini-hr-body">
+        <!-- Selezione AZIONE -->
+        <div class="field-legend">Cosa vuoi inserire?</div>
+        <div class="mini-hr-actions">
+          <button type="button" class="mini-hr-action-btn mini-hr-action-stra"
+            [class.active]="miniHrDashAction() === 'straordinario'"
+            [attr.aria-pressed]="miniHrDashAction() === 'straordinario'"
+            (click)="miniHrDashAction.set('straordinario')">
+            <strong>✨ Turno Extra</strong>
+            <span>Straordinario 08:30–17:00</span>
+          </button>
+          <button type="button" class="mini-hr-action-btn mini-hr-action-ferie"
+            [class.active]="miniHrDashAction() === 'ferie'" [attr.aria-pressed]="miniHrDashAction() === 'ferie'"
+            (click)="miniHrDashAction.set('ferie')">
+            <strong>🏖️ Ferie</strong>
+            <span>Giornata di ferie</span>
+          </button>
+          <button type="button" class="mini-hr-action-btn mini-hr-action-malattia"
+            [class.active]="miniHrDashAction() === 'malattia'" [attr.aria-pressed]="miniHrDashAction() === 'malattia'"
+            (click)="miniHrDashAction.set('malattia')">
+            <strong>🤒 Malattia</strong>
+            <span>Assenza per malattia</span>
+          </button>
+          <button type="button" class="mini-hr-action-btn mini-hr-action-permesso"
+            [class.active]="miniHrDashAction() === 'permesso'" [attr.aria-pressed]="miniHrDashAction() === 'permesso'"
+            (click)="miniHrDashAction.set('permesso')">
+            <strong>⏱️ Permesso</strong>
+            <span>Giornata intera o parziale</span>
+          </button>
         </div>
 
-        <div class="ui-modal-body mini-hr-body">
-          <!-- Selezione AZIONE -->
-          <div class="field-legend">Cosa vuoi inserire?</div>
-          <div class="mini-hr-actions">
-            <button type="button" class="mini-hr-action-btn mini-hr-action-stra"
-                    [class.active]="miniHrDashAction() === 'straordinario'"
-                    [attr.aria-pressed]="miniHrDashAction() === 'straordinario'"
-                    (click)="miniHrDashAction.set('straordinario')">
-              <strong>✨ Turno Extra</strong>
-              <span>Straordinario 08:30–17:00</span>
-            </button>
-            <button type="button" class="mini-hr-action-btn mini-hr-action-ferie"
-                    [class.active]="miniHrDashAction() === 'ferie'"
-                    [attr.aria-pressed]="miniHrDashAction() === 'ferie'"
-                    (click)="miniHrDashAction.set('ferie')">
-              <strong>🏖️ Ferie</strong>
-              <span>Giornata di ferie</span>
-            </button>
-            <button type="button" class="mini-hr-action-btn mini-hr-action-malattia"
-                    [class.active]="miniHrDashAction() === 'malattia'"
-                    [attr.aria-pressed]="miniHrDashAction() === 'malattia'"
-                    (click)="miniHrDashAction.set('malattia')">
-              <strong>🤒 Malattia</strong>
-              <span>Assenza per malattia</span>
-            </button>
-            <button type="button" class="mini-hr-action-btn mini-hr-action-permesso"
-                    [class.active]="miniHrDashAction() === 'permesso'"
-                    [attr.aria-pressed]="miniHrDashAction() === 'permesso'"
-                    (click)="miniHrDashAction.set('permesso')">
-              <strong>⏱️ Permesso</strong>
-              <span>Giornata intera o parziale</span>
-            </button>
-          </div>
+        <!-- Selezione DATA -->
+        <div class="mini-hr-inline-grid">
+          <label class="custom-field">
+            <span>📅 Data inserimento</span>
+            <input type="date" [value]="miniHrDashDate()" (change)="miniHrDashDate.set($any($event.target).value)">
+          </label>
+          <label class="custom-field">
+            <span>📝 Nota (opzionale)</span>
+            <input type="text" placeholder="es. Permesso visita medica" [value]="miniHrDashNote()"
+              (input)="miniHrDashNote.set($any($event.target).value)">
+          </label>
+        </div>
 
-          <!-- Selezione DATA -->
+        <!-- Permesso ORARI (solo se action === permesso) -->
+        @if (miniHrDashAction() === 'permesso') {
+        <div class="mini-hr-permit-box">
+          <div class="field-legend" style="margin-bottom: 0.5rem;">
+            ⏱️ Permesso orario (lascia 09:00–13:00 per default, o personalizza)
+          </div>
           <div class="mini-hr-inline-grid">
             <label class="custom-field">
-              <span>📅 Data inserimento</span>
-              <input type="date"
-                     [value]="miniHrDashDate()"
-                     (change)="miniHrDashDate.set($any($event.target).value)">
+              <span>Inizio permesso</span>
+              <select [value]="miniHrDashPermitStart()" (change)="miniHrDashPermitStart.set($any($event.target).value)">
+                @for (slot of planner30MinSlots; track slot) {
+                <option [value]="slot">{{ slot }}</option>
+                }
+              </select>
             </label>
             <label class="custom-field">
-              <span>📝 Nota (opzionale)</span>
-              <input type="text"
-                     placeholder="es. Permesso visita medica"
-                     [value]="miniHrDashNote()"
-                     (input)="miniHrDashNote.set($any($event.target).value)">
+              <span>Fine permesso</span>
+              <select [value]="miniHrDashPermitEnd()" (change)="miniHrDashPermitEnd.set($any($event.target).value)">
+                @for (slot of planner30MinSlots; track slot) {
+                <option [value]="slot">{{ slot }}</option>
+                }
+              </select>
             </label>
           </div>
-
-          <!-- Permesso ORARI (solo se action === permesso) -->
-          @if (miniHrDashAction() === 'permesso') {
-            <div class="mini-hr-permit-box">
-              <div class="field-legend" style="margin-bottom: 0.5rem;">
-                ⏱️ Permesso orario (lascia 09:00–13:00 per default, o personalizza)
-              </div>
-              <div class="mini-hr-inline-grid">
-                <label class="custom-field">
-                  <span>Inizio permesso</span>
-                  <select [value]="miniHrDashPermitStart()"
-                          (change)="miniHrDashPermitStart.set($any($event.target).value)">
-                    @for (slot of planner30MinSlots; track slot) {
-                      <option [value]="slot">{{ slot }}</option>
-                    }
-                  </select>
-                </label>
-                <label class="custom-field">
-                  <span>Fine permesso</span>
-                  <select [value]="miniHrDashPermitEnd()"
-                          (change)="miniHrDashPermitEnd.set($any($event.target).value)">
-                    @for (slot of planner30MinSlots; track slot) {
-                      <option [value]="slot">{{ slot }}</option>
-                    }
-                  </select>
-                </label>
-              </div>
-              <div class="permit-hours-summary" style="margin-top: 0.7rem;">
-                @let minuti = miniHrDashPermitMinutesCalc();
-                @if (minuti > 0 && minuti < 480) {
-                  <span class="chip chip-info chip-big">
-                    ⏱️ Permesso orario:
-                    <strong>{{ (minuti / 60) % 1 === 0 ? (minuti / 60) : ((minuti / 60).toFixed(1).replace('.', ',')) }}</strong>h
-                  </span>
-                } @else {
-                  <span class="chip chip-neutral chip-big">📋 Permesso giornata intera</span>
-                }
-              </div>
-            </div>
-          }
-
-          <!-- Selezione DIPENDENTI -->
-          <div class="field-legend" style="margin-top: 0.2rem;">
-            Seleziona dipendenti (clicca per attivare/disattivare · multi-seleziona)
-            <span class="badge badge-blue" style="margin-left: 0.5rem;">{{ miniHrDashEmpIds().length }} selezionati</span>
+          <div class="permit-hours-summary" style="margin-top: 0.7rem;">
+            @let minuti = miniHrDashPermitMinutesCalc();
+            @if (minuti > 0 && minuti < 480) { <span class="chip chip-info chip-big">
+              ⏱️ Permesso orario:
+              <strong>{{ (minuti / 60) % 1 === 0 ? (minuti / 60) : ((minuti / 60).toFixed(1).replace('.', ','))
+                }}</strong>h
+              </span>
+              } @else {
+              <span class="chip chip-neutral chip-big">📋 Permesso giornata intera</span>
+              }
           </div>
-          <div class="mini-hr-emp-grid">
-            @for (op of data.activeCashOperators(); track op.id) {
-              <button type="button"
-                      class="mini-hr-emp-btn"
-                      [class.active]="miniHrDashEmpIds().includes(op.id)"
-                      (click)="miniHrDashEmpIds.set(
+        </div>
+        }
+
+        <!-- Selezione DIPENDENTI -->
+        <div class="field-legend" style="margin-top: 0.2rem;">
+          Seleziona dipendenti (clicca per attivare/disattivare · multi-seleziona)
+          <span class="badge badge-blue" style="margin-left: 0.5rem;">{{ miniHrDashEmpIds().length }} selezionati</span>
+        </div>
+        <div class="mini-hr-emp-grid">
+          @for (op of miniHrDashEmployees(); track op.id) {
+          <button type="button" class="mini-hr-emp-btn" [class.active]="miniHrDashEmpIds().includes(op.id)" (click)="miniHrDashEmpIds.set(
                         miniHrDashEmpIds().includes(op.id)
                           ? miniHrDashEmpIds().filter(x => x !== op.id)
                           : [...miniHrDashEmpIds(), op.id]
                       )">
-                <strong>{{ op.name }}</strong>
-                <span>{{ op.role || 'Dipendente' }} · {{ op.contractHoursWeekly || '40' }}h</span>
-              </button>
-            } @empty {
-              <div class="op-fast-empty">Nessun dipendente attivo — vai in Impostazioni → Dipendenti.</div>
-            }
-          </div>
+            <strong>{{ op.name }}</strong>
+            <span>{{ op.role || 'Dipendente' }} · {{ op.contractHoursWeekly || '40' }}h</span>
+          </button>
+          } @empty {
+          <div class="op-fast-empty">Nessun dipendente attivo — vai in Impostazioni → Dipendenti.</div>
+          }
+        </div>
 
-          <div class="form-actions mini-hr-footer" style="margin-top: 1.2rem;">
-            <button type="button" class="btn-ghost" (click)="miniHrDashOpen.set(false)">Annulla</button>
-            <button type="button" class="btn-primary" (click)="saveMiniHrDashAction()">
-              💾 Salva operazione HR
-            </button>
-          </div>
+        <div class="form-actions mini-hr-footer" style="margin-top: 1.2rem;">
+          <button type="button" class="btn-ghost" (click)="miniHrDashOpen.set(false)">Annulla</button>
+          <button type="button" class="btn-primary" (click)="saveMiniHrDashAction()">
+            💾 Salva operazione HR
+          </button>
         </div>
       </div>
     </div>
+  </div>
   }
 
 </section>

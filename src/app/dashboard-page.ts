@@ -41,6 +41,9 @@ export class DashboardPageComponent {
   protected readonly miniHrDashPermitStart = signal('09:00');
   protected readonly miniHrDashPermitEnd = signal('13:00');
   protected readonly miniHrDashNote = signal('');
+  protected readonly miniHrDashEmployees = computed(() =>
+    this.data.activeCashOperators().filter((operator) => operator.name !== 'Banco'),
+  );
 
   // toast locale
   protected readonly toastMessage = signal<string | null>(null);
@@ -103,7 +106,7 @@ export class DashboardPageComponent {
     const iso = this.miniHrDashDate();
     const action = this.miniHrDashAction();
     const selectedIds = this.miniHrDashEmpIds();
-    const activeOps = this.data.activeCashOperators();
+    const activeOps = this.miniHrDashEmployees();
 
     if (!selectedIds.length) {
       this._pushDashToast('Seleziona almeno 1 dipendente', 'error');
@@ -426,12 +429,12 @@ export class DashboardPageComponent {
     label: string;
     detail: string;
   }> = [
-    { value: 'negozio', label: 'Negozio', detail: 'Demo, consulenza o vendita in showroom' },
-    { value: 'uscita', label: 'Uscita', detail: 'Visita cliente fuori negozio' },
-    { value: 'installazione', label: 'Installazione', detail: 'Montaggio impianto con eventuale preventivo' },
-    { value: 'assistenza', label: 'Assistenza', detail: 'Intervento tecnico o verifica guasto' },
-    { value: 'sopralluogo', label: 'Sopralluogo', detail: 'Rilievo tecnico prima del lavoro' },
-  ];
+      { value: 'negozio', label: 'Negozio', detail: 'Demo, consulenza o vendita in showroom' },
+      { value: 'uscita', label: 'Uscita', detail: 'Visita cliente fuori negozio' },
+      { value: 'installazione', label: 'Installazione', detail: 'Montaggio impianto con eventuale preventivo' },
+      { value: 'assistenza', label: 'Assistenza', detail: 'Intervento tecnico o verifica guasto' },
+      { value: 'sopralluogo', label: 'Sopralluogo', detail: 'Rilievo tecnico prima del lavoro' },
+    ];
   protected readonly dashboardQuickSlots = [
     { label: '09:00', value: '09:00' },
     { label: '11:00', value: '11:00' },
@@ -452,6 +455,7 @@ export class DashboardPageComponent {
     () => this.data.expenseNotifications().filter((entry) => !entry.readAt).length,
   );
   protected readonly recentActivities = this.data.recentActivities;
+  protected readonly connectionState = this.supabase.connectionState;
   protected readonly connectionLabel = this.supabase.connectionLabel;
   protected readonly searchResults = computed(() => this.data.searchRecords(this.searchTerm()));
   protected readonly todayIso = computed(() => new Date().toISOString().slice(0, 10));

@@ -15,9 +15,15 @@
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   border-radius: var(--radius-lg);
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-card);
+  /* Superficie leggermente tinta: evita il grigio piatto senza sporcare la UI. */
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 72%),
+    var(--surface-1);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-subtle));
+  box-shadow:
+    var(--shadow-inset-top),
+    0 2px 4px color-mix(in srgb, var(--accent) 10%, transparent),
+    var(--shadow-card);
   position: relative;
   overflow: hidden;
 }
@@ -85,8 +91,13 @@
   gap: 0.1rem;
   padding: 0.5rem 0.65rem;
   border-radius: var(--radius-md);
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 76%),
+    var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border-subtle));
+  box-shadow:
+    var(--shadow-inset-top),
+    0 8px 18px -14px color-mix(in srgb, var(--accent) 18%, transparent);
 
   span {
     color: var(--text-soft);
@@ -108,20 +119,36 @@
 .dash-conn-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.95rem;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
   border-radius: 999px;
-  background: var(--warning-bg);
-  border: 1px solid var(--warning-border);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
   color: var(--warning);
-  font-size: 0.8rem;
-  font-weight: 700;
   box-shadow: var(--shadow-card);
+  flex-shrink: 0;
 
-  &.connected {
+  &[data-state='connected'] {
     background: var(--success-bg);
     border-color: var(--success-border);
     color: var(--success);
+  }
+
+  &[data-state='syncing'],
+  &[data-state='ready'] {
+    background: var(--accent-surface);
+    border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+    color: var(--accent);
+  }
+
+  &[data-state='schema-required'],
+  &[data-state='error'],
+  &[data-state='missing-url'] {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger);
   }
 }
 
@@ -151,13 +178,18 @@
   width: 100%;
   min-height: var(--control-h-md);
   padding: 0.6rem 1rem 0.6rem 2.65rem;
-  border: 1px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-strong));
   border-radius: var(--radius-lg);
-  background: var(--input-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 3%, transparent), transparent 70%),
+    var(--input-bg);
   color: var(--text-primary);
   font-size: 0.94rem;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 8px 18px -14px color-mix(in srgb, var(--accent) 18%, transparent),
+    var(--shadow-card);
 
   &::placeholder {
     color: var(--text-soft);
@@ -297,11 +329,16 @@
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 72%),
+    var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-subtle));
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 10px 22px -16px color-mix(in srgb, var(--accent) 24%, transparent),
+    var(--shadow-card);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   text-decoration: none;
   min-height: 4.75rem;
@@ -323,37 +360,53 @@
 
 .kpi-blue {
   border-left-color: var(--accent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 74%),
+    var(--surface-2);
 
   .kpi-icon {
-    background: var(--accent-soft);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
     color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
   }
 }
 
 .kpi-green {
   border-left-color: var(--success);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--success) 7%, transparent), transparent 74%),
+    var(--surface-2);
 
   .kpi-icon {
-    background: var(--success-bg);
+    background: color-mix(in srgb, var(--success) 12%, var(--surface-2));
     color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 24%, var(--border-subtle));
   }
 }
 
 .kpi-orange {
   border-left-color: var(--warning);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--warning) 7%, transparent), transparent 74%),
+    var(--surface-2);
 
   .kpi-icon {
-    background: var(--warning-bg);
+    background: color-mix(in srgb, var(--warning) 12%, var(--surface-2));
     color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 24%, var(--border-subtle));
   }
 }
 
 .kpi-purple {
   border-left-color: var(--purple);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--purple) 7%, transparent), transparent 74%),
+    var(--surface-2);
 
   .kpi-icon {
-    background: var(--purple-bg);
+    background: color-mix(in srgb, var(--purple) 12%, var(--surface-2));
     color: var(--purple);
+    border-color: color-mix(in srgb, var(--purple) 24%, var(--border-subtle));
   }
 }
 
@@ -424,10 +477,15 @@
   display: grid;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 3.5%, transparent), transparent 74%),
+    var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-subtle));
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 10px 24px -18px color-mix(in srgb, var(--accent) 20%, transparent),
+    var(--shadow-card);
 }
 
 .dash-panel-calendar {
@@ -542,13 +600,17 @@
   align-items: flex-start;
   gap: 0.15rem;
   padding: var(--space-3) var(--space-4);
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 82%),
+    var(--surface-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-subtle));
   border-radius: var(--radius-md);
   text-decoration: none;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
   cursor: pointer;
-  box-shadow: none;
+  box-shadow:
+    var(--shadow-inset-top),
+    0 8px 18px -16px color-mix(in srgb, var(--accent) 18%, transparent);
   min-height: 4.4rem;
 
   &:hover {
@@ -570,9 +632,12 @@
 
 .action-btn-primary {
   background:
-    linear-gradient(180deg, var(--accent-surface), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 68%),
     var(--surface-3);
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
+  box-shadow:
+    var(--shadow-inset-top),
+    0 12px 24px -16px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .action-icon {
@@ -647,8 +712,10 @@
   gap: 0.1rem;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 82%),
+    var(--surface-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border-subtle));
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 
   &:hover {
@@ -797,8 +864,8 @@
   align-items: center;
   padding: 0.28rem 0.62rem;
   border-radius: var(--radius-full);
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-3));
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-subtle));
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 650;
@@ -862,10 +929,15 @@
   display: grid;
   gap: var(--space-3);
   padding: var(--space-5);
-  background: var(--surface-2);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 3%, transparent), transparent 78%),
+    var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border-subtle));
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 12px 26px -18px color-mix(in srgb, var(--accent) 18%, transparent),
+    var(--shadow-card);
 }
 
 .month-calendar-head {
@@ -993,8 +1065,10 @@
   border-radius: var(--radius-md);
   // Celle su un livello intermedio tra il pannello calendario e i suoi contenuti:
   // restano leggibili senza ricorrere a bordi pesanti.
-  background: var(--surface-3);
-  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 3%, transparent), transparent 82%),
+    var(--surface-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 8%, var(--border-subtle));
   text-align: left;
   cursor: pointer;
   transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
@@ -1705,7 +1779,9 @@ a.calendar-selected-item:hover {
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   border-left: 3px solid var(--accent);
-  background: var(--surface-3);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 82%),
+    var(--surface-3);
   text-decoration: none;
   transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 
@@ -1985,46 +2061,70 @@ a.calendar-selected-item:hover {
 // ─── Badges ───
 .badge {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.25rem 0.55rem;
   border-radius: var(--radius-full);
   font-size: 0.72rem;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: capitalize;
   white-space: nowrap;
-  background: var(--accent-chip-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--accent-chip-bg);
   color: var(--accent-chip-text);
   flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 4px 10px -8px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .badge-success {
-  background: var(--success-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--success-bg);
   color: var(--success);
+  border-color: var(--success-border);
 }
 
 .badge-warning {
-  background: var(--warning-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--warning-bg);
   color: var(--warning);
+  border-color: var(--warning-border);
 }
 
 .badge-danger {
-  background: var(--danger-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--danger-bg);
   color: var(--danger);
+  border-color: var(--danger-border);
 }
 
 .badge-info {
-  background: var(--info-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--info-bg);
   color: var(--info);
+  border-color: var(--info-border);
 }
 
 .badge-purple {
-  background: var(--purple-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--purple-bg);
   color: var(--purple);
+  border-color: var(--purple-border);
 }
 
 // In tema scuro superfici, bordi e ombre arrivano dai token del design system
 // (--surface-*, --border-subtle, --shadow-*): qui restano solo le correzioni
 // realmente specifiche di questo modulo.
 :host-context([data-theme='dark']) {
+
   // Nel tema scuro la card del giorno selezionato riceve una lieve tonalità d'accento
   .calendar-selected-card {
     background: linear-gradient(135deg, var(--accent-surface), var(--surface-2));
@@ -2046,6 +2146,7 @@ a.calendar-selected-item:hover {
 // Tablet: sotto i 1180px la colonna operativa va sotto al calendario,
 // così non comprime le celle del calendario e non genera scroll orizzontale.
 @media (max-width: 1180px) {
+
   .dash-primary-grid,
   .dash-primary-grid-calendar {
     grid-template-columns: 1fr;
@@ -2525,7 +2626,7 @@ a.calendar-selected-item:hover {
   padding: 0.8rem 0.95rem;
 }
 
-.dashboard-simple .ui-modal > .ui-modal-head {
+.dashboard-simple .ui-modal>.ui-modal-head {
   background: var(--surface-2);
 }
 

@@ -1,8 +1,7 @@
 @let currentSection = section();
 
 <section class="section-page" [class.pos-mode]="currentSection.id === 'cassa'"
-  [class.agenda-mode]="currentSection.id === 'agenda'"
-  [class.portal-mode]="currentSection.id === 'employee-portal'">
+  [class.agenda-mode]="currentSection.id === 'agenda'" [class.portal-mode]="currentSection.id === 'employee-portal'">
 
   @if (currentSection.id === 'cassa') {
   <div class="pos-topbar pos-topbar-redesign">
@@ -14,15 +13,17 @@
             <span class="pos-topbar-title">Cassa POS Audiomax</span>
             <span class="pos-topbar-sub">Banco vendita desktop per servizi tecnici, rivendita e chiusura rapida.</span>
             <div class="pos-topbar-flow">
-              <span class="pos-flow-step"
-                [class.active]="!!cashCurrentOperator() && (!!selectedCashClientId() || isCashWalkInWithoutSelectedClient())">
+              <span class="pos-flow-step" [class.active]="cashHasSelectedClientStep()">
                 1 Cliente
               </span>
+              <span class="pos-flow-step" [class.active]="cashHasSelectedOperator()">
+                2 Operatore
+              </span>
               <span class="pos-flow-step" [class.active]="cashCart().length > 0">
-                2 Carrello
+                3 Carrello
               </span>
               <span class="pos-flow-step" [class.active]="cashCanFinalizePaidSale() || cashCanMarkAsInsoluto()">
-                3 Incasso
+                4 Incasso
               </span>
             </div>
           </div>
@@ -65,7 +66,7 @@
       <section class="pos-topbar-card pos-topbar-card-operator" aria-label="Area operatore">
         <div class="pos-topbar-card-head">
           <span class="pos-panel-kicker pos-panel-kicker--slate">👷 Area operatore</span>
-          <strong>{{ cashCurrentOperator() }}</strong>
+          <strong>{{ cashCurrentOperator() || 'Seleziona operatore' }}</strong>
         </div>
         <div class="pos-operator-chips pos-operator-chips-pos">
           @for (operator of cashOperators(); track operator) {
@@ -74,6 +75,8 @@
             (click)="setCashCurrentOperator(operator)">
             {{ operator }}
           </button>
+          } @empty {
+          <span class="text-muted">Nessun operatore attivo disponibile.</span>
           }
         </div>
       </section>
@@ -81,7 +84,6 @@
       <section class="pos-topbar-card pos-topbar-card-status" aria-label="Stato cassa">
         <div class="pos-topbar-card-head">
           <span class="pos-panel-kicker pos-panel-kicker--blue">💼 Stato cassa</span>
-          <span class="pos-connection-pill" [attr.data-state]="cashConnectionState()">{{ cashConnectionLabel() }}</span>
         </div>
         <div class="pos-topbar-kpis pos-topbar-kpis-pos">
           <div class="pos-topbar-kpi">
@@ -103,7 +105,8 @@
         </div>
         <div class="pos-topbar-actions pos-topbar-actions-pos">
           <button type="button" class="btn-ghost btn-lg" (click)="openCashReportModal('incassi')">Report</button>
-          <button type="button" class="btn-primary btn-lg" (click)="openCashClosureModal()">Chiusura giornaliera</button>
+          <button type="button" class="btn-primary btn-lg" (click)="openCashClosureModal()">Chiusura
+            giornaliera</button>
           <a routerLink="/dashboard" class="btn-ghost">← Dashboard</a>
         </div>
       </section>
@@ -201,7 +204,8 @@
           </div>
           <div class="contact-command-pills">
             <span class="module-inline-chip module-inline-chip-accent">{{ contactVisibleCount() }} visibili</span>
-            <span class="module-inline-chip">{{ selectedContactDetailKind() === 'fornitore' ? 'Fornitori collegati a spese
+            <span class="module-inline-chip">{{ selectedContactDetailKind() === 'fornitore' ? 'Fornitori collegati a
+              spese
               e ordini' : 'Schede pronte per CRM, preventivi e cassa' }}</span>
             <span class="module-inline-chip">Privacy e storico sempre sotto controllo</span>
           </div>
@@ -340,7 +344,7 @@
   </div>
 
   @if (clientDetailModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeClientDetailModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg" (click)="$event.stopPropagation()">
       @if (selectedContactDetailKind() === 'fornitore' && selectedSupplier(); as supplier) {
       <div class="ui-modal-head">
@@ -594,7 +598,8 @@
               </div>
               <div class="record-actions">
                 <span class="badge" [class.bg-red]="txn.status === 'insoluto'"
-                  [class.bg-green]="txn.status === 'pagato'">{{ txn.status | uppercase }}</span>
+                  [class.badge-danger]="txn.status === 'annullato'" [class.bg-green]="txn.status === 'pagato'">{{
+                  txn.status | uppercase }}</span>
                 <strong>€ {{ txn.total.toLocaleString('it-IT') }}</strong>
               </div>
             </div>
@@ -616,7 +621,8 @@
               </div>
               <div class="record-actions">
                 <span class="badge" [class.bg-red]="txn.status === 'insoluto'"
-                  [class.bg-green]="txn.status === 'pagato'">{{ txn.status | uppercase }}</span>
+                  [class.badge-danger]="txn.status === 'annullato'" [class.bg-green]="txn.status === 'pagato'">{{
+                  txn.status | uppercase }}</span>
                 <strong>€ {{ txn.total.toLocaleString('it-IT') }}</strong>
               </div>
             </div>
@@ -639,7 +645,8 @@
               </div>
               <div class="record-actions">
                 <span class="badge" [class.bg-red]="txn.status === 'insoluto'"
-                  [class.bg-green]="txn.status === 'pagato'">{{ txn.status | uppercase }}</span>
+                  [class.badge-danger]="txn.status === 'annullato'" [class.bg-green]="txn.status === 'pagato'">{{
+                  txn.status | uppercase }}</span>
                 <strong>€ {{ txn.total.toLocaleString('it-IT') }}</strong>
               </div>
             </div>
@@ -699,7 +706,7 @@
   }
 
   @if (clientModalOpen() && section().id === 'clienti') {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false" (click)="closeClientModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -945,7 +952,7 @@
               <small class="section-toolbar-eyebrow">Pipeline commerciale con scadenze, valore medio e stato pratiche
                 sempre in evidenza.</small>
             </div>
-            </div>
+          </div>
           <div class="quote-command-pills">
             <span class="module-inline-chip module-inline-chip-accent">Valore totale € {{
               quoteTotalValue().toLocaleString('it-IT', { maximumFractionDigits: 0 }) }}</span>
@@ -1046,7 +1053,7 @@
   </div>
   }
   @if (quoteDetailModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeQuoteDetailModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg" (click)="$event.stopPropagation()">
       @if (selectedQuote(); as quote) {
       <div class="ui-modal-head">
@@ -1135,6 +1142,27 @@
           }
         </div>
 
+        <div class="detail-section client-detail-section">
+          <span class="detail-section-title client-detail-section-title">Registro operativo</span>
+          <div class="record-list compact quote-register-list">
+            @for (entry of selectedQuoteOperationalRegister(); track entry.id) {
+            <div class="record-row quote-register-row">
+              <div class="record-info quote-register-info">
+                <strong>{{ entry.title }}</strong>
+                <span>{{ entry.whenLabel }} · {{ entry.actor }}</span>
+                <small><strong>Come:</strong> {{ entry.how }}</small>
+                <small><strong>Perché:</strong> {{ entry.why }}</small>
+              </div>
+              <div class="record-actions">
+                <span class="badge" [class.badge-info]="entry.tone === 'info'"
+                  [class.badge-success]="entry.tone === 'success'" [class.badge-warning]="entry.tone === 'warning'">{{
+                  entry.badge }}</span>
+              </div>
+            </div>
+            }
+          </div>
+        </div>
+
         <div class="form-actions client-detail-section">
           <button class="btn-sm" (click)="advanceQuote(quote.id); closeQuoteDetailModal()">Avanza fase</button>
           <button class="btn-sm" (click)="editQuote(quote.id); closeQuoteDetailModal()">
@@ -1177,7 +1205,7 @@
         <h2 class="op-card-title">@if (editingQuoteId()) { Modifica preventivo } @else { Nuovo preventivo }</h2>
         @if (hasFormDraft('quote')) { <p class="form-draft-badge">{{ formDraftLabel('quote') }}</p> }
       </div>
-      <button type="button" class="btn-ghost" (click)="closeQuoteModal()">Annulla e Torna all'Elenco</button>
+      <button type="button" class="btn-ghost" (click)="closeQuoteModal()">Chiudi</button>
     </div>
     <form class="quote-doc-body quote-doc-body-pro" [formGroup]="quoteForm" (ngSubmit)="addQuote()">
       @if (shouldShowFormValidation(quoteForm)) { <div class="form-error-summary">Compila i dati obbligatori del
@@ -1207,7 +1235,7 @@
                 <span>Operatore Compilatore</span>
                 <select formControlName="operatorName">
                   <option value="">Seleziona operatore</option>
-                  @for (op of cashOperators(); track op) {
+                  @for (op of hrOperators(); track op) {
                   <option [value]="op">{{ op }}</option>
                   }
                 </select>
@@ -1409,44 +1437,66 @@
               <h3>Accettazione e pagamento</h3>
               <span>Configura incasso unico, finanziamento o rate con alert</span>
             </div>
-            <div class="quote-grid three compact">
-              <label>
-                <span>Modalità pagamento</span>
-                <select formControlName="paymentPlan">
-                  <option value="unica">Unica soluzione</option>
-                  <option value="finanziamento">Finanziamento</option>
-                  <option value="rate-negozio">Rate negozio</option>
-                </select>
-              </label>
-              @if (quoteForm.controls.paymentPlan.value === 'finanziamento') {
-              <label>
-                <span>Finanziaria</span>
-                <input type="text" formControlName="financingProvider" placeholder="Es. Agos, Cofidis">
-              </label>
-              }
-              @if (quoteForm.controls.paymentPlan.value === 'rate-negozio') {
-              <label>
-                <span>Numero rate</span>
-                <input type="number" min="2" formControlName="installmentCount">
-              </label>
-              <label>
-                <span>Cadenza rate</span>
-                <select formControlName="installmentCadence">
-                  <option value="mensile">Mensile</option>
-                  <option value="settimanale">Settimanale</option>
-                </select>
-              </label>
-              <label>
-                <span>Alert rata</span>
-                <input type="number" min="1" formControlName="paymentAlertDays"
-                  placeholder="Giorni prima della scadenza">
-              </label>
-              }
+            <div class="quote-payment-layout">
+              <div class="quote-payment-main">
+                <div class="quote-grid three compact quote-payment-grid">
+                  <label>
+                    <span>Modalità di pagamento</span>
+                    <select formControlName="paymentPlan">
+                      <option value="unica">Unica soluzione</option>
+                      <option value="finanziamento">Finanziamento</option>
+                      <option value="rate-negozio">Rate negozio</option>
+                    </select>
+                  </label>
+                  @if (quoteForm.controls.paymentPlan.value === 'finanziamento') {
+                  <label>
+                    <span>Finanziaria</span>
+                    <input type="text" formControlName="financingProvider" placeholder="Es. Agos, Cofidis">
+                  </label>
+                  }
+                  @if (quoteForm.controls.paymentPlan.value === 'rate-negozio') {
+                  <label>
+                    <span>Numero rate</span>
+                    <input type="number" min="2" formControlName="installmentCount">
+                  </label>
+                  <label>
+                    <span>Cadenza rate</span>
+                    <select formControlName="installmentCadence">
+                      <option value="mensile">Mensile</option>
+                      <option value="settimanale">Settimanale</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Alert rata</span>
+                    <input type="number" min="1" formControlName="paymentAlertDays"
+                      placeholder="Giorni prima della scadenza">
+                  </label>
+                  }
+                </div>
+
+                <label class="wide-field quote-payment-notes">
+                  <span>Note pagamento</span>
+                  <input type="text" formControlName="paymentNotes"
+                    placeholder="Es. acconto subito, saldo a fine lavori">
+                </label>
+              </div>
+
+              <aside class="quote-payment-summary" aria-label="Riepilogo pagamento">
+                <span class="quote-payment-summary-label">Schema selezionato</span>
+                @if (quoteForm.controls.paymentPlan.value === 'unica') {
+                <strong>Pagamento in un'unica soluzione</strong>
+                <p>Ideale per saldo immediato o acconto con chiusura rapida del lavoro.</p>
+                } @else if (quoteForm.controls.paymentPlan.value === 'finanziamento') {
+                <strong>Pagamento tramite finanziaria</strong>
+                <p>Registra l'istituto scelto e usa le note per inserire esito pratica, acconto o allegati richiesti.
+                </p>
+                } @else {
+                <strong>Piano rate negozio</strong>
+                <p>Imposta numero rate, cadenza e anticipo avviso così la squadra ha una traccia chiara delle scadenze.
+                </p>
+                }
+              </aside>
             </div>
-            <label class="wide-field">
-              <span>Note pagamento</span>
-              <input type="text" formControlName="paymentNotes" placeholder="Es. acconto subito, saldo a fine lavori">
-            </label>
           </section>
         </div>
 
@@ -1461,7 +1511,7 @@
           </label>
         </section>
 
-        <aside class="quote-doc-side" aria-label="Riepilogo preventivo">
+        <section class="quote-doc-footer" aria-label="Riepilogo preventivo">
           <section class="quote-summary-card">
             <h3>Riepilogo Economico</h3>
             <div class="quote-summary-row"><span>Imponibile</span><strong>€ {{
@@ -1484,28 +1534,21 @@
           </section>
           }
 
-          <section class="quote-summary-card">
-            <h3>Azioni</h3>
-            <div class="quote-actions-vertical">
+          <section class="quote-summary-card quote-summary-card-actions">
+            <div class="quote-actions-inline">
               <button type="submit" class="btn-primary">@if (editingQuoteId()) { Aggiorna preventivo } @else { Salva
                 preventivo }</button>
               <button type="button" class="btn-ghost" (click)="cancelQuoteEdit()">Annulla</button>
             </div>
           </section>
-        </aside>
-      </div>
-      <!-- Barra azioni sempre raggiungibile su tablet/mobile (il pannello laterale non è più sticky) -->
-      <div class="quote-mobile-actions">
-        <button type="button" class="btn-ghost" (click)="cancelQuoteEdit()">Annulla</button>
-        <button type="submit" class="btn-primary">@if (editingQuoteId()) { Aggiorna preventivo } @else { Salva
-          preventivo }</button>
+        </section>
       </div>
     </form>
   </div>
   }
 
   @if (quotePaymentModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeQuotePaymentModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal quote-payment-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head quote-modal-head">
         <div>
@@ -1553,7 +1596,7 @@
   }
 
   @if (ddtModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDdtModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ddt-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -1757,7 +1800,7 @@
   </div>
 
   @if (ddtQuotePickerOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDdtQuotePicker()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ddt-crm-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -1793,7 +1836,7 @@
   }
 
   @if (ddtDraftsModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDdtDrafts()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ddt-crm-modal ddt-drafts-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -1862,8 +1905,7 @@
   }
 
   @if (ddtEditorModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen ddt-crm-overlay" [attr.aria-hidden]="false"
-    (click)="closeDdtEditor()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen ddt-crm-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen ui-modal-warehouse ddt-crm-modal ddt-crm-editor"
       (click)="$event.stopPropagation()">
       <div class="ui-modal-head ui-modal-head-warehouse">
@@ -2041,7 +2083,7 @@
   }
 
   @if (ddtSendModalOpen() && selectedDdtSendRecord(); as record) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDdtSendModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ddt-crm-modal ddt-send-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -2081,7 +2123,7 @@
   }
 
   @if (ddtDetailModalOpen() && selectedDdtRecord(); as record) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeDdtDetail()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ddt-crm-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -2362,7 +2404,8 @@
         </div>
         <div class="agenda-month-grid">
           @for (day of appointmentCalendarDays(); track day.isoDate) {
-          <div class="agenda-month-cell" [class.out-of-month]="!day.isCurrentMonth" role="gridcell"
+          <div class="agenda-month-cell" [class.out-of-month]="!day.isCurrentMonth" [class.is-today]="day.isToday"
+            [class.is-weekend]="day.isWeekend" [class.has-events]="day.items.length > 0" role="gridcell"
             [attr.aria-label]="_longItalianDate(day.isoDate) + ' · ' + day.items.length + ' appuntamenti'">
             <div class="agenda-month-cell-header">
               <span class="agenda-month-date">{{ day.isoDate.slice(8, 10) }}</span>
@@ -2388,8 +2431,7 @@
   </div>
 
   @if (appointmentModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false"
-    (click)="closeAppointmentModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen appointment-modal" role="dialog" aria-modal="true"
       (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
@@ -2679,7 +2721,7 @@
   <!-- MINI-MODALE HR · ⚡ Operazioni Dipendenti (Task2 Agenda)       -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   @if (miniHrModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeMiniHrModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal mini-hr-modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -2717,7 +2759,7 @@
         <section class="mini-hr-sec">
           <h3 class="mini-hr-sec-title">Dipendente</h3>
           <div class="mini-hr-emp-grid">
-            @for (op of cashOperators(); track op) {
+            @for (op of hrOperators(); track op) {
             <button type="button" class="mini-hr-emp-btn" [class.active]="miniHrModalEmpName()===op"
               (click)="miniHrModalEmpName.set(op)">
               {{ op }}
@@ -2861,121 +2903,130 @@
             </div>
 
             <div class="pos-main-top">
-          @if (cashEditingTransaction(); as transaction) {
-          <div class="pos-flow-banner warning">
-            <div>
-              <span class="pos-panel-kicker">Correzione documento</span>
-              <strong>
-                @if (transaction.documentType === 'fattura') {
-                Fattura {{ transaction.invoiceNumber }}
-                } @else {
-                Scontrino {{ transaction.receiptNumber }}
-                }
-              </strong>
-              <p>Stai correggendo un documento gia registrato. Al salvataggio verra aggiornato lo stesso documento.
-              </p>
-            </div>
-            <button type="button" class="btn-ghost" (click)="clearCashCart()">Annulla modifica</button>
-          </div>
-          }
-          @if (cashIsSettlingPending()) {
-          <div class="pos-flow-banner warning">
-            <div>
-              <span class="pos-panel-kicker">Incasso dedicato</span>
-              <strong>{{ cashSettlementTitle() }}</strong>
-              <p>Stai saldando un insoluto esistente: il catalogo e il carrello restano bloccati per evitare modifiche
-                accidentali.</p>
-            </div>
-            <button type="button" class="btn-ghost" (click)="clearCashCart()">Annulla saldo</button>
-          </div>
-          }
-          <div class="pos-catalog-header">
-            <div class="pos-catalog-title">
-              <span class="detail-subtitle">Navigazione catalogo</span>
-              <strong>Seleziona il reparto di lavoro e filtra le voci da inserire.</strong>
-            </div>
-            <div class="pos-catalog-actions">
-              <button type="button" class="btn-ghost btn-sm-fit" (click)="openCashHistoryModal()">
-                Storico cliente
-              </button>
-              @if (cashQueuedSessions().length) {
-              <button type="button" class="btn-ghost btn-sm-fit" (click)="openCashWaitingModal()">
-                Coda banco
-              </button>
+              @if (cashEditingTransaction(); as transaction) {
+              <div class="pos-flow-banner warning">
+                <div>
+                  <span class="pos-panel-kicker">Correzione documento</span>
+                  <strong>
+                    @if (transaction.documentType === 'fattura') {
+                    Fattura {{ transaction.invoiceNumber }}
+                    } @else {
+                    Scontrino {{ transaction.receiptNumber }}
+                    }
+                  </strong>
+                  <p>Stai correggendo un documento gia registrato. Al salvataggio verra aggiornato lo stesso documento.
+                  </p>
+                </div>
+                <button type="button" class="btn-ghost" (click)="clearCashCart()">Annulla modifica</button>
+              </div>
               }
-            </div>
-          </div>
-          @if (cashSalesMode() !== 'preventivi') {
-          <div class="pos-search-toolbar">
-            <label class="pos-search-block pos-search-block-catalog">
-              <span>Cerca nel catalogo</span>
-              <div class="pos-search-field-shell">
-                <input class="filter-input" type="search" aria-label="Cerca prodotto o servizio da aggiungere al carrello"
-                  placeholder="Nome, categoria o descrizione" [value]="cashProductQuery()"
-                  (input)="updateCashProductQuery($event)">
-                @if (cashProductQuery()) {
-                <button type="button" class="pos-search-clear" (click)="cashProductQuery.set('')">Cancella</button>
+              @if (cashIsSettlingPending()) {
+              <div class="pos-flow-banner warning">
+                <div>
+                  <span class="pos-panel-kicker">Incasso dedicato</span>
+                  <strong>{{ cashSettlementTitle() }}</strong>
+                  <p>Stai saldando un insoluto esistente: il catalogo e il carrello restano bloccati per evitare
+                    modifiche
+                    accidentali.</p>
+                </div>
+                <button type="button" class="btn-ghost" (click)="clearCashCart()">Annulla saldo</button>
+              </div>
+              }
+              <div class="pos-catalog-header">
+                <div class="pos-catalog-title">
+                  <span class="detail-subtitle">Navigazione catalogo</span>
+                  <strong>Seleziona il reparto di lavoro e filtra le voci da inserire.</strong>
+                </div>
+                <div class="pos-catalog-actions">
+                  <button type="button" class="btn-ghost btn-sm-fit" (click)="openCashHistoryModal()">
+                    Storico cliente
+                  </button>
+                  @if (cashQueuedSessions().length) {
+                  <button type="button" class="btn-ghost btn-sm-fit" (click)="openCashWaitingModal()">
+                    Coda banco
+                  </button>
+                  }
+                </div>
+              </div>
+              @if (cashSalesMode() !== 'preventivi') {
+              <div class="pos-search-toolbar">
+                <label class="pos-search-block pos-search-block-catalog">
+                  <span>Cerca nel catalogo</span>
+                  <div class="pos-search-field-shell">
+                    <input class="filter-input" type="search"
+                      aria-label="Cerca prodotto o servizio da aggiungere al carrello"
+                      placeholder="Nome, categoria o descrizione" [value]="cashProductQuery()"
+                      (input)="updateCashProductQuery($event)">
+                    @if (cashProductQuery()) {
+                    <button type="button" class="pos-search-clear" (click)="cashProductQuery.set('')">Cancella</button>
+                    }
+                  </div>
+                </label>
+              </div>
+              }
+              <div class="pos-category-tabs">
+                @if (cashSalesMode() !== 'preventivi') {
+                <button type="button" class="pos-filter-btn" [class.active]="cashCategoryFilter() === 'tutte'"
+                  [attr.aria-pressed]="cashCategoryFilter() === 'tutte'"
+                  (click)="cashCategoryFilter.set('tutte')">Tutti</button>
+                @for (category of cashVisibleCategories(); track category) {
+                <button type="button" class="pos-filter-btn" [class.active]="cashCategoryFilter() === category"
+                  [attr.aria-pressed]="cashCategoryFilter() === category" (click)="cashCategoryFilter.set(category)">{{
+                  category }}</button>
+                }
+                } @else {
+                <div class="pos-stage-hint">Apri un preventivo confermato per caricarlo direttamente nel carrello.</div>
                 }
               </div>
-            </label>
-          </div>
-          }
-          <div class="pos-category-tabs">
-            @if (cashSalesMode() !== 'preventivi') {
-            <button type="button" class="pos-filter-btn" [class.active]="cashCategoryFilter() === 'tutte'"
-              [attr.aria-pressed]="cashCategoryFilter() === 'tutte'"
-              (click)="cashCategoryFilter.set('tutte')">Tutti</button>
-            @for (category of cashVisibleCategories(); track category) {
-            <button type="button" class="pos-filter-btn" [class.active]="cashCategoryFilter() === category"
-              [attr.aria-pressed]="cashCategoryFilter() === category" (click)="cashCategoryFilter.set(category)">{{
-              category }}</button>
-            }
-            } @else {
-            <div class="pos-stage-hint">Apri un preventivo confermato per caricarlo direttamente nel carrello.</div>
-            }
-          </div>
-        </div>
+            </div>
 
             <div class="pos-products">
-          @if (cashSalesMode() === 'preventivi') {
-          @for (quote of confirmedQuotes(); track quote.id) {
-          <button type="button" class="pos-product pos-quote-product" [disabled]="cashIsSettlingPending()"
-            (click)="loadQuoteToCash(quote.id)">
-            <span class="pos-quote-head">
-              <strong>{{ quote.customerName }}</strong>
-              <span>€ {{ quote.value.toLocaleString('it-IT') }}</span>
-            </span>
-            <span class="pos-quote-foot">
-              <span>{{ quoteCode(quote.id) }}</span>
-              <span>{{ quote.issueDate?.slice(0, 10) }}</span>
-            </span>
-          </button>
-          }
-          @if (confirmedQuotes().length === 0) {
-          <div class="empty-state pos-quote-empty">
-            <p>Nessun preventivo approvato disponibile.</p>
-          </div>
-          }
-          } @else {
-          @for (product of filteredCashProducts(); track product.id) {
-          <button type="button" class="pos-product" [class.selected]="selectedCashProductId() === product.id"
-            [disabled]="cashIsSettlingPending()" (click)="addCashProductToCart(product.id)">
-            <span class="pos-product-badge">{{ product.category }}</span>
-            <strong>{{ product.name }}</strong>
-            <span>€ {{ resolveCashProductPrice(product).toLocaleString('it-IT') }}</span>
-            <small>{{ product.pricingMode }}</small>
-            @if (cashSalesMode() === 'rivendita' && product.linkedInventoryItemId) {
-            <span class="pos-product-meta">
-              <span class="badge" [class.badge-success]="cashProductInventoryStatus(product) === 'disponibile'"
-                [class.badge-warning]="cashProductInventoryStatus(product) === 'bassa-scorta'"
-                [class.badge-danger]="cashProductInventoryStatus(product) === 'esaurito'">
-                {{ cashProductStockLabel(product) }}
-              </span>
-            </span>
-            }
-          </button>
-          }
-          }
+              @if (cashSalesMode() === 'preventivi') {
+              @if (!cashHasSelectedOperator()) {
+              <div class="pos-stage-hint">Seleziona prima un operatore per caricare il preventivo in cassa.</div>
+              }
+              @for (quote of confirmedQuotes(); track quote.id) {
+              <button type="button" class="pos-product pos-quote-product"
+                [disabled]="cashIsSettlingPending() || !cashHasSelectedOperator()" (click)="loadQuoteToCash(quote.id)">
+                <span class="pos-quote-head">
+                  <strong>{{ quote.customerName }}</strong>
+                  <span>€ {{ quote.value.toLocaleString('it-IT') }}</span>
+                </span>
+                <span class="pos-quote-foot">
+                  <span>{{ quoteCode(quote.id) }}</span>
+                  <span>{{ quote.issueDate?.slice(0, 10) }}</span>
+                </span>
+              </button>
+              }
+              @if (confirmedQuotes().length === 0) {
+              <div class="empty-state pos-quote-empty">
+                <p>Nessun preventivo approvato disponibile.</p>
+              </div>
+              }
+              } @else {
+              @if (!cashCanComposeCart()) {
+              <div class="pos-stage-hint">Prima seleziona cliente e operatore, poi aggiungi servizi o rivendita.</div>
+              }
+              @for (product of filteredCashProducts(); track product.id) {
+              <button type="button" class="pos-product" [class.selected]="selectedCashProductId() === product.id"
+                [disabled]="cashIsSettlingPending() || !cashCanComposeCart()"
+                (click)="addCashProductToCart(product.id)">
+                <span class="pos-product-badge">{{ product.category }}</span>
+                <strong>{{ product.name }}</strong>
+                <span>€ {{ resolveCashProductPrice(product).toLocaleString('it-IT') }}</span>
+                <small>{{ product.pricingMode }}</small>
+                @if (cashSalesMode() === 'rivendita' && product.linkedInventoryItemId) {
+                <span class="pos-product-meta">
+                  <span class="badge" [class.badge-success]="cashProductInventoryStatus(product) === 'disponibile'"
+                    [class.badge-warning]="cashProductInventoryStatus(product) === 'bassa-scorta'"
+                    [class.badge-danger]="cashProductInventoryStatus(product) === 'esaurito'">
+                    {{ cashProductStockLabel(product) }}
+                  </span>
+                </span>
+                }
+              </button>
+              }
+              }
             </div>
           </section>
 
@@ -2985,112 +3036,113 @@
                 <span class="detail-subtitle">Settore C · Carrello / voci in lavorazione</span>
                 <h2 class="op-card-title">Carrello operativo</h2>
               </div>
-          <div class="pos-cart-summary">
-            <span>{{ cashCart().length }} righe</span>
-            <strong>€ {{ cashSubtotal().toLocaleString('it-IT') }}</strong>
-          </div>
-          <div class="pos-cart-state" [class.ready]="cashCanFinalizePaidSale()"
-            [class.warning]="!cashCanFinalizePaidSale() && cashCanMarkAsInsoluto()">
-            @if (cashCanFinalizePaidSale()) {
-            Pronto da chiudere
-            } @else if (cashCanMarkAsInsoluto()) {
-            Puoi registrare insoluto
-            } @else {
-            Sessione in compilazione
-            }
-          </div>
-        </div>
-
-        @if (cashCart().length) {
-        <div class="pos-cart-table-head" aria-hidden="true">
-          <span>Voce</span>
-          <span>Azioni</span>
-          <span>Prezzi</span>
-        </div>
-        }
-
-        <div class="pos-cart-lines">
-          @if (cashCart().length) {
-          @for (line of cashCart(); track line.id) {
-          <div class="pos-cart-line" [class.receipt-hidden]="line.excludeFromReceipt">
-            <div class="pos-cart-line-info">
-              <span class="pos-line-tag">@if (line.excludeFromReceipt) { Non stampato } @else { Scontrino } </span>
-              <strong>{{ line.name }}</strong>
-              <span class="pos-line-operator">{{ line.operatorName }} · {{ line.quantity }} {{ cashQuantityLabel(line)
-                }}</span>
-            </div>
-            <div class="pos-cart-line-controls">
-              <button type="button" class="receipt-toggle" [class.active]="line.excludeFromReceipt"
-                [attr.aria-pressed]="line.excludeFromReceipt"
-                aria-label="Alterna esclusione dallo scontrino per questa riga" [disabled]="cashIsSettlingPending()"
-                (click)="toggleCashLineReceipt(line.id)">
-                @if (line.excludeFromReceipt) { 👁️‍🗨️ } @else { 🧾 }
-              </button>
-              <button type="button" class="btn-qty" [disabled]="cashIsSettlingPending()"
-                (click)="decreaseCashLine(line.id)">−</button>
-              <span class="qty-display">{{ line.quantity }}</span>
-              <button type="button" class="btn-qty" [disabled]="cashIsSettlingPending()"
-                (click)="increaseCashLine(line.id)">+</button>
-              <select class="operator-select" [attr.aria-label]="'Operatore riga ' + line.name"
-                [disabled]="cashIsSettlingPending()" [value]="line.operatorName"
-                (change)="assignOperatorToCashLine(line.id, $any($event.target).value)">
-                @for (operator of cashOperators(); track operator) {
-                <option [value]="operator">{{ operator }}</option>
+              <div class="pos-cart-summary">
+                <span>{{ cashCart().length }} righe</span>
+                <strong>€ {{ cashSubtotal().toLocaleString('it-IT') }}</strong>
+              </div>
+              <div class="pos-cart-state" [class.ready]="cashCanFinalizePaidSale()"
+                [class.warning]="!cashCanFinalizePaidSale() && cashCanMarkAsInsoluto()">
+                @if (cashCanFinalizePaidSale()) {
+                Pronto da chiudere
+                } @else if (cashCanMarkAsInsoluto()) {
+                Puoi registrare insoluto
+                } @else {
+                Sessione in compilazione
                 }
-              </select>
-              <button type="button" class="btn-sm btn-danger-sm" [disabled]="cashIsSettlingPending()"
-                (click)="removeCashLine(line.id)">✕</button>
-            </div>
-            <div class="pos-cart-line-pricing">
-              <div class="input-group discount-input">
-                <span class="input-prefix">%</span>
-                <input type="number" class="input-field" min="0" max="100" step="1"
-                  [attr.aria-label]="'Sconto percentuale riga ' + line.name" [value]="line.discountPercentage || 0"
-                  (change)="updateCashLineDiscount(line.id, $event)" [disabled]="cashIsSettlingPending()">
               </div>
-              <div class="input-group price-input">
-                <span class="input-prefix">€</span>
-                <input type="number" class="input-field" min="0" step="0.01"
-                  [attr.aria-label]="'Prezzo unitario riga ' + line.name" [value]="line.unitPrice"
-                  (change)="updateCashLineUnitPrice(line.id, $event)" [disabled]="cashIsSettlingPending()">
-              </div>
-              <strong class="line-total">€ {{ line.total.toLocaleString('it-IT') }}</strong>
             </div>
-          </div>
-          }
-          } @else {
-          <div class="empty-state small">
-            <p>Inserisci servizi o articoli dalla griglia centrale.</p>
-          </div>
-          }
-        </div>
 
-        <div class="pos-subtotal-card">
-          <div>
-            <span>Subtotale</span>
-            <strong>€ {{ cashSubtotal().toLocaleString('it-IT') }}</strong>
-          </div>
-          @if (hasCashDiscount()) {
-          <div>
-            <span>Sconto</span>
-            <strong class="text-danger">− € {{ cashDiscountAmount().toLocaleString('it-IT') }}</strong>
-          </div>
-          }
-          <div>
-            <span>Totale</span>
-            <strong>€ {{ cashEffectiveTotal().toLocaleString('it-IT') }}</strong>
-          </div>
-          <div>
-            <span>Resto</span>
-            <strong>€ {{ cashChange().toLocaleString('it-IT') }}</strong>
-          </div>
-          @if (hasCashHiddenReceiptTotal()) {
-          <div>
-            <span>Fuori scontrino</span>
-            <strong>€ {{ cashHiddenReceiptTotal().toLocaleString('it-IT') }}</strong>
-          </div>
-          }
-        </div>
+            @if (cashCart().length) {
+            <div class="pos-cart-table-head" aria-hidden="true">
+              <span>Voce</span>
+              <span>Azioni</span>
+              <span>Prezzi</span>
+            </div>
+            }
+
+            <div class="pos-cart-lines">
+              @if (cashCart().length) {
+              @for (line of cashCart(); track line.id) {
+              <div class="pos-cart-line" [class.receipt-hidden]="line.excludeFromReceipt">
+                <div class="pos-cart-line-info">
+                  <span class="pos-line-tag">@if (line.excludeFromReceipt) { Non stampato } @else { Scontrino } </span>
+                  <strong>{{ line.name }}</strong>
+                  <span class="pos-line-operator">{{ line.operatorName }} · {{ line.quantity }} {{
+                    cashQuantityLabel(line)
+                    }}</span>
+                </div>
+                <div class="pos-cart-line-controls">
+                  <button type="button" class="receipt-toggle" [class.active]="line.excludeFromReceipt"
+                    [attr.aria-pressed]="line.excludeFromReceipt"
+                    aria-label="Alterna esclusione dallo scontrino per questa riga" [disabled]="cashIsSettlingPending()"
+                    (click)="toggleCashLineReceipt(line.id)">
+                    @if (line.excludeFromReceipt) { 👁️‍🗨️ } @else { 🧾 }
+                  </button>
+                  <button type="button" class="btn-qty" [disabled]="cashIsSettlingPending()"
+                    (click)="decreaseCashLine(line.id)">−</button>
+                  <span class="qty-display">{{ line.quantity }}</span>
+                  <button type="button" class="btn-qty" [disabled]="cashIsSettlingPending()"
+                    (click)="increaseCashLine(line.id)">+</button>
+                  <select class="operator-select" [attr.aria-label]="'Operatore riga ' + line.name"
+                    [disabled]="cashIsSettlingPending()" [value]="line.operatorName"
+                    (change)="assignOperatorToCashLine(line.id, $any($event.target).value)">
+                    @for (operator of cashOperators(); track operator) {
+                    <option [value]="operator">{{ operator }}</option>
+                    }
+                  </select>
+                  <button type="button" class="btn-sm btn-danger-sm" [disabled]="cashIsSettlingPending()"
+                    (click)="removeCashLine(line.id)">✕</button>
+                </div>
+                <div class="pos-cart-line-pricing">
+                  <div class="input-group discount-input">
+                    <span class="input-prefix">%</span>
+                    <input type="number" class="input-field" min="0" max="100" step="1"
+                      [attr.aria-label]="'Sconto percentuale riga ' + line.name" [value]="line.discountPercentage || 0"
+                      (change)="updateCashLineDiscount(line.id, $event)" [disabled]="cashIsSettlingPending()">
+                  </div>
+                  <div class="input-group price-input">
+                    <span class="input-prefix">€</span>
+                    <input type="number" class="input-field" min="0" step="0.01"
+                      [attr.aria-label]="'Prezzo unitario riga ' + line.name" [value]="line.unitPrice"
+                      (change)="updateCashLineUnitPrice(line.id, $event)" [disabled]="cashIsSettlingPending()">
+                  </div>
+                  <strong class="line-total">€ {{ line.total.toLocaleString('it-IT') }}</strong>
+                </div>
+              </div>
+              }
+              } @else {
+              <div class="empty-state small">
+                <p>Inserisci servizi o articoli dalla griglia centrale.</p>
+              </div>
+              }
+            </div>
+
+            <div class="pos-subtotal-card">
+              <div>
+                <span>Subtotale</span>
+                <strong>€ {{ cashSubtotal().toLocaleString('it-IT') }}</strong>
+              </div>
+              @if (hasCashDiscount()) {
+              <div>
+                <span>Sconto</span>
+                <strong class="text-danger">− € {{ cashDiscountAmount().toLocaleString('it-IT') }}</strong>
+              </div>
+              }
+              <div>
+                <span>Totale</span>
+                <strong>€ {{ cashEffectiveTotal().toLocaleString('it-IT') }}</strong>
+              </div>
+              <div>
+                <span>Resto</span>
+                <strong>€ {{ cashChange().toLocaleString('it-IT') }}</strong>
+              </div>
+              @if (hasCashHiddenReceiptTotal()) {
+              <div>
+                <span>Fuori scontrino</span>
+                <strong>€ {{ cashHiddenReceiptTotal().toLocaleString('it-IT') }}</strong>
+              </div>
+              }
+            </div>
           </section>
         </div>
       </div>
@@ -3170,7 +3222,7 @@
 
 
         @if (cashHistoryModalOpen()) {
-        <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashHistoryModal()">
+        <div class="ui-modal-overlay" [attr.aria-hidden]="false">
           <div class="ui-modal cash-history-modal" (click)="$event.stopPropagation()">
             <div class="ui-modal-head">
               <div>
@@ -3310,6 +3362,7 @@
                           </div>
                           <div class="record-actions">
                             <span class="badge" [class.bg-red]="txn.status === 'insoluto'"
+                              [class.badge-danger]="txn.status === 'annullato'"
                               [class.bg-green]="txn.status === 'pagato'">{{ txn.status | uppercase }}</span>
                             <strong>€ {{ txn.total.toLocaleString('it-IT') }}</strong>
                           </div>
@@ -3357,7 +3410,7 @@
         }
 
         @if (cashWaitingModalOpen()) {
-        <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashWaitingModal()">
+        <div class="ui-modal-overlay" [attr.aria-hidden]="false">
           <div class="ui-modal cash-waiting-modal" (click)="$event.stopPropagation()">
             <div class="ui-modal-head">
               <div>
@@ -3405,8 +3458,8 @@
                 <small>Vendita banco</small>
               </button>
               <button type="button" class="pos-toggle-btn pos-toggle-btn-doc"
-                [class.active]="cashDocumentType() === 'fattura'"
-                [attr.aria-pressed]="cashDocumentType() === 'fattura'" (click)="setCashDocumentType('fattura')">
+                [class.active]="cashDocumentType() === 'fattura'" [attr.aria-pressed]="cashDocumentType() === 'fattura'"
+                (click)="setCashDocumentType('fattura')">
                 <strong>Fattura</strong>
                 <small>Dati fiscali</small>
               </button>
@@ -3420,8 +3473,8 @@
             <span class="detail-subtitle">Sconto</span>
             <div class="pos-doc-type-switch pos-discount-switch">
               <button type="button" class="pos-toggle-btn pos-toggle-btn-discount"
-                [class.active]="cashDiscountType() === 'importo'"
-                [attr.aria-pressed]="cashDiscountType() === 'importo'" (click)="cashDiscountType.set('importo')">
+                [class.active]="cashDiscountType() === 'importo'" [attr.aria-pressed]="cashDiscountType() === 'importo'"
+                (click)="cashDiscountType.set('importo')">
                 <strong>Importo</strong>
                 <small>Euro fissi</small>
               </button>
@@ -3499,8 +3552,7 @@
           }
           <div class="pos-method-list compact pos-method-grid-desktop">
             <button type="button" [class.active]="cashPaymentMethod() === 'contanti'"
-              [attr.aria-pressed]="cashPaymentMethod() === 'contanti'"
-              (click)="setCashPaymentMethod('contanti')">
+              [attr.aria-pressed]="cashPaymentMethod() === 'contanti'" (click)="setCashPaymentMethod('contanti')">
               <strong>CONTANTI</strong>
               <small>Cassa immediata</small>
             </button>
@@ -3517,8 +3569,7 @@
               <small>Pagamento tracciato</small>
             </button>
             <button type="button" [class.active]="cashPaymentMethod() === 'misto'"
-              [attr.aria-pressed]="cashPaymentMethod() === 'misto'"
-              (click)="setCashPaymentMethod('misto')">
+              [attr.aria-pressed]="cashPaymentMethod() === 'misto'" (click)="setCashPaymentMethod('misto')">
               <strong>MISTO</strong>
               <small>Contanti + elettronico</small>
             </button>
@@ -3588,6 +3639,8 @@
             </button>
             <button type="button" class="btn-ghost btn-warning-ghost" [disabled]="!cashCanMarkAsInsoluto()"
               (click)="completeCashSale('insoluto')">Registra insoluto</button>
+            <button type="button" class="btn-ghost btn-danger-sm" [disabled]="!cashHasSessionContent()"
+              (click)="cancelCashDraft()">Annulla</button>
             <button type="button" class="btn-ghost" (click)="clearCashCart()">Pulisci</button>
           </div>
         </div>
@@ -3609,7 +3662,7 @@
   </div>
 
   @if (cashReceiptPreviewModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashReceiptPreviewModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal cash-receipt-preview-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -3648,7 +3701,7 @@
             </div>
             }
           </div>
-          @if (cashHiddenReceiptLines().length) {
+          @if (cashHiddenReceiptLines().length && auth.isOwner()) {
           <div class="virtual-receipt-note">
             <span>Voci fuori scontrino</span>
             <strong>€ {{ cashHiddenReceiptTotal().toLocaleString('it-IT') }}</strong>
@@ -3672,7 +3725,7 @@
   }
 
   @if (cashReceiptsModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashReceiptsModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal cash-receipts-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -3693,15 +3746,15 @@
               Elenco fatture
             </button>
           </div>
-          <label class="pos-inline-label">
+          <label class="pos-inline-label cash-receipt-search">
             <span>@if (cashDocumentListFilter() === 'fatture') { Cerca fattura } @else { Cerca scontrino }</span>
             <input type="search" placeholder="Numero, cliente, note o pagamento" [value]="cashReceiptSearch()"
               (input)="updateCashReceiptSearch($event)">
           </label>
           <div class="cash-receipts-list">
             @for (transaction of cashReceiptTransactions(); track transaction.id) {
-            <button type="button" class="cash-receipt-row" [class.active]="selectedCashReceipt().id === transaction.id"
-              (click)="selectCashReceipt(transaction.id)">
+            <button type="button" class="cash-receipt-row" [class.active]="selectedCashReceiptId() === transaction.id"
+              [class.is-annulled]="transaction.status === 'annullato'" (click)="selectCashReceipt(transaction.id)">
               <span class="cash-receipt-row-main">
                 <strong>
                   @if (transaction.documentType === 'fattura') {
@@ -3710,7 +3763,7 @@
                   Sc. {{ transaction.receiptNumber }}
                   }
                 </strong>
-                <span>{{ transaction.customerName }}</span>
+                <span>{{ transaction.customerName }} · {{ cashStatusLabel(transaction.status) }}</span>
               </span>
               <span class="cash-receipt-row-side">
                 <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
@@ -3741,8 +3794,16 @@
             </div>
             <span class="badge" [class.badge-success]="receipt.status === 'pagato'"
               [class.badge-warning]="receipt.status === 'sospeso'"
-              [class.badge-danger]="receipt.status === 'insoluto'">{{ cashStatusLabel(receipt.status) }}</span>
+              [class.badge-danger]="receipt.status === 'insoluto' || receipt.status === 'annullato'">{{
+              cashStatusLabel(receipt.status) }}</span>
           </div>
+
+          @if (receipt.status === 'annullato') {
+          <div class="cash-transaction-status-note is-annulled">
+            Questo scontrino e annullato: resta in archivio per storico ma non viene piu conteggiato negli incassi e
+            nei report.
+          </div>
+          }
 
           <form class="cash-receipt-edit-grid" [formGroup]="cashReceiptEditForm" (ngSubmit)="saveCashReceiptEdit()">
             <label class="pos-inline-label pos-inline-label-full">
@@ -3798,14 +3859,23 @@
                 provider</button>
               }
               }
-              <button type="button" class="btn-ghost" (click)="restoreCashReceiptToDesk()">Riporta in cassa</button>
-              <button type="submit" class="btn-primary">Salva modifiche</button>
+              @if (cashTransactionCanBeAnnulled(receipt)) {
+              <button type="button" class="btn-ghost btn-danger-sm" (click)="annulCashTransaction(receipt.id)">
+                Annulla scontrino
+              </button>
+              }
+              <button type="button" class="btn-ghost" [disabled]="receipt.status === 'annullato'"
+                (click)="restoreCashReceiptToDesk()">Riporta in cassa</button>
+              <button type="submit" class="btn-primary" [disabled]="receipt.status === 'annullato'">Salva
+                modifiche</button>
               <button type="button" class="btn-ghost" (click)="closeCashReceiptsModal()">Chiudi</button>
             </div>
           </form>
           } @else {
-          <div class="empty-state">
-            <p>Seleziona uno scontrino dall'elenco per visualizzarlo o modificarlo.</p>
+          <div class="cash-receipt-empty">
+            <span class="detail-subtitle">Nessun documento selezionato</span>
+            <h3>Seleziona uno scontrino dalla lista</h3>
+            <p>Il dettaglio comparira qui solo dopo il click su uno scontrino o su una fattura.</p>
           </div>
           }
         </div>
@@ -3815,7 +3885,7 @@
   }
 
   @if (cashClientModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false" (click)="closeCashClientModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen cash-client-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -3958,7 +4028,7 @@
   }
 
   @if (cashInvoiceDataModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashInvoiceDataModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg cash-invoice-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -4000,8 +4070,10 @@
 
             <div class="cash-client-modal-grid cash-invoice-section-grid">
               <label class="pos-inline-label pos-inline-label-full">
-                <span>{{ cashInvIsCompany() ? 'Ragione sociale' : 'Nome e cognome' }} <i class="field-required">*</i></span>
-                <input type="text" [placeholder]="cashInvIsCompany() ? 'Ragione sociale cliente' : 'Nome e cognome cliente'"
+                <span>{{ cashInvIsCompany() ? 'Ragione sociale' : 'Nome e cognome' }} <i
+                    class="field-required">*</i></span>
+                <input type="text"
+                  [placeholder]="cashInvIsCompany() ? 'Ragione sociale cliente' : 'Nome e cognome cliente'"
                   [value]="cashInvName()" (input)="cashInvName.set($any($event.target).value)">
               </label>
               <label class="pos-inline-label">
@@ -4068,7 +4140,8 @@
 
             <div class="detail-note cash-invoice-dispatch-note">
               <span>Canale di recapito</span>
-              <p>Compila almeno uno tra SDI, PEC o email. Se SDI non è presente, il sistema userà comunque il fallback XML manuale.</p>
+              <p>Compila almeno uno tra SDI, PEC o email. Se SDI non è presente, il sistema userà comunque il fallback
+                XML manuale.</p>
             </div>
           </section>
         </div>
@@ -4083,7 +4156,7 @@
   }
 
   @if (cashClosureModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashClosureModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -4139,7 +4212,7 @@
         <div class="closure-transactions">
           <h3>Dettaglio operazioni</h3>
           <div class="record-list compact">
-            @for (transaction of allCashTransactions(); track transaction.id) {
+            @for (transaction of cashClosureTransactions(); track transaction.id) {
             <div class="record-row">
               <div class="record-info">
                 <strong>{{ transaction.reference }}
@@ -4153,7 +4226,8 @@
                 <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
                 <span class="badge" [class.badge-success]="transaction.status === 'pagato'"
                   [class.badge-warning]="transaction.status === 'sospeso'"
-                  [class.badge-danger]="transaction.status === 'insoluto'">{{ cashStatusLabel(transaction.status)
+                  [class.badge-danger]="transaction.status === 'insoluto' || transaction.status === 'annullato'">{{
+                  cashStatusLabel(transaction.status)
                   }}</span>
               </div>
             </div>
@@ -4191,7 +4265,7 @@
   }
 
   @if (cashReportModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashReportModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal cash-report-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -4221,6 +4295,7 @@
             <div class="closure-card"><span>Fatture</span><strong>{{ cashTodayInvoiceCount() }}</strong></div>
             <div class="closure-card"><span>Insoluti aperti</span><strong>€ {{
                 cashUnpaidTransactionsTotal().toLocaleString('it-IT') }}</strong></div>
+            <div class="closure-card"><span>Annullati</span><strong>{{ cashAnnulledTransactionsCount() }}</strong></div>
             <div class="closure-card"><span>Sconti</span><strong>€ {{ cashTodayDiscountTotal().toLocaleString('it-IT')
                 }}</strong></div>
           </div>
@@ -4283,15 +4358,16 @@
             </label>
             <div class="cash-receipts-list">
               @for (shift of filteredCashShifts(); track shift.id) {
+              @let shiftMetrics = cashShiftMetrics(shift);
               <button type="button" class="cash-receipt-row" [class.active]="selectedCashReportShiftId() === shift.id"
                 (click)="selectCashReportShift(shift.id)">
                 <span class="cash-receipt-row-main">
                   <strong>{{ shift.label }} · Ch. {{ shift.closureNumber }}</strong>
-                  <span>{{ shift.closedAt.slice(0, 10) }} · {{ shift.transactionsCount }} operazioni</span>
+                  <span>{{ shift.closedAt.slice(0, 10) }} · {{ shiftMetrics.transactionsCount }} operazioni</span>
                 </span>
                 <span class="cash-receipt-row-side">
-                  <strong>€ {{ shift.paidTotal.toLocaleString('it-IT') }}</strong>
-                  <span>{{ shift.receiptNumbers.length }} sc. · {{ shift.invoiceNumbers.length }} ft.</span>
+                  <strong>€ {{ shiftMetrics.paidTotal.toLocaleString('it-IT') }}</strong>
+                  <span>{{ shiftMetrics.receiptCount }} sc. · {{ shiftMetrics.invoiceCount }} ft.</span>
                 </span>
               </button>
               } @empty {
@@ -4304,6 +4380,7 @@
 
           <div class="cash-shift-detail-panel">
             @if (selectedCashReportShift(); as shift) {
+            @let shiftMetrics = cashShiftMetrics(shift);
             <div class="cash-receipt-summary">
               <div>
                 <span class="detail-subtitle">Chiusura selezionata</span>
@@ -4312,21 +4389,27 @@
               <span class="badge badge-neutral">{{ shift.closedAt.slice(0, 10) }}</span>
             </div>
             <div class="closure-summary-grid">
-              <div class="closure-card"><span>Incasso</span><strong>€ {{ shift.paidTotal.toLocaleString('it-IT')
+              <div class="closure-card"><span>Incasso</span><strong>€ {{ shiftMetrics.paidTotal.toLocaleString('it-IT')
                   }}</strong></div>
-              <div class="closure-card"><span>Operazioni</span><strong>{{ shift.transactionsCount }}</strong></div>
-              <div class="closure-card"><span>Scontrini</span><strong>{{ shift.receiptNumbers.length }}</strong></div>
-              <div class="closure-card"><span>Fatture</span><strong>{{ shift.invoiceNumbers.length }}</strong></div>
+              <div class="closure-card"><span>Operazioni</span><strong>{{ shiftMetrics.transactionsCount }}</strong>
+              </div>
+              <div class="closure-card"><span>Scontrini</span><strong>{{ shiftMetrics.receiptCount }}</strong></div>
+              <div class="closure-card"><span>Fatture</span><strong>{{ shiftMetrics.invoiceCount }}</strong></div>
+              @if (shiftMetrics.annulledCount > 0) {
+              <div class="closure-card"><span>Annullati</span><strong>{{ shiftMetrics.annulledCount }}</strong></div>
+              }
             </div>
             <div class="cash-receipt-lines">
               <span class="detail-subtitle">Documenti della chiusura</span>
               @for (transaction of selectedCashReportShiftTransactions(); track transaction.id) {
               <button type="button" class="cash-report-transaction"
+                [class.is-annulled]="transaction.status === 'annullato'"
                 [class.active]="selectedCashReportTransactionId() === transaction.id"
                 (click)="selectCashReportTransaction(transaction.id)">
                 <span>
                   <strong>{{ cashReportDocumentLabel(transaction) }} · {{ transaction.customerName }}</strong>
-                  <span>{{ transaction.paymentMethod }} · {{ transaction.createdAt.slice(0, 10) }}</span>
+                  <span>{{ transaction.paymentMethod }} · {{ cashStatusLabel(transaction.status) }} · {{
+                    transaction.createdAt.slice(0, 10) }}</span>
                 </span>
                 <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
               </button>
@@ -4337,6 +4420,21 @@
               }
             </div>
             @if (selectedCashReportTransaction(); as transaction) {
+            <div class="cash-receipt-summary">
+              <div>
+                <span class="detail-subtitle">Documento selezionato</span>
+                <strong>{{ cashReportDocumentLabel(transaction) }} · {{ transaction.customerName }}</strong>
+              </div>
+              <span class="badge" [class.badge-success]="transaction.status === 'pagato'"
+                [class.badge-warning]="transaction.status === 'sospeso'"
+                [class.badge-danger]="transaction.status === 'insoluto' || transaction.status === 'annullato'">{{
+                cashStatusLabel(transaction.status) }}</span>
+            </div>
+            @if (transaction.status === 'annullato') {
+            <div class="cash-transaction-status-note is-annulled">
+              Documento annullato: escluso dagli incassi e dai riepiloghi economici.
+            </div>
+            }
             <div class="cash-receipt-lines">
               <span class="detail-subtitle">Dettaglio documento</span>
               @for (line of transaction.lines; track line.id) {
@@ -4348,6 +4446,14 @@
                 <strong>€ {{ line.total.toLocaleString('it-IT') }}</strong>
               </div>
               }
+            </div>
+            <div class="form-actions cash-report-detail-actions">
+              @if (cashTransactionCanBeAnnulled(transaction)) {
+              <button type="button" class="btn-ghost btn-danger-sm"
+                (click)="annulCashTransaction(transaction.id, 'report')">Annulla scontrino</button>
+              }
+              <button type="button" class="btn-ghost" (click)="openCashReceiptsFromReport()">Apri archivio
+                documenti</button>
             </div>
             }
             }
@@ -4519,7 +4625,7 @@
 
 
   @if (ticketModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false" (click)="closeTicketModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen ticket-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div class="appointment-modal-head-copy">
@@ -4890,6 +4996,9 @@
         [attr.aria-pressed]="warehouseView() === 'fornitori'"
         [attr.aria-current]="warehouseView() === 'fornitori' ? 'page' : null"
         (click)="setWarehouseView('fornitori')">Fornitori</button>
+      <button type="button" class="warehouse-tab" [class.active]="warehouseAdjustmentModalOpen()"
+        [attr.aria-pressed]="warehouseAdjustmentModalOpen()" (click)="openWarehouseAdjustmentModal()">Rettifiche
+        rapide</button>
     </nav>
 
     <!-- Task 7: Ordini attivi · Portale Dipendenti (solo quelli da gestire; gli ordini chiusi finiscono nel Registro ordini) -->
@@ -5131,55 +5240,6 @@
         <p class="text-muted">Seleziona un prodotto dalla tabella per vedere i dettagli.</p>
         }
       </div>
-      <div class="op-card warehouse-adjustment-card">
-        <h2 class="op-card-title">Rettifiche rapide</h2>
-        <form class="op-form" [formGroup]="warehouseAdjustmentForm" (ngSubmit)="applyInventoryAdjustment()">
-          <div class="warehouse-adjustment-rows">
-            <!-- Riga 1: Prodotto (largo) · Giacenza attuale (stretta numerica) · Quantità reale (stretta numerica) -->
-            <div class="warehouse-adjustment-row warehouse-adjustment-row-top">
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
-                <span>Prodotto</span>
-                <select class="form-field-outlined" formControlName="inventoryItemId">
-                  <option value="">Seleziona prodotto</option>
-                  @for (item of allInventoryItems(); track item.id) {<option [value]="item.id">{{ item.name }} · {{
-                    item.stock }}</option>}
-                </select>
-              </label>
-              <div class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
-                <span>Giacenza attuale</span>
-                <input type="text" class="form-readonly form-field-numeric"
-                  [value]="warehouseAdjustmentCurrentStock() !== null ? warehouseAdjustmentCurrentStock() + ' unità' : '—'"
-                  readonly aria-readonly="true">
-              </div>
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
-                <span>Quantità reale</span>
-                <input type="number" class="form-field-outlined form-field-numeric" formControlName="actualQuantity"
-                  min="0">
-              </label>
-            </div>
-
-            <!-- Riga 2: Causale (largo) · Operatore (select elenco) · Pulsanti (destra) -->
-            <div class="warehouse-adjustment-row warehouse-adjustment-row-bottom">
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
-                <span>Causale</span>
-                <input type="text" class="form-field-outlined" formControlName="reason"
-                  placeholder="Inventario periodico, danno, errore...">
-              </label>
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--operator">
-                <span>Operatore</span>
-                <select class="form-field-outlined" formControlName="operator">
-                  @for (name of warehouseAdjustmentOperatorList(); track name) {<option [value]="name">{{ name }}
-                  </option>}
-                </select>
-              </label>
-              <div class="form-actions form-actions-row">
-                <button type="submit" class="btn-primary">Applica rettifica</button>
-                <button type="button" class="btn-ghost" (click)="resetWarehouseAdjustmentForm()">Annulla</button>
-              </div>
-            </div>
-          </div>
-        </form>
-      </div>
     </div>
     } @else if (warehouseView() === 'acquisto') {
     <section class="op-card warehouse-view-card">
@@ -5294,55 +5354,6 @@
           <p class="text-muted">Nessun prodotto ad uso negozio registrato in inventario.</p>
           }
         </div>
-      </div>
-      <div class="op-card warehouse-adjustment-card">
-        <h2 class="op-card-title">Registrazione uso interno</h2>
-        <form class="op-form" [formGroup]="warehouseAdjustmentForm" (ngSubmit)="applyInventoryAdjustment()">
-          <div class="warehouse-adjustment-rows">
-            <!-- Riga 1: Prodotto (largo) · Giacenza attuale (stretta numerica) · Quantità reale (stretta numerica) -->
-            <div class="warehouse-adjustment-row warehouse-adjustment-row-top">
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
-                <span>Prodotto</span>
-                <select class="form-field-outlined" formControlName="inventoryItemId">
-                  <option value="">Seleziona prodotto</option>
-                  @for (item of allInventoryItems(); track item.id) {<option [value]="item.id">{{ item.name }} · {{
-                    item.stock }}</option>}
-                </select>
-              </label>
-              <div class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
-                <span>Giacenza attuale</span>
-                <input type="text" class="form-readonly form-field-numeric"
-                  [value]="warehouseAdjustmentCurrentStock() !== null ? warehouseAdjustmentCurrentStock() + ' unità' : '—'"
-                  readonly aria-readonly="true">
-              </div>
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
-                <span>Quantità reale</span>
-                <input type="number" class="form-field-outlined form-field-numeric" formControlName="actualQuantity"
-                  min="0">
-              </label>
-            </div>
-
-            <!-- Riga 2: Causale (largo) · Operatore (select elenco) · Pulsanti (destra) -->
-            <div class="warehouse-adjustment-row warehouse-adjustment-row-bottom">
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
-                <span>Causale</span>
-                <input type="text" class="form-field-outlined" formControlName="reason"
-                  placeholder="Uso interno, rottura, test, inventario...">
-              </label>
-              <label class="warehouse-adjustment-field warehouse-adjustment-field--operator">
-                <span>Operatore</span>
-                <select class="form-field-outlined" formControlName="operator">
-                  @for (name of warehouseAdjustmentOperatorList(); track name) {<option [value]="name">{{ name }}
-                  </option>}
-                </select>
-              </label>
-              <div class="form-actions form-actions-row">
-                <button type="submit" class="btn-primary">Registra uso interno</button>
-                <button type="button" class="btn-ghost" (click)="resetWarehouseAdjustmentForm()">Annulla</button>
-              </div>
-            </div>
-          </div>
-        </form>
       </div>
     </div>
 
@@ -5785,8 +5796,7 @@
   </div>
 
   @if (warehouseSupplierDetail(); as supplier) {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false"
-    (click)="closeWarehouseSupplierDetail()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen warehouse-supplier-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head warehouse-supplier-modal-head">
         <div class="warehouse-supplier-head-copy">
@@ -5878,8 +5888,69 @@
   </div>
   }
 
+  @if (warehouseAdjustmentModalOpen()) {
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
+    <div class="ui-modal warehouse-adjustment-modal" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head">
+        <div>
+          <span class="detail-subtitle">Magazzino</span>
+          <h2 class="op-card-title">Rettifiche rapide</h2>
+          <p class="warehouse-adjustment-modal-note">Allinea la giacenza reale, registra uso interno o correggi
+            differenze inventariali senza entrare nel carico prodotto.</p>
+        </div>
+        <button type="button" class="btn-ghost" (click)="closeWarehouseAdjustmentModal()">Chiudi</button>
+      </div>
+      <form class="ui-modal-body op-form warehouse-adjustment-modal-form" [formGroup]="warehouseAdjustmentForm"
+        (ngSubmit)="applyInventoryAdjustment() && closeWarehouseAdjustmentModal()">
+        <div class="warehouse-adjustment-rows">
+          <div class="warehouse-adjustment-row warehouse-adjustment-row-top">
+            <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
+              <span>Prodotto</span>
+              <select class="form-field-outlined" formControlName="inventoryItemId">
+                <option value="">Seleziona prodotto</option>
+                @for (item of allInventoryItems(); track item.id) {<option [value]="item.id">{{ item.name }} · {{
+                  item.stock }}</option>}
+              </select>
+            </label>
+            <div class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
+              <span>Giacenza attuale</span>
+              <input type="text" class="form-readonly form-field-numeric"
+                [value]="warehouseAdjustmentCurrentStock() !== null ? warehouseAdjustmentCurrentStock() + ' unità' : '—'"
+                readonly aria-readonly="true">
+            </div>
+            <label class="warehouse-adjustment-field warehouse-adjustment-field--numeric">
+              <span>Quantità reale</span>
+              <input type="number" class="form-field-outlined form-field-numeric" formControlName="actualQuantity"
+                min="0">
+            </label>
+          </div>
+
+          <div class="warehouse-adjustment-row warehouse-adjustment-row-bottom">
+            <label class="warehouse-adjustment-field warehouse-adjustment-field--wide">
+              <span>Causale</span>
+              <input type="text" class="form-field-outlined" formControlName="reason"
+                placeholder="Inventario periodico, uso interno, danno, errore...">
+            </label>
+            <label class="warehouse-adjustment-field warehouse-adjustment-field--operator">
+              <span>Operatore</span>
+              <select class="form-field-outlined" formControlName="operator">
+                @for (name of warehouseAdjustmentOperatorList(); track name) {<option [value]="name">{{ name }}
+                </option>}
+              </select>
+            </label>
+            <div class="form-actions form-actions-row">
+              <button type="submit" class="btn-primary">Applica rettifica</button>
+              <button type="button" class="btn-ghost" (click)="resetWarehouseAdjustmentForm()">Annulla</button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  }
+
   @if (warehouseModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-warehouse" [attr.aria-hidden]="false" (click)="closeWarehouseModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-warehouse" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-warehouse warehouse-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head ui-modal-head-warehouse">
         <div class="appointment-modal-head-copy">
@@ -6107,8 +6178,11 @@
                 </select>
               </label>
               <label [class.has-error]="hasFieldError(warehouseReceiptForm, 'unitOfMeasure')"><span>Unità misura
-                  *</span><input type="text" formControlName="unitOfMeasure" placeholder="pz, m, kg...">@if
-                (hasFieldError(warehouseReceiptForm, 'unitOfMeasure')) { <small class="field-error">{{
+                  *</span><select formControlName="unitOfMeasure">
+                  @for (unit of warehouseUnitMeasures; track unit.value) {
+                  <option [value]="unit.value">{{ unit.label }}</option>
+                  }
+                </select>@if (hasFieldError(warehouseReceiptForm, 'unitOfMeasure')) { <small class="field-error">{{
                   fieldError(warehouseReceiptForm, 'unitOfMeasure', 'Unità misura') }}</small> }</label>
             </div>
             @if (warehouseReceiptForm.controls.usageType.value === 'uso-negozio') {
@@ -6231,7 +6305,7 @@
 
   <!-- Modale modifica anagrafica prodotto (ex pulsante "Modifica" che non apriva nulla) -->
   @if (inventoryEditModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeInventoryEditModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div class="appointment-modal-head-copy">
@@ -6347,7 +6421,7 @@
 
   <!-- Modale Carico in magazzino da ordine: precompila le righe dell'ordine e lo marca come ricevuto -->
   @if (epOrderReceiptOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="epCloseOrderReceipt()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div class="appointment-modal-head-copy">
@@ -6764,7 +6838,7 @@
     </div>
   </div>
   @if (serviceModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-service" [attr.aria-hidden]="false" (click)="closeServiceModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-service" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-service service-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head ui-modal-head-service">
         <div class="appointment-modal-head-copy">
@@ -7321,7 +7395,7 @@
   }
 
   @if (expenseModalOpen()) {
-  <div class="ui-modal-overlay ui-modal-overlay-expense" [attr.aria-hidden]="false" (click)="closeExpenseModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-expense" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-expense" (click)="$event.stopPropagation()">
       <div class="ui-modal-head ui-modal-head-expense">
         <div>
@@ -8188,27 +8262,6 @@
       </div>
       }
 
-      <form class="op-form op-form-spaced" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
-        <label><span>Nuovo operatore</span><input type="text" formControlName="name"
-            placeholder="Nome operatore"></label>
-        <label><span>Ruolo</span>
-          <select formControlName="role">
-            <option value="vendita">Vendita</option>
-            <option value="tecnico">Tecnico</option>
-            <option value="amministrazione">Amministrazione</option>
-            <option value="magazzino">Magazzino</option>
-          </select>
-        </label>
-        <label><span>Contratto settimanale</span>
-          <select formControlName="contractHoursWeekly">
-            @for (h of [24,30,32,36,38,40,44,48]; track h) {
-            <option [value]="h">{{ h }} ore</option>
-            }
-          </select>
-        </label>
-        <div class="form-actions"><button type="submit" class="btn-primary">Aggiungi</button></div>
-      </form>
-
       @if (inactiveCashOperators().length && !showHiddenOperators()) {
       <div class="detail-note">
         <span>💡 Dipendenti nascosti ({{ inactiveCashOperators().length }})</span>
@@ -8217,6 +8270,25 @@
           &nbsp;·&nbsp; attiva "Mostra nascosti" in alto per ripristinarli.
         </p>
       </div>
+      }
+    </div>
+
+    <!-- ═══ LINK DEL PORTALE DA INOLTRARE AI DIPENDENTI ═══ -->
+    <div class="op-card op-card-operativa">
+      <h2 class="op-card-title">🔗 Link Portale Dipendenti</h2>
+      <p class="detail-note">
+        Inoltra questo link ai dipendenti: si apre direttamente il portale, senza passare dal gestionale.
+      </p>
+      <div class="ep-portal-link-row">
+        <input class="ep-input" type="text" readonly [value]="epPortalShareUrl()"
+          aria-label="Link del portale dipendenti">
+        <button type="button" class="btn-primary ep-portal-link-copy"
+          (click)="epCopyToClipboard(epPortalShareUrl(), 'Link del portale copiato negli appunti 👍')">
+          📋 Copia link
+        </button>
+      </div>
+      @if (epMobileLastMessage()) {
+      <p class="ep-portal-link-feedback" role="status">{{ epMobileLastMessage() }}</p>
       }
     </div>
 
@@ -8251,39 +8323,47 @@
   @case ('employee-portal') {
   <!-- Icone condivise tra navigazione, riepilogo e azioni del portale. -->
   <ng-template #epIcon let-key>
-    <svg class="ep-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg class="ep-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+      stroke-linejoin="round" aria-hidden="true">
       @switch (key) {
       @case ('dashboard') {
-        <path d="m3 10 9-7 9 7v10H3V10Z" /><path d="M9 20v-7h6v7" />
+      <path d="m3 10 9-7 9 7v10H3V10Z" />
+      <path d="M9 20v-7h6v7" />
       }
       @case ('agenda') {
-        <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M8 3v4M16 3v4M3 11h18M8 15h2M14 15h2" />
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M8 3v4M16 3v4M3 11h18M8 15h2M14 15h2" />
       }
       @case ('magazzino') {
-        <path d="m3 7 9-4 9 4-9 4-9-4ZM3 7v10l9 4 9-4V7M12 11v10M7.5 5l9 4" />
+      <path d="m3 7 9-4 9 4-9 4-9-4ZM3 7v10l9 4 9-4V7M12 11v10M7.5 5l9 4" />
       }
       @case ('ddt') {
-        <path d="M3 5h11v12H3V5ZM14 9h4l3 5v3h-7" /><circle cx="7" cy="18" r="2" /><circle cx="17" cy="18" r="2" />
+      <path d="M3 5h11v12H3V5ZM14 9h4l3 5v3h-7" />
+      <circle cx="7" cy="18" r="2" />
+      <circle cx="17" cy="18" r="2" />
       }
       @case ('servizi') {
-        <path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z" />
+      <path d="M14 6a5 5 0 0 0-6 6l-5 5a2.1 2.1 0 0 0 3 3l5-5a5 5 0 0 0 6-6l-3 3-3-3 3-3Z" />
       }
       @case ('ordini') {
-        <path d="M3 3h2l3 12h10l3-9H6" /><circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" />
+      <path d="M3 3h2l3 12h10l3-9H6" />
+      <circle cx="9" cy="20" r="1" />
+      <circle cx="18" cy="20" r="1" />
       }
       @case ('comunicazioni') {
-        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
       }
       @case ('logout') {
-        <path d="M9 4H4v16h5M10 12h11m-4-4 4 4-4 4" />
+      <path d="M9 4H4v16h5M10 12h11m-4-4 4 4-4 4" />
       }
       @case ('warning') {
-        <path d="m12 3 10 18H2L12 3ZM12 9v5M12 17h.01" />
+      <path d="m12 3 10 18H2L12 3ZM12 9v5M12 17h.01" />
       }
       @default {
-        <rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" />
-        <rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" />
+      <rect x="4" y="4" width="6" height="6" rx="1" />
+      <rect x="14" y="4" width="6" height="6" rx="1" />
+      <rect x="4" y="14" width="6" height="6" rx="1" />
+      <rect x="14" y="14" width="6" height="6" rx="1" />
       }
       }
     </svg>
@@ -8340,8 +8420,7 @@
       <header class="ep-header">
         <div class="ep-header-left">
           <button type="button" class="ep-hamburger-btn" aria-label="Apri menu portale dipendenti"
-            [attr.aria-expanded]="epNavDrawerOpen()" aria-controls="ep-navigation"
-            (click)="epNavDrawerOpen.set(true)">
+            [attr.aria-expanded]="epNavDrawerOpen()" aria-controls="ep-navigation" (click)="epNavDrawerOpen.set(true)">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2"
               stroke-linecap="round">
               <path d="M3 6h18" />
@@ -8368,8 +8447,8 @@
       <!-- ✅ EP v3: Menu drawer a sinistra (hamburger) — SOLO funzioni portalino, NIENTE gestionale -->
       @if (epNavDrawerOpen()) {
       <div class="ep-nav-overlay" (click)="epNavDrawerOpen.set(false)"></div>
-      <aside class="ep-nav-drawer" id="ep-navigation" role="dialog" aria-modal="true" aria-label="Menu Portale Dipendenti"
-        (keydown.escape)="epNavDrawerOpen.set(false)">
+      <aside class="ep-nav-drawer" id="ep-navigation" role="dialog" aria-modal="true"
+        aria-label="Menu Portale Dipendenti" (keydown.escape)="epNavDrawerOpen.set(false)">
         <div class="ep-nav-drawer-head">
           <div class="ep-nav-brand">
             <span class="ep-nav-brand-mark">AM</span>
@@ -8389,23 +8468,24 @@
           </div>
         </div>
         <nav class="ep-nav-list" aria-label="Voci menu portale">
-          <button type="button" class="ep-nav-item"
-            [class.ep-nav-item-active]="epActiveTab() === 'dashboard'"
-            [attr.aria-current]="epActiveTab() === 'dashboard' ? 'page' : null"
-            (click)="epResetPortalView()">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'dashboard' }" /></span>
+          <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'dashboard'"
+            [attr.aria-current]="epActiveTab() === 'dashboard' ? 'page' : null" (click)="epResetPortalView()">
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'dashboard' }" /></span>
             <span class="ep-nav-text">Home</span>
             <span class="ep-nav-desc">Vista principale</span>
           </button>
           <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'agenda'"
             (click)="epGotoTab('agenda')">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'agenda' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'agenda' }" /></span>
             <span class="ep-nav-text">Agenda</span>
             <span class="ep-nav-desc">{{ epMyAgendaAppts().length }} appuntamenti</span>
           </button>
           <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'comunicazioni'"
             (click)="epGotoTab('comunicazioni')">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'comunicazioni' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'comunicazioni' }" /></span>
             <span class="ep-nav-text">Comunicazioni</span>
             <span class="ep-nav-desc">
               @if (epBellUnreadCount() > 0) {
@@ -8417,32 +8497,37 @@
           </button>
           <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'magazzino'"
             (click)="epGotoTab('magazzino')">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'magazzino' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'magazzino' }" /></span>
             <span class="ep-nav-text">Magazzino</span>
             <span class="ep-nav-desc">Consulta e preleva</span>
           </button>
           <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'ddt'"
             (click)="epGotoTab('ddt')">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'ddt' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'ddt' }" /></span>
             <span class="ep-nav-text">DDT</span>
             <span class="ep-nav-desc">Documenti di trasporto</span>
           </button>
           <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'servizi'"
             (click)="epGotoTab('servizi')">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'servizi' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'servizi' }" /></span>
             <span class="ep-nav-text">Servizi</span>
             <span class="ep-nav-desc">Invia in officina / cassa</span>
           </button>
           <button type="button" class="ep-nav-item" [class.ep-nav-item-active]="epActiveTab() === 'ordini'"
             (click)="epGotoTab('ordini')">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'ordini' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'ordini' }" /></span>
             <span class="ep-nav-text">Ordini</span>
             <span class="ep-nav-desc">Richiedi materiale</span>
           </button>
         </nav>
         <div class="ep-nav-footer">
           <button type="button" class="ep-nav-item ep-nav-item-logout" (click)="epLogout(); epNavDrawerOpen.set(false)">
-            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'logout' }" /></span>
+            <span class="ep-nav-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'logout' }" /></span>
             <span class="ep-nav-text">Esci dal portale</span>
             <span class="ep-nav-desc">Chiudi sessione</span>
           </button>
@@ -8466,22 +8551,26 @@
         <!-- Statistiche rapide -->
         <div class="ep-dashboard-stats">
           <button type="button" class="ep-stat-card" (click)="epGotoTab('agenda')">
-            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'agenda' }" /></span>
+            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'agenda' }" /></span>
             <span class="ep-stat-value">{{ epDashboardTodayAppts() }}</span>
             <span class="ep-stat-label">Appuntamenti oggi</span>
           </button>
           <button type="button" class="ep-stat-card" (click)="epGotoTab('magazzino')">
-            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'warning' }" /></span>
+            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'warning' }" /></span>
             <span class="ep-stat-value">{{ epDashboardLowStock() }}</span>
             <span class="ep-stat-label">Giacenza bassa</span>
           </button>
           <button type="button" class="ep-stat-card" (click)="epGotoTab('ordini')">
-            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'ordini' }" /></span>
+            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'ordini' }" /></span>
             <span class="ep-stat-value">{{ epDashboardPendingOrders() }}</span>
             <span class="ep-stat-label">Ordini in attesa</span>
           </button>
           <button type="button" class="ep-stat-card" (click)="epGotoTab('comunicazioni')">
-            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'comunicazioni' }" /></span>
+            <span class="ep-stat-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'comunicazioni' }" /></span>
             <span class="ep-stat-value">{{ epDashboardUnreadComms() }}</span>
             <span class="ep-stat-label">Messaggi</span>
           </button>
@@ -8491,32 +8580,38 @@
         <h3 class="ep-dashboard-section-title">Azioni rapide</h3>
         <div class="ep-quick-grid">
           <button type="button" class="ep-quick-btn ep-quick-magazzino" (click)="epGotoTab('magazzino')">
-            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'magazzino' }" /></span>
+            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'magazzino' }" /></span>
             <span class="ep-quick-label">Magazzino</span>
             <span class="ep-quick-desc">Prelievo articoli</span>
           </button>
           <button type="button" class="ep-quick-btn ep-quick-ddt" (click)="epGotoTab('ddt')">
-            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'ddt' }" /></span>
+            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'ddt' }" /></span>
             <span class="ep-quick-label">DDT</span>
             <span class="ep-quick-desc">Documenti trasporto</span>
           </button>
           <button type="button" class="ep-quick-btn ep-quick-servizi" (click)="epGotoTab('servizi')">
-            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'servizi' }" /></span>
+            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'servizi' }" /></span>
             <span class="ep-quick-label">Servizi</span>
             <span class="ep-quick-desc">Registra e invia in cassa</span>
           </button>
           <button type="button" class="ep-quick-btn ep-quick-ordini" (click)="epGotoTab('ordini')">
-            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'ordini' }" /></span>
+            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'ordini' }" /></span>
             <span class="ep-quick-label">Ordini</span>
             <span class="ep-quick-desc">Richieste materiale</span>
           </button>
           <button type="button" class="ep-quick-btn ep-quick-agenda" (click)="epGotoTab('agenda')">
-            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'agenda' }" /></span>
+            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'agenda' }" /></span>
             <span class="ep-quick-label">Agenda</span>
             <span class="ep-quick-desc">Appuntamenti e preventivi</span>
           </button>
           <button type="button" class="ep-quick-btn ep-quick-comunicazioni" (click)="epGotoTab('comunicazioni')">
-            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: 'comunicazioni' }" /></span>
+            <span class="ep-quick-icon"><ng-container [ngTemplateOutlet]="epIcon"
+                [ngTemplateOutletContext]="{ $implicit: 'comunicazioni' }" /></span>
             <span class="ep-quick-label">Comunicazioni</span>
             <span class="ep-quick-desc">Messaggi dal titolare</span>
           </button>
@@ -9818,9 +9913,9 @@
       <nav class="ep-tab-bar" aria-label="Navigazione rapida portale">
         @for (tab of epPrimaryTabs; track tab.id) {
         <button type="button" class="ep-tab-btn" [class.ep-tab-active]="epActiveTab() === tab.id"
-          [attr.aria-current]="epActiveTab() === tab.id ? 'page' : null"
-          (click)="epGotoTab(tab.id)">
-          <span class="ep-tab-icon"><ng-container [ngTemplateOutlet]="epIcon" [ngTemplateOutletContext]="{ $implicit: tab.id }" /></span>
+          [attr.aria-current]="epActiveTab() === tab.id ? 'page' : null" (click)="epGotoTab(tab.id)">
+          <span class="ep-tab-icon"><ng-container [ngTemplateOutlet]="epIcon"
+              [ngTemplateOutletContext]="{ $implicit: tab.id }" /></span>
           <span class="ep-tab-label">{{ tab.label }}</span>
           @if (tab.id === 'comunicazioni' && epBellUnreadCount() > 0) {
           <span class="ep-tab-unread" aria-label="Nuovi messaggi"></span>
@@ -9829,8 +9924,7 @@
         }
         <button type="button" class="ep-tab-btn"
           [class.ep-tab-active]="epActiveTab() === 'ddt' || epActiveTab() === 'servizi' || epActiveTab() === 'ordini'"
-          [attr.aria-expanded]="epNavDrawerOpen()" aria-controls="ep-navigation"
-          (click)="epNavDrawerOpen.set(true)">
+          [attr.aria-expanded]="epNavDrawerOpen()" aria-controls="ep-navigation" (click)="epNavDrawerOpen.set(true)">
           <span class="ep-tab-icon"><ng-container [ngTemplateOutlet]="epIcon" /></span>
           <span class="ep-tab-label">Altro</span>
         </button>
@@ -10333,7 +10427,8 @@
         <h2 class="op-card-title">🏢 Dati Azienda</h2>
         <p class="text-muted">Anagrafica completa dell'azienda: gli stessi dati vengono utilizzati per la fatturazione
           elettronica e per l'intestazione dei documenti. Le modifiche restano in sospeso finché non confermi con
-          <strong>Salva modifiche</strong>.</p>
+          <strong>Salva modifiche</strong>.
+        </p>
         <div class="op-form op-form-spaced">
           <label>
             <span>Ragione sociale</span>
@@ -10382,8 +10477,8 @@
           </label>
           <label>
             <span>PEC</span>
-            <input type="email" [value]="companyProfileDraft().pec" (change)="updateCompanyProfileSetting('pec', $event)"
-              placeholder="amministrazione@pec.it">
+            <input type="email" [value]="companyProfileDraft().pec"
+              (change)="updateCompanyProfileSetting('pec', $event)" placeholder="amministrazione@pec.it">
           </label>
           <label>
             <span>Email azienda</span>
@@ -10402,8 +10497,8 @@
           </label>
           <label>
             <span>IBAN</span>
-            <input type="text" [value]="companyProfileDraft().iban" (change)="updateCompanyProfileSetting('iban', $event)"
-              placeholder="IBAN per bonifici">
+            <input type="text" [value]="companyProfileDraft().iban"
+              (change)="updateCompanyProfileSetting('iban', $event)" placeholder="IBAN per bonifici">
           </label>
         </div>
 
@@ -10419,8 +10514,8 @@
                 <input type="file" accept="image/*" (change)="onCompanyLogoSelected($event)" hidden>
               </label>
               @if (companyProfileDraft().logoUrl) {
-              <button type="button" class="btn-sm btn-ghost settings-logo-remove"
-                (click)="removeCompanyLogo()">Rimuovi logo</button>
+              <button type="button" class="btn-sm btn-ghost settings-logo-remove" (click)="removeCompanyLogo()">Rimuovi
+                logo</button>
               }
             </div>
           </div>
@@ -10502,27 +10597,6 @@
           <div class="op-fast-empty">Nessun operatore — aggiungi il primo con + Nuovo.</div>
           }
         </div>
-
-        <form class="op-form op-form-spaced" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
-          <label><span>Nuovo operatore</span><input type="text" formControlName="name"
-              placeholder="Nome operatore"></label>
-          <label><span>Ruolo</span>
-            <select formControlName="role">
-              <option value="vendita">Vendita</option>
-              <option value="tecnico">Tecnico</option>
-              <option value="amministrazione">Amministrazione</option>
-              <option value="magazzino">Magazzino</option>
-            </select>
-          </label>
-          <label><span>Contratto settimanale</span>
-            <select formControlName="contractHoursWeekly">
-              @for (h of [24,30,32,36,38,40,44,48]; track h) {
-              <option [value]="h">{{ h }} ore</option>
-              }
-            </select>
-          </label>
-          <div class="form-actions"><button type="submit" class="btn-primary">Aggiungi</button></div>
-        </form>
 
         @if (inactiveCashOperators().length && !showHiddenOperators()) {
         <div class="detail-note">
@@ -10906,8 +10980,7 @@
           <label>
             <span>API key</span>
             <input type="password" [value]="companyProfileDraft().invoiceTransmission.apiKey"
-              (change)="updateInvoiceTransmissionSetting('apiKey', $event)"
-              placeholder="Chiave privata provider">
+              (change)="updateInvoiceTransmissionSetting('apiKey', $event)" placeholder="Chiave privata provider">
           </label>
           <label>
             <span>Regime fiscale (codice XML)</span>
@@ -11001,7 +11074,8 @@
 
         <div class="settings-form-actions">
           @if (companyProfileDirty()) {
-          <span class="settings-form-status is-dirty">● Regime e aliquota in sospeso: conferma con Salva modifiche</span>
+          <span class="settings-form-status is-dirty">● Regime e aliquota in sospeso: conferma con Salva
+            modifiche</span>
           } @else {
           <span class="settings-form-status">Configurazione allineata</span>
           }
@@ -11010,6 +11084,85 @@
           <button type="button" class="btn-primary" [disabled]="!companyProfileDirty()"
             (click)="saveCompanyProfile()">Salva modifiche</button>
         </div>
+      </div>
+      }
+
+      @case ('staff') {
+      <div class="op-card">
+        <h2 class="op-card-title">
+          🔑 Accessi gestionali
+          <span class="op-card-title-right">
+            <button type="button" class="btn-sm btn-ghost" (click)="loadStaffAccesses()"
+              [disabled]="staffAccessLoading()">Aggiorna elenco</button>
+            <button type="button" class="btn-sm btn-primary-sm" (click)="openStaffAccessModal()">+ Nuovo
+              accesso</button>
+          </span>
+        </h2>
+        <p class="text-muted">Basta uno username (anche un indirizzo email, anche fittizio) e una password. L'accesso
+          creato è operativo: usa le stesse funzioni del gestionale ma non vede il Registro attività.</p>
+
+        @if (staffAccessError()) {
+        <p class="account-feedback account-feedback-error" role="alert">{{ staffAccessError() }}</p>
+        }
+        @if (staffAccessFeedback()) {
+        <p class="account-feedback" [class.account-feedback-success]="staffAccessFeedbackTone() === 'success'"
+          [class.account-feedback-error]="staffAccessFeedbackTone() === 'error'" role="status">{{ staffAccessFeedback()
+          }}</p>
+        }
+
+        <div class="account-toolbar">
+          <span class="module-inline-chip">{{ staffAccessList().length }} accessi</span>
+          <span class="module-inline-chip module-inline-chip-accent">{{ staffAccessActiveCount() }} attivi</span>
+        </div>
+
+        @if (staffAccessLoading()) {
+        <p class="text-muted">Caricamento accessi…</p>
+        } @else if (!staffAccessList().length) {
+        <div class="detail-note">
+          <span>Nessun accesso</span>
+          <p>Non hai ancora creato accessi operativi: usa “Nuovo accesso” per generarne uno con username e password.</p>
+        </div>
+        } @else {
+        <div class="account-list">
+          @for (record of staffAccessList(); track record.id) {
+          <div class="account-card" [class.account-card-suspended]="record.status === 'sospesa'">
+            <div class="account-card-head">
+              <div class="account-identity">
+                <strong>{{ record.username }}</strong>
+                @if (record.displayName && record.displayName !== record.username) {
+                <span class="text-muted">{{ record.displayName }}</span>
+                }
+              </div>
+              <div class="account-badges">
+                @if (record.role === 'titolare') {
+                <span class="badge badge-neutral">Titolare</span>
+                }
+                <span class="badge" [class.badge-success]="record.status === 'attiva'"
+                  [class.badge-warning]="record.status !== 'attiva'">{{ staffAccessStatusLabel(record) }}</span>
+              </div>
+            </div>
+
+            <div class="account-card-meta">
+              <span>{{ record.loginCount }} accessi</span>
+              <span>Ultimo accesso: {{ staffAccessTimestamp(record.lastLoginAt) }}</span>
+              <span>Creato il {{ staffAccessTimestamp(record.createdAt) }}</span>
+            </div>
+
+            <div class="account-card-actions">
+              <button type="button" class="btn-sm" (click)="openStaffPasswordModal(record)">Reimposta
+                password</button>
+              @if (record.status === 'sospesa') {
+              <button type="button" class="btn-sm btn-primary-sm"
+                (click)="toggleStaffAccessStatus(record)">Riattiva</button>
+              } @else {
+              <button type="button" class="btn-sm" (click)="toggleStaffAccessStatus(record)">Sospendi</button>
+              }
+              <button type="button" class="btn-sm btn-danger-sm" (click)="removeStaffAccess(record)">Elimina</button>
+            </div>
+          </div>
+          }
+        </div>
+        }
       </div>
       }
 
@@ -11076,8 +11229,7 @@
               </label>
               <label>
                 <span>Note licenza</span>
-                <input type="text" #licenseNotes placeholder="Es. rinnovo annuale"
-                  [value]="account.licenseNotes ?? ''">
+                <input type="text" #licenseNotes placeholder="Es. rinnovo annuale" [value]="account.licenseNotes ?? ''">
               </label>
               <button type="button" class="btn-sm btn-primary-sm"
                 (click)="saveAccountLicense(account, licenseDate.value, licenseNotes.value)">Salva
@@ -11103,6 +11255,64 @@
       }
     </div>
   </div>
+
+  @if (staffAccessModalOpen()) {
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
+    <div class="ui-modal" (click)="$event.stopPropagation()">
+      <div class="ui-modal-head">
+        <div>
+          <span class="detail-subtitle">Accessi gestionali</span>
+          <h2 class="op-card-title">{{ staffAccessModalMode() === 'create' ? 'Nuovo accesso' : 'Reimposta password' }}
+          </h2>
+        </div>
+        <button type="button" class="btn-ghost" (click)="closeStaffAccessModal()">Chiudi</button>
+      </div>
+      <div class="ui-modal-body">
+        <form [formGroup]="staffAccessForm" (ngSubmit)="submitStaffAccessForm()" class="form-grid">
+          @if (staffAccessModalMode() === 'password') {
+          <label>
+            <span>Accesso</span>
+            <input type="text" [value]="staffAccessTargetUsername()" readonly>
+          </label>
+          } @else {
+          <label>
+            <span>Username o email</span>
+            <input type="text" formControlName="username" placeholder="es. marco.rossi oppure marco@azienda.it"
+              autocomplete="off" autocapitalize="none">
+          </label>
+          }
+          <label>
+            <span>Password</span>
+            <input type="password" formControlName="password"
+              [placeholder]="staffAccessModalMode() === 'create' ? 'Minimo 8 caratteri' : 'Nuova password (min 8 caratteri)'"
+              autocomplete="new-password">
+          </label>
+
+          @if (staffAccessFeedback()) {
+          <p class="account-feedback" [class.account-feedback-error]="staffAccessFeedbackTone() === 'error'"
+            [class.account-feedback-success]="staffAccessFeedbackTone() === 'success'" role="alert">{{
+            staffAccessFeedback() }}</p>
+          }
+
+          <div class="quote-actions-inline">
+            <button type="submit" class="btn-primary" [disabled]="staffAccessSubmitting()">
+              {{ staffAccessModalMode() === 'create' ? 'Crea accesso' : 'Aggiorna password' }}
+            </button>
+            <button type="button" class="btn-ghost" (click)="closeStaffAccessModal()">Annulla</button>
+          </div>
+        </form>
+
+        @if (staffAccessModalMode() === 'create') {
+        <div class="detail-note">
+          <span>Nota</span>
+          <p>Il dipendente accede dalla schermata di login con username e password. L'accesso operativo non mostra il
+            Registro attività.</p>
+        </div>
+        }
+      </div>
+    </div>
+  </div>
+  }
   }
 
   <!-- ═══════════════ REPORT ═══════════════ -->
@@ -12438,7 +12648,7 @@
   }
 
   @if (reportDrilldownRequest(); as request) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeReportDrilldown()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg report-drilldown-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -12507,7 +12717,7 @@
   }
 
   @if (cashReportModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashReportModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal cash-report-modal" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -12537,6 +12747,7 @@
             <div class="closure-card"><span>Fatture</span><strong>{{ cashTodayInvoiceCount() }}</strong></div>
             <div class="closure-card"><span>Insoluti aperti</span><strong>€ {{
                 cashUnpaidTransactionsTotal().toLocaleString('it-IT') }}</strong></div>
+            <div class="closure-card"><span>Annullati</span><strong>{{ cashAnnulledTransactionsCount() }}</strong></div>
             <div class="closure-card"><span>Sconti</span><strong>€ {{ cashTodayDiscountTotal().toLocaleString('it-IT')
                 }}</strong></div>
           </div>
@@ -12599,15 +12810,16 @@
             </label>
             <div class="cash-receipts-list">
               @for (shift of filteredCashShifts(); track shift.id) {
+              @let shiftMetrics = cashShiftMetrics(shift);
               <button type="button" class="cash-receipt-row" [class.active]="selectedCashReportShiftId() === shift.id"
                 (click)="selectCashReportShift(shift.id)">
                 <span class="cash-receipt-row-main">
                   <strong>{{ shift.label }} · Ch. {{ shift.closureNumber }}</strong>
-                  <span>{{ shift.closedAt.slice(0, 10) }} · {{ shift.transactionsCount }} operazioni</span>
+                  <span>{{ shift.closedAt.slice(0, 10) }} · {{ shiftMetrics.transactionsCount }} operazioni</span>
                 </span>
                 <span class="cash-receipt-row-side">
-                  <strong>€ {{ shift.paidTotal.toLocaleString('it-IT') }}</strong>
-                  <span>{{ shift.receiptNumbers.length }} sc. · {{ shift.invoiceNumbers.length }} ft.</span>
+                  <strong>€ {{ shiftMetrics.paidTotal.toLocaleString('it-IT') }}</strong>
+                  <span>{{ shiftMetrics.receiptCount }} sc. · {{ shiftMetrics.invoiceCount }} ft.</span>
                 </span>
               </button>
               } @empty {
@@ -12620,6 +12832,7 @@
 
           <div class="cash-shift-detail-panel">
             @if (selectedCashReportShift(); as shift) {
+            @let shiftMetrics = cashShiftMetrics(shift);
             <div class="cash-receipt-summary">
               <div>
                 <span class="detail-subtitle">Chiusura selezionata</span>
@@ -12628,21 +12841,27 @@
               <span class="badge badge-neutral">{{ shift.closedAt.slice(0, 10) }}</span>
             </div>
             <div class="closure-summary-grid">
-              <div class="closure-card"><span>Incasso</span><strong>€ {{ shift.paidTotal.toLocaleString('it-IT')
+              <div class="closure-card"><span>Incasso</span><strong>€ {{ shiftMetrics.paidTotal.toLocaleString('it-IT')
                   }}</strong></div>
-              <div class="closure-card"><span>Operazioni</span><strong>{{ shift.transactionsCount }}</strong></div>
-              <div class="closure-card"><span>Scontrini</span><strong>{{ shift.receiptNumbers.length }}</strong></div>
-              <div class="closure-card"><span>Fatture</span><strong>{{ shift.invoiceNumbers.length }}</strong></div>
+              <div class="closure-card"><span>Operazioni</span><strong>{{ shiftMetrics.transactionsCount }}</strong>
+              </div>
+              <div class="closure-card"><span>Scontrini</span><strong>{{ shiftMetrics.receiptCount }}</strong></div>
+              <div class="closure-card"><span>Fatture</span><strong>{{ shiftMetrics.invoiceCount }}</strong></div>
+              @if (shiftMetrics.annulledCount > 0) {
+              <div class="closure-card"><span>Annullati</span><strong>{{ shiftMetrics.annulledCount }}</strong></div>
+              }
             </div>
             <div class="cash-receipt-lines">
               <span class="detail-subtitle">Documenti della chiusura</span>
               @for (transaction of selectedCashReportShiftTransactions(); track transaction.id) {
               <button type="button" class="cash-report-transaction"
+                [class.is-annulled]="transaction.status === 'annullato'"
                 [class.active]="selectedCashReportTransactionId() === transaction.id"
                 (click)="selectCashReportTransaction(transaction.id)">
                 <span>
                   <strong>{{ cashReportDocumentLabel(transaction) }} · {{ transaction.customerName }}</strong>
-                  <span>{{ transaction.paymentMethod }} · {{ transaction.createdAt.slice(0, 10) }}</span>
+                  <span>{{ transaction.paymentMethod }} · {{ cashStatusLabel(transaction.status) }} · {{
+                    transaction.createdAt.slice(0, 10) }}</span>
                 </span>
                 <strong>€ {{ transaction.total.toLocaleString('it-IT') }}</strong>
               </button>
@@ -12653,6 +12872,21 @@
               }
             </div>
             @if (selectedCashReportTransaction(); as transaction) {
+            <div class="cash-receipt-summary">
+              <div>
+                <span class="detail-subtitle">Documento selezionato</span>
+                <strong>{{ cashReportDocumentLabel(transaction) }} · {{ transaction.customerName }}</strong>
+              </div>
+              <span class="badge" [class.badge-success]="transaction.status === 'pagato'"
+                [class.badge-warning]="transaction.status === 'sospeso'"
+                [class.badge-danger]="transaction.status === 'insoluto' || transaction.status === 'annullato'">{{
+                cashStatusLabel(transaction.status) }}</span>
+            </div>
+            @if (transaction.status === 'annullato') {
+            <div class="cash-transaction-status-note is-annulled">
+              Documento annullato: escluso dagli incassi e dai riepiloghi economici.
+            </div>
+            }
             <div class="cash-receipt-lines">
               <span class="detail-subtitle">Dettaglio documento</span>
               @for (line of transaction.lines; track line.id) {
@@ -12664,6 +12898,14 @@
                 <strong>€ {{ line.total.toLocaleString('it-IT') }}</strong>
               </div>
               }
+            </div>
+            <div class="form-actions cash-report-detail-actions">
+              @if (cashTransactionCanBeAnnulled(transaction)) {
+              <button type="button" class="btn-ghost btn-danger-sm"
+                (click)="annulCashTransaction(transaction.id, 'report')">Annulla scontrino</button>
+              }
+              <button type="button" class="btn-ghost" (click)="openCashReceiptsFromReport()">Apri archivio
+                documenti</button>
             </div>
             }
             }
@@ -12769,7 +13011,7 @@
   </div>
 
   @if (cashClosureModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeCashClosureModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-lg" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>
@@ -12823,6 +13065,131 @@
   }
   }
 
+  <!-- ═══════════════ REGISTRO ATTIVITÀ ═══════════════ -->
+  @case ('registro') {
+  @if (!auth.isOwner()) {
+  <div class="op-card">
+    <div class="empty-state">
+      <h2>Registro attività</h2>
+      <p>Questa sezione è visibile solo al titolare dell’azienda.</p>
+    </div>
+  </div>
+  } @else {
+  <section class="op-card report-shell-card audit-register-shell">
+    <div class="report-shell-head">
+      <div class="section-toolbar-text">
+        <span class="detail-subtitle">Portale e sistema</span>
+        <h2 class="op-card-title">Registro attività</h2>
+        <p class="report-shell-copy">Chi ha fatto cosa, quando, come e perché. Registro centralizzato di tutta
+          l’azienda, visibile solo al titolare.</p>
+      </div>
+      <div class="report-shell-badges">
+        <span class="badge badge-info">{{ auditRegisterStats().total }} eventi</span>
+        <span class="badge badge-neutral">{{ auditRegisterRangeLabel() }}</span>
+      </div>
+    </div>
+
+    <div class="report-shell-controls">
+      <div class="report-period-block">
+        <label><span>Periodo</span></label>
+        <div class="report-period-chips" role="group" aria-label="Preset periodo registro">
+          @for (option of auditRegisterPresetOptions; track option.key) {
+          <button type="button" class="report-filter-chip" [class.active]="auditRegisterPreset() === option.key"
+            (click)="setAuditRegisterPreset(option.key)">{{ option.label }}</button>
+          }
+        </div>
+        <div class="report-period-custom">
+          <label><span>Dal</span><input type="date" [value]="auditRegisterFrom()"
+              (input)="updateAuditRegisterFrom($event)"></label>
+          <label><span>Al</span><input type="date" [value]="auditRegisterTo()"
+              (input)="updateAuditRegisterTo($event)"></label>
+          <button type="button" class="btn-ghost" (click)="clearAuditRegisterFilters()">Azzera filtri</button>
+        </div>
+      </div>
+
+      <div class="report-search-field">
+        <label for="audit-register-search"><span>Cerca nel registro</span></label>
+        <div class="report-search-input">
+          <input id="audit-register-search" type="search" placeholder="Cerca operatore, cliente, documento, motivo..."
+            [value]="auditRegisterSearch()" (input)="updateAuditRegisterSearch($event)">
+        </div>
+      </div>
+    </div>
+
+    <div class="audit-register-filters">
+      <label class="audit-register-filter">
+        <span>Categoria</span>
+        <select [value]="auditRegisterCategory()" (change)="auditRegisterCategory.set($any($event.target).value)">
+          @for (option of auditRegisterCategories; track option.key) {
+          <option [value]="option.key">{{ option.label }}</option>
+          }
+        </select>
+      </label>
+      <label class="audit-register-filter">
+        <span>Operatore</span>
+        <select [value]="auditRegisterOperator()" (change)="auditRegisterOperator.set($any($event.target).value)">
+          <option value="tutti">Tutti gli operatori</option>
+          @for (operator of auditRegisterOperators(); track operator) {
+          <option [value]="operator">{{ operator }}</option>
+          }
+        </select>
+      </label>
+      <label class="audit-register-filter">
+        <span>Documento</span>
+        <select [value]="auditRegisterReceipt()" (change)="auditRegisterReceipt.set($any($event.target).value)">
+          <option value="tutte">Tutte le vendite</option>
+          <option value="scontrino">Solo con scontrino</option>
+          <option value="fuori-scontrino">Solo fuori scontrino</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="kpi-mini-row audit-register-stats">
+      <div class="kpi-mini"><span>Totale eventi</span><strong>{{ auditRegisterStats().total }}</strong></div>
+      <div class="kpi-mini"><span>Preventivi</span><strong>{{ auditRegisterStats().preventivi }}</strong></div>
+      <div class="kpi-mini"><span>Cassa</span><strong>{{ auditRegisterStats().cassa }}</strong></div>
+      <div class="kpi-mini"><span>Magazzino</span><strong>{{ auditRegisterStats().magazzino }}</strong></div>
+      <div class="kpi-mini"><span>Spese</span><strong>{{ auditRegisterStats().spese }}</strong></div>
+      <div class="kpi-mini"><span>Fuori scontrino</span><strong>{{ auditRegisterStats().offReceipt }}</strong></div>
+    </div>
+
+    <div class="record-list audit-register-list">
+      @for (entry of auditRegisterVisible(); track entry.id) {
+      <div class="record-row audit-register-row">
+        <div class="record-info audit-register-info">
+          <div class="audit-register-head">
+            <strong>{{ entry.title }}</strong>
+            <span class="badge" [class.badge-info]="entry.tone === 'info'"
+              [class.badge-success]="entry.tone === 'success'" [class.badge-warning]="entry.tone === 'warning'"
+              [class.badge-neutral]="entry.tone === 'neutral'">{{ entry.categoryLabel }}</span>
+            @if (entry.offReceipt) {
+            <span class="badge badge-warning">Fuori scontrino</span>
+            }
+          </div>
+          <span>{{ auditRegisterWhenLabel(entry) }} · {{ entry.actor }}@if (entry.amount !== null) { · € {{
+            entry.amount.toLocaleString('it-IT') }} }</span>
+          <small><strong>Come:</strong> {{ entry.how }}</small>
+          <small><strong>Perché:</strong> {{ entry.why }}</small>
+        </div>
+      </div>
+      } @empty {
+      <div class="empty-state small">
+        <p>Nessuna attività trovata con i filtri selezionati.</p>
+      </div>
+      }
+    </div>
+
+    @if (auditRegisterHasMore()) {
+    <div class="audit-register-more">
+      <button type="button" class="btn-ghost" (click)="showMoreAuditRegister()">Mostra altri eventi</button>
+      <span class="text-muted">Mostrati {{ auditRegisterVisible().length }} di {{ auditRegisterStats().total
+        }}</span>
+    </div>
+    }
+  </section>
+  }
+  }
+
   <!-- ═══════════════ DEFAULT (altre sezioni) ═══════════════ -->
   @default {
   <div class="op-card">
@@ -12836,7 +13203,7 @@
   }
 
   @if (employeeModalOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="closeEmployeeModal()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal employee-modal-wide" [class.employee-modal-create]="isCreatingEmployee()"
       [class.employee-modal-edit]="!isCreatingEmployee()" role="dialog" aria-modal="true"
       (click)="$event.stopPropagation()">
@@ -12863,121 +13230,77 @@
         <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Chiudi</button>
       </div>
 
-      <!-- Tabs della modale -->
+      <!-- Tabs della modale: presenti solo in modifica (in creazione non servono) -->
+      @if (!isCreatingEmployee()) {
       <div class="employee-modal-tabs" role="tablist">
         <button type="button" role="tab" class="employee-tab-btn" [class.active]="employeeModalTab() === 'anagrafica'"
           (click)="employeeModalTab.set('anagrafica')">
           📋 Anagrafica
         </button>
         <button type="button" role="tab" class="employee-tab-btn"
-          [class.active]="employeeModalTab() === 'turni-standard'" [disabled]="isCreatingEmployee()"
-          (click)="employeeModalTab.set('turni-standard')">
+          [class.active]="employeeModalTab() === 'turni-standard'" (click)="employeeModalTab.set('turni-standard')">
           ⏰ Turni Standard
         </button>
         <button type="button" role="tab" class="employee-tab-btn"
-          [class.active]="employeeModalTab() === 'turni-settimanali'" [disabled]="isCreatingEmployee()"
+          [class.active]="employeeModalTab() === 'turni-settimanali'"
           (click)="employeeModalTab.set('turni-settimanali')">
           📅 Turni Settimanali
         </button>
       </div>
+      }
 
       <!-- ════════════════════════════════════════════ -->
       <!-- TAB 1: ANAGRAFICA                            -->
       <!-- ════════════════════════════════════════════ -->
       @if (employeeModalTab() === 'anagrafica') {
       @if (isCreatingEmployee()) {
-      <form class="ui-modal-body op-form op-form-spaced employee-modal-form employee-create-form"
-        [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
-        <div class="employee-create-summary">
-          <div class="employee-create-kpi">
-            <span>Ruolo</span>
-            <strong>{{ employeeRoleLabel(cashOperatorForm.controls.role.value) }}</strong>
-          </div>
-          <div class="employee-create-kpi">
+      <form class="ui-modal-body employee-create" [formGroup]="cashOperatorForm" (ngSubmit)="addCashOperator()">
+        <div class="employee-create-grid">
+          <label class="employee-field-wide" [class.has-error]="hasFieldError(cashOperatorForm, 'name')">
+            <span>Nome e cognome *</span>
+            <input type="text" formControlName="name" placeholder="Es. Marco Rossi" autocomplete="off">
+          </label>
+          <label>
+            <span>Mansione *</span>
+            <select formControlName="role">
+              <option value="vendita">Addetto vendite</option>
+              <option value="tecnico">Tecnico</option>
+              <option value="amministrazione">Amministrazione</option>
+              <option value="magazzino">Magazzino</option>
+            </select>
+          </label>
+          <label>
             <span>Tipologia</span>
-            <strong>{{ employeeEmploymentLabel(cashOperatorForm.controls.employmentType.value) }}</strong>
-          </div>
-          <div class="employee-create-kpi">
-            <span>Contratto</span>
-            <strong>{{ employeeContractLabel(cashOperatorForm.controls.contractHoursWeekly.value) }}</strong>
-          </div>
-          <div class="employee-create-kpi">
+            <select formControlName="employmentType">
+              <option value="dipendente">Dipendente</option>
+              <option value="titolare">Titolare</option>
+            </select>
+          </label>
+          <label>
+            <span>Qualifica</span>
+            <input type="text" formControlName="jobTitle" placeholder="Es. Installatore (opzionale)" autocomplete="off">
+          </label>
+          <label>
+            <span>Ore settimanali</span>
+            <input type="number" min="0" max="60" formControlName="contractHoursWeekly">
+          </label>
+          <label class="employee-field-wide">
             <span>Stato</span>
-            <strong>{{ employeeStatusLabel(cashOperatorForm.controls.active.value) }}</strong>
+            <select formControlName="active">
+              <option [ngValue]="true">Attivo</option>
+              <option [ngValue]="false">Disattivato</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="employee-create-footer">
+          <p class="employee-create-hint">
+            Dopo il salvataggio potrai impostare turni standard e turni settimanali dalla scheda del dipendente.
+          </p>
+          <div class="form-actions">
+            <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
+            <button type="submit" class="btn-primary">Crea dipendente</button>
           </div>
-        </div>
-
-        <div class="employee-create-layout">
-          <section class="employee-create-panel employee-create-panel-main">
-            <div class="employee-create-panel-head">
-              <span class="detail-subtitle">Anagrafica</span>
-              <strong>Dati base del dipendente</strong>
-            </div>
-
-            <div class="employee-modal-grid employee-create-grid">
-              <label class="employee-field-wide" [class.has-error]="hasFieldError(cashOperatorForm, 'name')">
-                <span>Nome e cognome *</span>
-                <input type="text" formControlName="name" placeholder="Nome e cognome del dipendente">
-              </label>
-              <label>
-                <span>Ruolo</span>
-                <select formControlName="role">
-                  <option value="vendita">Vendita</option>
-                  <option value="tecnico">Tecnico</option>
-                  <option value="amministrazione">Amministrazione</option>
-                  <option value="magazzino">Magazzino</option>
-                </select>
-              </label>
-              <label>
-                <span>Tipologia</span>
-                <select formControlName="employmentType">
-                  <option value="dipendente">Dipendente</option>
-                  <option value="titolare">Titolare</option>
-                </select>
-              </label>
-              <label class="employee-field-wide">
-                <span>Mansione</span>
-                <input type="text" formControlName="jobTitle" placeholder="Mansione operativa">
-              </label>
-              <label>
-                <span>Ore settimanali</span>
-                <input type="number" min="0" max="60" formControlName="contractHoursWeekly">
-              </label>
-              <label>
-                <span>Stato</span>
-                <select formControlName="active">
-                  <option [ngValue]="true">Attivo</option>
-                  <option [ngValue]="false">Disattivato</option>
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <aside class="employee-create-panel employee-create-panel-side">
-            <div class="employee-create-panel-head">
-              <span class="detail-subtitle">Passi successivi</span>
-              <strong>Configura i turni dopo il salvataggio</strong>
-            </div>
-            <div class="detail-note employee-create-note">
-              <span>Flusso consigliato</span>
-              <p>Crea prima l'anagrafica, poi imposta turni standard e turni settimanali dalla stessa scheda dipendente.</p>
-            </div>
-            <div class="employee-create-hints">
-              <div class="employee-create-hint">
-                <strong>Dipendente</strong>
-                <span>Usa ore contrattuali e turni operativi.</span>
-              </div>
-              <div class="employee-create-hint">
-                <strong>Titolare</strong>
-                <span>Puoi tenerlo senza monte ore settimanale fisso.</span>
-              </div>
-            </div>
-          </aside>
-        </div>
-
-        <div class="form-actions employee-create-actions">
-          <button type="submit" class="btn-primary">Crea dipendente</button>
-          <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
         </div>
       </form>
       } @else if (selectedEmployee(); as employee) {
@@ -12988,9 +13311,9 @@
             <input type="text" [value]="employee.name" (input)="updateSelectedEmployeeName($event)">
           </label>
           <label>
-            <span>Ruolo</span>
+            <span>Mansione *</span>
             <select [value]="employee.role" (change)="updateSelectedEmployeeRole($event)">
-              <option value="vendita">Vendita</option>
+              <option value="vendita">Addetto vendite</option>
               <option value="tecnico">Tecnico</option>
               <option value="amministrazione">Amministrazione</option>
               <option value="magazzino">Magazzino</option>
@@ -13004,8 +13327,9 @@
             </select>
           </label>
           <label>
-            <span>Mansione</span>
-            <input type="text" [value]="employee.jobTitle" (input)="updateSelectedEmployeeJobTitle($event)">
+            <span>Qualifica</span>
+            <input type="text" [value]="employee.jobTitle" (input)="updateSelectedEmployeeJobTitle($event)"
+              placeholder="Es. Installatore (opzionale)">
           </label>
           <label>
             <span>Ore settimanali</span>
@@ -13021,8 +13345,8 @@
           </label>
         </div>
         <div class="form-actions">
-          <button type="button" class="btn-primary" (click)="saveEmployeeModal()">Salva modifiche</button>
           <button type="button" class="btn-ghost" (click)="closeEmployeeModal()">Annulla</button>
+          <button type="button" class="btn-primary" (click)="saveEmployeeModal()">Salva modifiche</button>
         </div>
       </div>
       }
@@ -13278,7 +13602,7 @@
   <!-- MODALE PROMEMORIA 1° DEL MESE (INVIO PAGHE)           -->
   <!-- ═════════════════════════════════════════════════════ -->
   @if (pagheReminderOpen()) {
-  <div class="ui-modal-overlay" [attr.aria-hidden]="false" (click)="acknowledgePagheReminder()">
+  <div class="ui-modal-overlay" [attr.aria-hidden]="false">
     <div class="ui-modal paghe-reminder-modal" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div class="paghe-reminder-title">
@@ -13323,7 +13647,7 @@
   }
 
   @if (clientModalOpen() && section().id !== 'clienti') {
-  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false" (click)="closeClientModal()">
+  <div class="ui-modal-overlay ui-modal-overlay-fullscreen" [attr.aria-hidden]="false">
     <div class="ui-modal ui-modal-fullscreen" (click)="$event.stopPropagation()">
       <div class="ui-modal-head">
         <div>

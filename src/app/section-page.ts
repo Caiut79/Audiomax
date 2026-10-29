@@ -19,12 +19,16 @@ import { map, merge, startWith } from 'rxjs';
 import { BrowserStorageService } from './browser-storage.service';
 
 import { AudiomaxDataService } from './audiomax-data.service';
-import { AppAccountRecord, AuthService } from './auth.service';
+import {
+  AppAccountRecord,
+  AppStaffAccountRecord,
+  AuthService,
+  StaffAccountPayload,
+} from './auth.service';
 import { EpScannerService } from './ep-scanner.service';
 import { crmModuleContent } from './crm-module-content';
 import { FormDraftService } from './form-draft.service';
 import { PrivacyDispatchService } from './privacy-dispatch.service';
-import { SupabaseService } from './supabase.service';
 import { UiDialogDirective } from './ui-dialog.directive';
 import {
   AppointmentRecord,
@@ -32,6 +36,7 @@ import {
   CashOperatorRecord,
   CashPaymentSplit,
   CashRegisterProductRecord,
+  CashShiftRecord,
   CashTransactionLine,
   CashTransactionRecord,
   ClientBillingProfile,
@@ -49,6 +54,7 @@ import {
   PortalCommunicationLine,
   PortalCommunicationRecord,
   PortalSettings,
+  QuoteHistoryEntry,
   QuoteLineRecord,
   QuoteRecord,
   ServiceTicketRecord,
@@ -126,6 +132,18 @@ interface DdtLocalDraftSummary {
   lineCount: number;
 }
 
+interface QuoteOperationalRegisterEntry {
+  id: string;
+  title: string;
+  sortAt: string;
+  whenLabel: string;
+  actor: string;
+  how: string;
+  why: string;
+  badge: string;
+  tone: 'info' | 'success' | 'warning' | 'neutral';
+}
+
 type EmployeeShiftDayKey = keyof CashOperatorRecord['shiftPatterns'][0];
 type ReportSectionKey =
   | 'overview'
@@ -169,6 +187,36 @@ type ReportDrilldownKind =
   | 'services-top'
   | 'services-low'
   | 'payment-method';
+
+/** Categorie tracciate nel Registro attività (una per area operativa). */
+type AuditRegisterCategory = 'preventivi' | 'cassa' | 'magazzino' | 'spese';
+/** Filtro categoria: include la voce "tutte". */
+type AuditRegisterCategoryFilter = 'tutte' | AuditRegisterCategory;
+/** Filtro sulla natura della vendita in cassa. */
+type AuditRegisterReceiptFilter = 'tutte' | 'scontrino' | 'fuori-scontrino';
+/** Preset di periodo usati dai chip del registro. */
+type AuditRegisterPreset = 'oggi' | 'ultimi-7' | 'ultimi-30' | 'mese-corrente' | 'tutto' | 'custom';
+
+/** Riga normalizzata del Registro attività: tutte le aree confluiscono qui. */
+interface AuditRegisterEntry {
+  id: string;
+  /** Data/ora ISO dell'evento. */
+  when: string;
+  category: AuditRegisterCategory;
+  categoryLabel: string;
+  title: string;
+  /** Chi ha eseguito l'operazione. */
+  actor: string;
+  /** Come è stata eseguita (modalità/strumento). */
+  how: string;
+  /** Perché è stata eseguita (motivo). */
+  why: string;
+  detail: string;
+  amount: number | null;
+  /** true se l'operazione è stata fatta fuori scontrino. */
+  offReceipt: boolean;
+  tone: 'info' | 'success' | 'warning' | 'neutral';
+}
 
 interface EmployeeShiftDraft {
   startHour: string;
@@ -509,7 +557,6 @@ export class SectionPageComponent {
   // Reso protected invece di private perché i template accedono a paymentProviders()
   // e a togglePaymentProviderActive / CRUD fornitori dalle impostazioni.
   protected readonly data = inject(AudiomaxDataService);
-  private readonly supabase = inject(SupabaseService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly formDrafts = inject(FormDraftService);
   private readonly privacyDispatch = inject(PrivacyDispatchService);
@@ -536,6 +583,7 @@ export class SectionPageComponent {
   protected readonly allWarehouseMovements = this.data.warehouseMovements;
   protected readonly allWarehousePositions = this.data.warehousePositions;
   protected readonly allWarehousePurchases = this.data.warehousePurchases;
+  protected readonly allWarehouseDdts = this.data.warehouseDdts;
   protected readonly allWarehouseAdjustments = this.data.warehouseAdjustments;
   protected readonly allWarehouseAuditLog = this.data.warehouseAuditLog;
   protected readonly allExpenseCategories = this.data.expenseCategories;
@@ -553,8 +601,6 @@ export class SectionPageComponent {
   protected readonly allCashTransactions = this.data.cashTransactions;
   protected readonly allCashShifts = this.data.cashShifts;
   protected readonly allServiceTickets = this.data.serviceTickets;
-  protected readonly cashConnectionState = this.supabase.connectionState;
-  protected readonly cashConnectionLabel = this.supabase.connectionLabel;
   protected readonly editingClientId = signal<string | null>(null);
   protected readonly editingQuoteId = signal<string | null>(null);
   protected readonly editingAppointmentId = signal<string | null>(null);
@@ -602,6 +648,7 @@ export class SectionPageComponent {
   // (tutti i campi pagamento sono modificabili post save come richiesto)
   protected readonly expenseEditingId = signal<string | null>(null);
   protected readonly warehouseModalOpen = signal(false);
+  protected readonly warehouseAdjustmentModalOpen = signal(false);
   protected readonly warehouseReceiptMode = signal<'new' | 'restock'>('new');
   protected readonly warehouseReceiptTargetId = signal<string | null>(null);
   protected readonly warehouseSupplierHandoff = signal<{ active: boolean; draft: any | null }>({
@@ -907,10 +954,49 @@ export class SectionPageComponent {
   protected readonly selectedCashTopClientId = signal<string | null>(null);
   protected readonly cashCart = signal<CashTransactionLine[]>([]);
   protected readonly cashShiftLabel = signal('Chiusura giornaliera');
-  protected readonly cashCurrentOperator = signal('Banco');
+  protected readonly cashCurrentOperator = signal('');
   protected readonly cashOperators = computed(() =>
-    this.data.activeCashOperators().map((operator) => operator.name),
+    this.data
+      .activeCashOperators()
+      .map((operator) => operator.name)
+      .filter((name) => name !== 'Banco'),
   );
+  /** Cliente selezionato oppure cliente di passaggio esplicito. */
+  protected readonly cashHasSelectedClientStep = computed(
+    () => !!this.selectedCashClientId() || this.isCashWalkInWithoutSelectedClient(),
+  );
+  /** In cassa accettiamo solo operatori reali, mai il generico "Banco". */
+  protected readonly cashHasSelectedOperator = computed(() =>
+    this.isCashOperatorAssigned(this.cashCurrentOperator()),
+  );
+  /** Ogni riga del carrello deve avere un operatore valido per la reportistica. */
+  protected readonly cashCartHasAssignedOperators = computed(() =>
+    this.cashCart().every((line) => this.isCashOperatorAssigned(line.operatorName)),
+  );
+  /** Per aggiungere voci manuali bisogna prima avere cliente e operatore. */
+  protected readonly cashCanComposeCart = computed(
+    () => this.cashHasSelectedClientStep() && this.cashHasSelectedOperator() && !this.cashIsSettlingPending(),
+  );
+  protected readonly hrOperators = computed(() =>
+    this.data
+      .activeCashOperators()
+      .map((operator) => operator.name)
+      .filter((name) => name !== 'Banco'),
+  );
+  protected readonly warehouseUnitMeasures = [
+    { value: 'pz', label: 'Pezzi (pz)' },
+    { value: 'm', label: 'Metri (m)' },
+    { value: 'cm', label: 'Centimetri (cm)' },
+    { value: 'mm', label: 'Millimetri (mm)' },
+    { value: 'kg', label: 'Chilogrammi (kg)' },
+    { value: 'g', label: 'Grammi (g)' },
+    { value: 'l', label: 'Litri (l)' },
+    { value: 'ml', label: 'Millilitri (ml)' },
+    { value: 'conf', label: 'Confezioni' },
+    { value: 'rotolo', label: 'Rotoli' },
+    { value: 'coppia', label: 'Coppie' },
+    { value: 'kit', label: 'Kit' },
+  ] as const;
   protected readonly selectedEmployeeId = signal<string | null>(null);
   protected readonly employeeModalOpen = signal(false);
   protected readonly isCreatingEmployee = signal(false);
@@ -1404,16 +1490,20 @@ export class SectionPageComponent {
   ] as const;
   /**
    * Tab effettivamente visibili: il super admin vede in più la gestione
-   * dei profili (licenze, sospensione, eliminazione delle aziende clienti).
+   * dei profili (licenze, sospensione, eliminazione delle aziende clienti);
+   * il titolare dell'azienda vede invece la gestione degli accessi gestionali.
    */
-  protected readonly settingsTabs = computed<ReadonlyArray<{ key: string; label: string; icon: string }>>(
-    () =>
-      this.auth.isSuperAdmin()
-        ? [...this.SETTINGS_TABS, { key: 'account', label: 'Profili', icon: '🛡️' }]
-        : [...this.SETTINGS_TABS],
-  );
+  protected readonly settingsTabs = computed<ReadonlyArray<{ key: string; label: string; icon: string }>>(() => {
+    if (this.auth.isSuperAdmin()) {
+      return [...this.SETTINGS_TABS, { key: 'account', label: 'Profili', icon: '🛡️' }];
+    }
+    if (this.auth.isOwner()) {
+      return [...this.SETTINGS_TABS, { key: 'staff', label: 'Accessi gestionali', icon: '🔑' }];
+    }
+    return [...this.SETTINGS_TABS];
+  });
   protected readonly activeSettingsTab: WritableSignal<string> = signal(
-    this.SETTINGS_TABS.some((tab) => tab.key === this.storage.getItem('audiomax_settings_last_tab'))
+    this.settingsTabs().some((tab) => tab.key === this.storage.getItem('audiomax_settings_last_tab'))
       ? (this.storage.getItem('audiomax_settings_last_tab') as string)
       : 'azienda'
   );
@@ -1423,6 +1513,508 @@ export class SectionPageComponent {
     if (key === 'account') {
       void this.loadAccountProfiles();
     }
+    if (key === 'staff') {
+      void this.loadStaffAccesses();
+    }
+  }
+
+  // ========================================================================
+  // ACCESSI GESTIONALE · accessi dedicati per i dipendenti (solo titolare)
+  // ------------------------------------------------------------------------
+  // Il profilo principale (titolare) nasce in fase di attivazione e vede tutto,
+  // registro compreso. Da qui il titolare crea gli accessi "operativi" con
+  // username e password propri del gestionale, distinti dal Portale Dipendenti.
+  // ========================================================================
+  protected readonly staffAccessList = signal<AppStaffAccountRecord[]>([]);
+  protected readonly staffAccessLoading = signal(false);
+  protected readonly staffAccessError = signal('');
+  protected readonly staffAccessFeedback = signal('');
+  protected readonly staffAccessFeedbackTone = signal<'success' | 'error'>('success');
+  protected readonly staffAccessModalOpen = signal(false);
+  /** Modalità della modale accessi: creazione oppure reimpostazione password. */
+  protected readonly staffAccessModalMode = signal<'create' | 'password'>('create');
+  /** Accesso in corso di modifica (solo per la reimpostazione password). */
+  protected readonly staffAccessTargetId = signal<string | null>(null);
+  protected readonly staffAccessSubmitting = signal(false);
+  protected readonly staffAccessForm = this.formBuilder.nonNullable.group({
+    username: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(60)]],
+    password: ['', [Validators.required, Validators.minLength(8)]],
+  });
+  protected readonly staffAccessActiveCount = computed(
+    () => this.staffAccessList().filter((item) => item.status === 'attiva').length,
+  );
+  /** Nome leggibile dell'accesso selezionato per la modale password. */
+  protected readonly staffAccessTargetUsername = computed(() => {
+    const id = this.staffAccessTargetId();
+    return this.staffAccessList().find((item) => item.id === id)?.username ?? '';
+  });
+
+  /** Carica l'elenco degli accessi gestionali dell'azienda. */
+  protected async loadStaffAccesses(): Promise<void> {
+    if (!this.auth.isOwner()) {
+      return;
+    }
+    this.staffAccessLoading.set(true);
+    this.staffAccessError.set('');
+    try {
+      this.staffAccessList.set(await this.auth.listStaffAccounts());
+    } catch {
+      this.staffAccessError.set('Impossibile caricare gli accessi gestionali.');
+    } finally {
+      this.staffAccessLoading.set(false);
+    }
+  }
+
+  /** Apre la modale per creare un nuovo accesso gestionale (profilo operativo). */
+  protected openStaffAccessModal(): void {
+    this.staffAccessModalMode.set('create');
+    this.staffAccessTargetId.set(null);
+    this.staffAccessForm.reset({ username: '', password: '' });
+    this.staffAccessFeedback.set('');
+    this.staffAccessModalOpen.set(true);
+  }
+
+  /** Apre la modale per reimpostare la password di un accesso esistente. */
+  protected openStaffPasswordModal(record: AppStaffAccountRecord): void {
+    this.staffAccessModalMode.set('password');
+    this.staffAccessTargetId.set(record.id);
+    this.staffAccessForm.reset({ username: record.username, password: '' });
+    this.staffAccessFeedback.set('');
+    this.staffAccessModalOpen.set(true);
+  }
+
+  protected closeStaffAccessModal(): void {
+    this.staffAccessModalOpen.set(false);
+    this.staffAccessTargetId.set(null);
+    this.staffAccessFeedback.set('');
+  }
+
+  /** Salva la modale: crea l'accesso oppure reimposta la password. */
+  protected async submitStaffAccessForm(): Promise<void> {
+    if (this.staffAccessSubmitting()) {
+      return;
+    }
+    const value = this.staffAccessForm.getRawValue();
+    if (this.staffAccessForm.invalid) {
+      this.staffAccessForm.markAllAsTouched();
+      this.notifyStaffAccess('Controlla i campi evidenziati.', 'error');
+      return;
+    }
+
+    this.staffAccessSubmitting.set(true);
+
+    if (this.staffAccessModalMode() === 'password') {
+      const targetId = this.staffAccessTargetId();
+      if (!targetId) {
+        this.staffAccessSubmitting.set(false);
+        return;
+      }
+      const result = await this.auth.setStaffPassword(targetId, value.password);
+      this.staffAccessSubmitting.set(false);
+      if (!result.ok) {
+        this.notifyStaffAccess(result.message ?? 'Operazione non riuscita.', 'error');
+        return;
+      }
+      this.closeStaffAccessModal();
+      this.notifyStaffAccess('Password aggiornata.', 'success');
+      await this.loadStaffAccesses();
+      return;
+    }
+
+    // Accesso operativo: nome mostrato coincidente con lo username.
+    const payload: StaffAccountPayload = {
+      username: value.username.trim().toLowerCase(),
+      password: value.password,
+    };
+    const result = await this.auth.createStaffAccount(payload);
+    this.staffAccessSubmitting.set(false);
+    if (!result.ok) {
+      this.notifyStaffAccess(result.message ?? 'Creazione non riuscita.', 'error');
+      return;
+    }
+    this.closeStaffAccessModal();
+    this.notifyStaffAccess(
+      'Accesso gestionale creato. Comunica username e password al dipendente.',
+      'success',
+    );
+    await this.loadStaffAccesses();
+  }
+
+  /** Sospende o riattiva un accesso gestionale. */
+  protected async toggleStaffAccessStatus(record: AppStaffAccountRecord): Promise<void> {
+    const result =
+      record.status === 'sospesa'
+        ? await this.auth.resumeStaffAccount(record.id)
+        : await this.auth.suspendStaffAccount(record.id);
+    if (!result.ok) {
+      this.notifyStaffAccess(result.message ?? 'Operazione non riuscita.', 'error');
+      return;
+    }
+    this.notifyStaffAccess(record.status === 'sospesa' ? 'Accesso riattivato.' : 'Accesso sospeso.', 'success');
+    await this.loadStaffAccesses();
+  }
+
+  /** Elimina definitivamente un accesso gestionale. */
+  protected async removeStaffAccess(record: AppStaffAccountRecord): Promise<void> {
+    if (!window.confirm(`Eliminare l'accesso "${record.username}"? L'operazione non è reversibile.`)) {
+      return;
+    }
+    const result = await this.auth.deleteStaffAccount(record.id);
+    if (!result.ok) {
+      this.notifyStaffAccess(result.message ?? 'Operazione non riuscita.', 'error');
+      return;
+    }
+    this.notifyStaffAccess('Accesso eliminato.', 'success');
+    await this.loadStaffAccesses();
+  }
+
+  protected staffAccessStatusLabel(record: AppStaffAccountRecord): string {
+    return record.status === 'sospesa' ? 'Sospeso' : record.status === 'eliminata' ? 'Eliminato' : 'Attivo';
+  }
+
+  /** Data/ora locale leggibile per un accesso gestionale. */
+  protected staffAccessTimestamp(value: string | null): string {
+    if (!value) {
+      return 'mai';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString('it-IT', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  private notifyStaffAccess(message: string, tone: 'success' | 'error'): void {
+    this.staffAccessFeedbackTone.set(tone);
+    this.staffAccessFeedback.set(message);
+  }
+
+  // ========================================================================
+  // REGISTRO ATTIVITÀ · audit centralizzato e filtrabile (solo titolare)
+  // ------------------------------------------------------------------------
+  // Aggrega in un'unica lista le attività di preventivi, cassa, magazzino e
+  // spese: per ogni evento registra chi, quando, come e perché. Rispetto alla
+  // consegna, le vendite fuori scontrino sono marcate e possono essere isolate.
+  // ========================================================================
+  protected readonly auditRegisterCategories: ReadonlyArray<{
+    key: AuditRegisterCategoryFilter;
+    label: string;
+  }> = [
+      { key: 'tutte', label: 'Tutte le attività' },
+      { key: 'preventivi', label: 'Preventivi' },
+      { key: 'cassa', label: 'Cassa' },
+      { key: 'magazzino', label: 'Magazzino' },
+      { key: 'spese', label: 'Spese' },
+    ];
+  protected readonly auditRegisterPresetOptions: ReadonlyArray<{
+    key: AuditRegisterPreset;
+    label: string;
+  }> = [
+      { key: 'oggi', label: 'Oggi' },
+      { key: 'ultimi-7', label: 'Ultimi 7 giorni' },
+      { key: 'ultimi-30', label: 'Ultimi 30 giorni' },
+      { key: 'mese-corrente', label: 'Mese corrente' },
+      { key: 'tutto', label: 'Tutto lo storico' },
+      { key: 'custom', label: 'Personalizzato' },
+    ];
+  /** Dimensione di un blocco di eventi caricati progressivamente. */
+  private readonly AUDIT_REGISTER_PAGE_SIZE = 60;
+  protected readonly auditRegisterSearch = signal('');
+  protected readonly auditRegisterCategory = signal<AuditRegisterCategoryFilter>('tutte');
+  protected readonly auditRegisterOperator = signal('tutti');
+  protected readonly auditRegisterReceipt = signal<AuditRegisterReceiptFilter>('tutte');
+  protected readonly auditRegisterPreset: WritableSignal<AuditRegisterPreset> = signal('ultimi-30');
+  protected readonly auditRegisterFrom = signal('');
+  protected readonly auditRegisterTo = signal('');
+  protected readonly auditRegisterLimit = signal(60);
+
+  /** Tutti gli eventi disponibili, normalizzati e ordinati dal più recente. */
+  protected readonly auditRegisterAll = computed<AuditRegisterEntry[]>(() => {
+    const entries: AuditRegisterEntry[] = [];
+
+    // Preventivi: storico operativo salvato sul record (chi, come, perché).
+    for (const quote of this.allQuotes()) {
+      for (const entry of quote.history ?? []) {
+        entries.push({
+          id: `quote-${quote.id}-${entry.id}`,
+          when: entry.createdAt,
+          category: 'preventivi',
+          categoryLabel: 'Preventivi',
+          title: entry.title,
+          actor: entry.actor,
+          how: entry.how,
+          why: entry.why,
+          detail: quote.customerName,
+          amount: null,
+          offReceipt: false,
+          tone: entry.tone,
+        });
+      }
+    }
+
+    // Cassa: una voce per documento emesso, con evidenza delle vendite fuori scontrino.
+    for (const transaction of this.allCashTransactions()) {
+      const operators = [...new Set(transaction.lines.map((line) => line.operatorName).filter(Boolean))];
+      const offReceipt = transaction.lines.some((line) => line.excludeFromReceipt);
+      entries.push({
+        id: `cash-${transaction.id}`,
+        when: transaction.createdAt,
+        category: 'cassa',
+        categoryLabel: 'Cassa',
+        title: this.auditCashDocumentLabel(transaction),
+        actor: operators.join(', ') || 'Cassa',
+        how: `Pagamento ${transaction.paymentMethod} · ${transaction.status}`,
+        why: transaction.notes?.trim() || 'Incasso registrato in cassa',
+        detail: transaction.customerName,
+        amount: transaction.total,
+        offReceipt,
+        tone:
+          transaction.status === 'annullato'
+            ? 'warning'
+            : transaction.status === 'pagato'
+              ? 'success'
+              : 'info',
+      });
+    }
+
+    // Magazzino: log operativo (creazioni, modifiche, prelievi, consumo FIFO).
+    for (const record of this.allWarehouseAuditLog()) {
+      entries.push({
+        id: `wh-audit-${record.id}`,
+        when: record.createdAt,
+        category: 'magazzino',
+        categoryLabel: 'Magazzino',
+        title: `Magazzino · ${record.action} ${record.entityType}`,
+        actor: record.actor || 'Magazzino',
+        how: `Azione "${record.action}" su ${record.entityType}`,
+        why: record.detail || 'Movimento di magazzino',
+        detail: record.entityId,
+        amount: null,
+        offReceipt: false,
+        tone:
+          record.action === 'delete' ? 'warning' : record.action === 'create' ? 'success' : 'info',
+      });
+    }
+
+    // Magazzino: rettifiche manuali di giacenza (sempre tracciate a parte).
+    for (const record of this.allWarehouseAdjustments()) {
+      entries.push({
+        id: `wh-adj-${record.id}`,
+        when: record.adjustedAt,
+        category: 'magazzino',
+        categoryLabel: 'Magazzino',
+        title: `Rettifica giacenza (${record.deltaQuantity >= 0 ? '+' : ''}${record.deltaQuantity})`,
+        actor: record.operator || 'Magazzino',
+        how: `Da ${record.previousQuantity} a ${record.actualQuantity}`,
+        why: record.reason || 'Rettifica inventario',
+        detail: record.inventoryItemId,
+        amount: null,
+        offReceipt: false,
+        tone: 'warning',
+      });
+    }
+
+    // Spese: log operativo (creazione, modifica, pagamento, notifiche).
+    for (const record of this.allExpenseAuditLog()) {
+      entries.push({
+        id: `exp-audit-${record.id}`,
+        when: record.createdAt,
+        category: 'spese',
+        categoryLabel: 'Spese',
+        title: `Spese · ${record.action} ${record.entityType}`,
+        actor: record.actor || 'Amministrazione',
+        how: `Azione "${record.action}" su ${record.entityType}`,
+        why: record.detail || 'Operazione sulle spese',
+        detail: record.entityId,
+        amount: null,
+        offReceipt: false,
+        tone:
+          record.action === 'delete' ? 'warning' : record.action === 'create' ? 'success' : 'info',
+      });
+    }
+
+    return entries.sort((left, right) => right.when.localeCompare(left.when));
+  });
+
+  /** Operatori disponibili come filtro: ricavati dagli eventi tracciati. */
+  protected readonly auditRegisterOperators = computed(() => {
+    const operators = new Set<string>();
+    for (const entry of this.auditRegisterAll()) {
+      const actor = entry.actor.trim();
+      if (actor) {
+        operators.add(actor);
+      }
+    }
+    return [...operators].sort((left, right) => left.localeCompare(right, 'it'));
+  });
+
+  /** Intervallo di date effettivo derivato dal preset o dal range personalizzato. */
+  protected readonly auditRegisterRange = computed<{ from: string; to: string }>(() => {
+    const preset = this.auditRegisterPreset();
+    if (preset === 'tutto') {
+      return { from: '', to: '' };
+    }
+    if (preset === 'custom') {
+      return { from: this.auditRegisterFrom(), to: this.auditRegisterTo() };
+    }
+
+    const today = new Date();
+    if (preset === 'oggi') {
+      const day = this.toLocalIsoDate(today);
+      return { from: day, to: day };
+    }
+    if (preset === 'mese-corrente') {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { from: this.toLocalIsoDate(first), to: this.toLocalIsoDate(today) };
+    }
+
+    const days = preset === 'ultimi-7' ? 7 : 30;
+    const start = new Date(today);
+    start.setDate(start.getDate() - (days - 1));
+    return { from: this.toLocalIsoDate(start), to: this.toLocalIsoDate(today) };
+  });
+
+  /** Eventi che rispettano periodo, categoria, operatore, documento e ricerca. */
+  protected readonly auditRegisterFiltered = computed<AuditRegisterEntry[]>(() => {
+    const term = this.auditRegisterSearch().trim().toLowerCase();
+    const category = this.auditRegisterCategory();
+    const operator = this.auditRegisterOperator();
+    const receipt = this.auditRegisterReceipt();
+    const { from, to } = this.auditRegisterRange();
+
+    return this.auditRegisterAll().filter((entry) => {
+      const day = entry.when.slice(0, 10);
+      if (from && day < from) {
+        return false;
+      }
+      if (to && day > to) {
+        return false;
+      }
+      if (category !== 'tutte' && entry.category !== category) {
+        return false;
+      }
+      if (operator !== 'tutti' && entry.actor.trim() !== operator) {
+        return false;
+      }
+      if (receipt === 'fuori-scontrino' && !entry.offReceipt) {
+        return false;
+      }
+      if (receipt === 'scontrino' && entry.offReceipt) {
+        return false;
+      }
+      if (term) {
+        const haystack = `${entry.title} ${entry.actor} ${entry.how} ${entry.why} ${entry.detail} ${entry.categoryLabel}`.toLowerCase();
+        if (!haystack.includes(term)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  });
+
+  protected readonly auditRegisterVisible = computed(() =>
+    this.auditRegisterFiltered().slice(0, this.auditRegisterLimit()),
+  );
+  protected readonly auditRegisterHasMore = computed(
+    () => this.auditRegisterFiltered().length > this.auditRegisterLimit(),
+  );
+  protected readonly auditRegisterStats = computed(() => {
+    const all = this.auditRegisterFiltered();
+    return {
+      total: all.length,
+      preventivi: all.filter((entry) => entry.category === 'preventivi').length,
+      cassa: all.filter((entry) => entry.category === 'cassa').length,
+      magazzino: all.filter((entry) => entry.category === 'magazzino').length,
+      spese: all.filter((entry) => entry.category === 'spese').length,
+      offReceipt: all.filter((entry) => entry.offReceipt).length,
+    };
+  });
+
+  protected setAuditRegisterPreset(preset: AuditRegisterPreset): void {
+    this.auditRegisterPreset.set(preset);
+    this.auditRegisterLimit.set(this.AUDIT_REGISTER_PAGE_SIZE);
+  }
+
+  protected updateAuditRegisterFrom(event: Event): void {
+    this.auditRegisterFrom.set((event.target as HTMLInputElement).value);
+    this.auditRegisterPreset.set('custom');
+    this.auditRegisterLimit.set(this.AUDIT_REGISTER_PAGE_SIZE);
+  }
+
+  protected updateAuditRegisterTo(event: Event): void {
+    this.auditRegisterTo.set((event.target as HTMLInputElement).value);
+    this.auditRegisterPreset.set('custom');
+    this.auditRegisterLimit.set(this.AUDIT_REGISTER_PAGE_SIZE);
+  }
+
+  protected updateAuditRegisterSearch(event: Event): void {
+    this.auditRegisterSearch.set((event.target as HTMLInputElement).value);
+    this.auditRegisterLimit.set(this.AUDIT_REGISTER_PAGE_SIZE);
+  }
+
+  protected clearAuditRegisterFilters(): void {
+    this.auditRegisterSearch.set('');
+    this.auditRegisterCategory.set('tutte');
+    this.auditRegisterOperator.set('tutti');
+    this.auditRegisterReceipt.set('tutte');
+    this.auditRegisterPreset.set('ultimi-30');
+    this.auditRegisterFrom.set('');
+    this.auditRegisterTo.set('');
+    this.auditRegisterLimit.set(this.AUDIT_REGISTER_PAGE_SIZE);
+  }
+
+  protected showMoreAuditRegister(): void {
+    this.auditRegisterLimit.update((value) => value + this.AUDIT_REGISTER_PAGE_SIZE);
+  }
+
+  /** Data/ora leggibile dell'evento, nel fuso locale dell'utente. */
+  protected auditRegisterWhenLabel(entry: AuditRegisterEntry): string {
+    const date = new Date(entry.when);
+    if (Number.isNaN(date.getTime())) {
+      return entry.when;
+    }
+    return date.toLocaleString('it-IT', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  protected auditRegisterRangeLabel(): string {
+    const { from, to } = this.auditRegisterRange();
+    if (!from && !to) {
+      return 'Tutto lo storico';
+    }
+    const format = (value: string) =>
+      value ? new Date(`${value}T00:00:00`).toLocaleDateString('it-IT') : '—';
+    return `${format(from)} → ${format(to)}`;
+  }
+
+  /** Etichetta del documento di cassa (fattura, scontrino o documento generico). */
+  private auditCashDocumentLabel(transaction: CashTransactionRecord): string {
+    if (transaction.documentType === 'fattura' && transaction.invoiceNumber !== null) {
+      return `Fattura n. ${transaction.invoiceNumber}`;
+    }
+    if (transaction.receiptNumber !== null) {
+      return `Scontrino n. ${transaction.receiptNumber}`;
+    }
+    return transaction.documentType === 'fattura' ? 'Fattura' : 'Documento di cassa';
+  }
+
+  /** Data locale in formato yyyy-mm-dd (evita slittamenti di fuso orario). */
+  private toLocalIsoDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   // ========================================================================
@@ -1658,7 +2250,7 @@ export class SectionPageComponent {
     this.miniHrModalDate.set(isoDate);
     this.miniHrModalAction.set(initialAction);
     // default: primo operatore attivo (se esiste)
-    const firstOp = this.allCashOperators().find(o => o.active);
+    const firstOp = this.allCashOperators().find((o) => o.active && o.name !== 'Banco');
     this.miniHrModalEmpName.set(firstOp?.name ?? '');
     this.miniHrModalPermitStart.set('09:00');
     this.miniHrModalPermitEnd.set('11:00');
@@ -2500,8 +3092,13 @@ export class SectionPageComponent {
     }
     return Math.max(this.cashSubtotal() - this.cashDiscountAmount(), 0);
   });
+  protected readonly cashActiveTransactions = computed(() =>
+    this.allCashTransactions().filter((transaction) => transaction.status !== 'annullato'),
+  );
   protected readonly cashPendingTransactions = computed(() =>
-    this.allCashTransactions().filter((transaction) => transaction.status !== 'pagato'),
+    this.allCashTransactions().filter(
+      (transaction) => transaction.status === 'sospeso' || transaction.status === 'insoluto',
+    ),
   );
   protected readonly cashPendingSummaryByClientId = computed(() => {
     const grouped = new Map<string, { total: number; count: number }>();
@@ -2562,6 +3159,10 @@ export class SectionPageComponent {
       return true;
     }
 
+    if (!this.cashHasSelectedOperator() || !this.cashCartHasAssignedOperators()) {
+      return false;
+    }
+
     if (this.cashEffectiveTotal() <= 0) {
       return false;
     }
@@ -2595,7 +3196,12 @@ export class SectionPageComponent {
   public readonly cashIsPaymentSettled = computed(() => this.cashCanFinalizePaidSale());
   public readonly cashHasSessionTotal = computed(() => this.cashEffectiveTotal() > 0);
   protected readonly cashCanMarkAsInsoluto = computed(
-    () => this.cashCart().length > 0 && !!this.selectedCashClientId() && !this.cashIsSettlingPending(),
+    () =>
+      this.cashCart().length > 0 &&
+      !!this.selectedCashClientId() &&
+      this.cashHasSelectedOperator() &&
+      this.cashCartHasAssignedOperators() &&
+      !this.cashIsSettlingPending(),
   );
 
   protected readonly implementationPhases = computed(() => [
@@ -4064,9 +4670,7 @@ export class SectionPageComponent {
   });
   protected readonly selectedCashReceipt = computed(
     () =>
-      this.allCashTransactions().find((item) => item.id === this.selectedCashReceiptId()) ??
-      this.cashReceiptTransactions()[0] ??
-      null,
+      this.allCashTransactions().find((item) => item.id === this.selectedCashReceiptId()) ?? null,
   );
   protected readonly cashReceiptEditForm = this.formBuilder.nonNullable.group({
     customerName: ['', Validators.required],
@@ -4080,7 +4684,7 @@ export class SectionPageComponent {
   protected readonly cashCategoryBreakdown = computed(() => {
     const totals = new Map<string, { total: number; quantity: number }>();
 
-    for (const transaction of this.allCashTransactions().filter((item) => item.status === 'pagato')) {
+    for (const transaction of this.cashActiveTransactions().filter((item) => item.status === 'pagato')) {
       for (const line of transaction.lines) {
         const product = this.allCashProducts().find((item) => item.id === line.productId);
         const category = product?.category ?? 'servizi';
@@ -4098,13 +4702,20 @@ export class SectionPageComponent {
   protected readonly filteredCashShifts = computed(() => {
     const query = this.cashShiftSearch().trim().toLowerCase();
 
-    return this.allCashShifts().filter((shift) =>
-      query
+    return this.allCashShifts().filter((shift) => {
+      const matchesQuery = query
         ? `${shift.label} ${shift.closureNumber} ${shift.closedAt}`
           .toLowerCase()
           .includes(query)
-        : true,
-    );
+        : true;
+      if (!matchesQuery) {
+        return false;
+      }
+      if (this.auth.isOwner()) {
+        return true;
+      }
+      return this.cashShiftMetrics(shift).transactionsCount > 0;
+    });
   });
   protected readonly selectedCashReportShift = computed(
     () =>
@@ -4118,7 +4729,7 @@ export class SectionPageComponent {
       return [];
     }
 
-    return this.allCashTransactions().filter((transaction) => {
+    return this.cashReportTransactions().filter((transaction) => {
       const receiptIncluded =
         transaction.receiptNumber !== null && shift.receiptNumbers.includes(transaction.receiptNumber);
       const invoiceIncluded =
@@ -4129,7 +4740,7 @@ export class SectionPageComponent {
   });
   protected readonly selectedCashReportTransaction = computed(
     () =>
-      this.allCashTransactions().find((item) => item.id === this.selectedCashReportTransactionId()) ??
+      this.selectedCashReportShiftTransactions().find((item) => item.id === this.selectedCashReportTransactionId()) ??
       this.selectedCashReportShiftTransactions()[0] ??
       null,
   );
@@ -4340,6 +4951,143 @@ export class SectionPageComponent {
       .sort((left, right) => left.scheduledAt.localeCompare(right.scheduledAt))
       .slice(0, 4);
   });
+  protected readonly selectedQuoteLinkedAppointments = computed(() => {
+    const quote = this.selectedQuote();
+
+    if (!quote) {
+      return [];
+    }
+
+    return this.allAppointments()
+      .filter((item) => item.linkedQuoteId === quote.id)
+      .sort((left, right) => right.scheduledAt.localeCompare(left.scheduledAt));
+  });
+  protected readonly selectedQuoteDdts = computed(() => {
+    const quote = this.selectedQuote();
+
+    if (!quote) {
+      return [];
+    }
+
+    return this.allWarehouseDdts()
+      .filter((record) => record.linkedQuoteId === quote.id)
+      .sort((left, right) =>
+        String(right.emittedAt || right.createdAt).localeCompare(String(left.emittedAt || left.createdAt)),
+      );
+  });
+  protected readonly selectedQuoteCashTransactions = computed(() => {
+    const quote = this.selectedQuote();
+
+    if (!quote) {
+      return [];
+    }
+
+    return this.allCashTransactions()
+      .filter((transaction) => transaction.linkedQuoteId === quote.id)
+      .sort((left, right) =>
+        String(right.settledAt || right.createdAt).localeCompare(String(left.settledAt || left.createdAt)),
+      );
+  });
+  protected readonly selectedQuoteOperationalRegister = computed<QuoteOperationalRegisterEntry[]>(() => {
+    const quote = this.selectedQuote();
+
+    if (!quote) {
+      return [];
+    }
+
+    const entries: QuoteOperationalRegisterEntry[] = [];
+    const issueDate = quote.issueDate || quote.dueDate || '';
+
+    if (quote.history?.length) {
+      for (const entry of quote.history) {
+        entries.push({
+          id: `quote-history-${entry.id}`,
+          title: entry.title,
+          sortAt: entry.createdAt,
+          whenLabel: this.quoteRegisterDateLabel(entry.createdAt),
+          actor: entry.actor,
+          how: entry.how,
+          why: entry.why,
+          badge: entry.badge,
+          tone: entry.tone,
+        });
+      }
+    } else {
+      entries.push({
+        id: `${quote.id}-compiled`,
+        title: 'Preventivo compilato',
+        sortAt: issueDate,
+        whenLabel: this.quoteRegisterDateLabel(issueDate),
+        actor: quote.operatorName?.trim() || 'Operatore non specificato',
+        how: `${this.quoteFulfillmentSummary(quote)} · ${this.quotePaymentPlanLabel(quote.paymentPlan || 'unica')}`,
+        why: quote.projectType || 'Oggetto preventivo non specificato',
+        badge: this.quoteStageLabel(quote.stage),
+        tone: quote.stage === 'ordine' || quote.stage === 'confermato' ? 'success' : 'info',
+      });
+
+      if (
+        (quote.paymentPlan && quote.paymentPlan !== 'unica') ||
+        quote.paymentNotes?.trim() ||
+        quote.financingProvider?.trim()
+      ) {
+        entries.push({
+          id: `${quote.id}-payment`,
+          title: 'Accettazione pagamento impostata',
+          sortAt: quote.dueDate || issueDate,
+          whenLabel: this.quoteRegisterDateLabel(quote.dueDate || issueDate),
+          actor: quote.operatorName?.trim() || 'Operatore non specificato',
+          how: this.quotePaymentSummary(quote),
+          why: quote.paymentNotes?.trim() || 'Piano di incasso definito nel preventivo',
+          badge: 'Pagamento',
+          tone: 'warning',
+        });
+      }
+    }
+
+    for (const appointment of this.selectedQuoteLinkedAppointments()) {
+      entries.push({
+        id: `quote-appt-${appointment.id}`,
+        title: appointment.title || 'Appuntamento collegato',
+        sortAt: appointment.scheduledAt,
+        whenLabel: this.quoteRegisterDateLabel(appointment.scheduledAt),
+        actor: appointment.technician || 'Tecnico da assegnare',
+        how: `${this.appointmentTypeLabel(appointment.appointmentType)} · ${this.appointmentLocationShortLabel(appointment.locationType)}`,
+        why: `Stato ${appointment.status}`,
+        badge: 'Agenda',
+        tone: appointment.status === 'chiuso' ? 'success' : 'info',
+      });
+    }
+
+    for (const record of this.selectedQuoteDdts()) {
+      entries.push({
+        id: `quote-ddt-${record.id}`,
+        title: `DDT ${record.number || this.ddtLinkedQuoteLabel(record)}`,
+        sortAt: record.emittedAt || record.createdAt,
+        whenLabel: this.quoteRegisterDateLabel(record.emittedAt || record.createdAt),
+        actor: record.createdByOperatorName || 'Magazzino',
+        how: `${this.epDdtStatusLabel(record.status)} · ${record.originType === 'preventivo' ? 'Da preventivo' : 'Manuale'}`,
+        why: record.causale?.trim() || record.note?.trim() || 'Documento di trasporto collegato al preventivo',
+        badge: 'DDT',
+        tone: record.status === 'annullato' ? 'warning' : record.status === 'consegnato' ? 'success' : 'info',
+      });
+    }
+
+    for (const transaction of this.selectedQuoteCashTransactions()) {
+      entries.push({
+        id: `quote-cash-${transaction.id}`,
+        title: `Incasso ${transaction.reference}`,
+        sortAt: transaction.settledAt || transaction.createdAt,
+        whenLabel: this.quoteRegisterDateLabel(transaction.settledAt || transaction.createdAt),
+        actor: this.quoteTransactionOperatorsLabel(transaction),
+        how: `${transaction.documentType === 'fattura' ? 'Fattura' : 'Scontrino'} · ${this.quoteTransactionPaymentLabel(transaction)} · ${this.cashStatusLabel(transaction.status)}`,
+        why: transaction.notes?.trim() || `Totale € ${this.formatCurrency(transaction.total)}`,
+        badge: 'Cassa',
+        tone: transaction.status === 'pagato' ? 'success' : transaction.status === 'annullato' ? 'warning' : 'neutral',
+      });
+    }
+
+    return entries.sort((left, right) => right.sortAt.localeCompare(left.sortAt));
+  });
   protected readonly quoteFormSelectedService = computed(() => {
     const serviceId = this.quoteForm.controls.serviceId.value || '';
     return this.servicesOnly().find((service) => service.id === serviceId) ?? null;
@@ -4428,12 +5176,14 @@ export class SectionPageComponent {
     return Array.from({ length }, (_, index) => {
       const currentDate = new Date(actualStart);
       currentDate.setDate(actualStart.getDate() + index);
-      const isoDate = currentDate.toISOString().slice(0, 10);
+      const isoDate = this.toIsoDate(currentDate);
+      const weekday = currentDate.getDay();
 
-      // if mensile, we don't need 'weekday: long' since grid headers handle it, but we can leave it
       return {
         isoDate,
+        isToday: isoDate === this.toIsoDate(new Date()),
         isCurrentMonth: mode === 'mensile' ? currentDate.getMonth() === startDate.getMonth() : true,
+        isWeekend: weekday === 0 || weekday === 6,
         label: new Intl.DateTimeFormat('it-IT', {
           weekday: mode === 'mensile' ? 'short' : 'long',
           day: '2-digit',
@@ -5142,14 +5892,37 @@ export class SectionPageComponent {
   protected readonly cashHiddenReceiptTotal = computed(() =>
     this.cashHiddenReceiptLines().reduce((sum, line) => sum + line.total, 0),
   );
-  protected readonly cashPaidTransactionsTotal = computed(() =>
+  /**
+   * Transazioni usate nei riepiloghi/report cassa.
+   * Per il profilo operativo i fuori scontrino vengono rimossi dalla vista:
+   * - se una transazione contiene solo righe fuori scontrino, sparisce del tutto;
+   * - se contiene righe miste, restano solo quelle visibili con totali riproporzionati.
+   */
+  protected readonly cashReportTransactions = computed(() =>
     this.allCashTransactions()
+      .map((transaction) => this.cashTransactionVisibleForCurrentRole(transaction))
+      .filter((transaction): transaction is CashTransactionRecord => transaction !== null),
+  );
+  protected readonly cashReportActiveTransactions = computed(() =>
+    this.cashReportTransactions().filter((transaction) => transaction.status !== 'annullato'),
+  );
+  protected readonly cashReportPendingTransactions = computed(() =>
+    this.cashReportTransactions().filter(
+      (transaction) => transaction.status === 'sospeso' || transaction.status === 'insoluto',
+    ),
+  );
+  protected readonly cashClosureTransactions = computed(() => this.cashReportTransactions());
+  protected readonly cashPaidTransactionsTotal = computed(() =>
+    this.cashReportActiveTransactions()
       .filter((transaction) => transaction.status === 'pagato')
       .reduce((sum, transaction) => sum + transaction.total, 0),
   );
-  protected readonly cashTransactionsTotalCount = computed(() => this.allCashTransactions().length);
+  protected readonly cashTransactionsTotalCount = computed(() => this.cashReportActiveTransactions().length);
+  protected readonly cashAnnulledTransactionsCount = computed(() =>
+    this.cashReportTransactions().filter((transaction) => transaction.status === 'annullato').length,
+  );
   protected readonly cashTotalsByMethod = computed(() => {
-    const paidTransactions = this.allCashTransactions().filter(
+    const paidTransactions = this.cashReportActiveTransactions().filter(
       (transaction) => transaction.status === 'pagato',
     );
 
@@ -5178,7 +5951,10 @@ export class SectionPageComponent {
     );
   });
   protected readonly cashUnpaidTransactionsTotal = computed(() =>
-    this.cashPendingTransactions().reduce((sum, transaction) => sum + (transaction.total - (transaction.receivedAmount || 0)), 0),
+    this.cashReportPendingTransactions().reduce(
+      (sum, transaction) => sum + (transaction.total - (transaction.receivedAmount || 0)),
+      0,
+    ),
   );
 
   protected readonly clientPendingAlerts = computed(() =>
@@ -5247,7 +6023,7 @@ export class SectionPageComponent {
   protected readonly cashTopCategories = computed(() => {
     const totals = new Map<string, number>();
 
-    for (const transaction of this.allCashTransactions().filter((item) => item.status === 'pagato')) {
+    for (const transaction of this.cashReportActiveTransactions().filter((item) => item.status === 'pagato')) {
       for (const line of transaction.lines) {
         const product = this.allCashProducts().find((item) => item.id === line.productId);
         const category = product?.category ?? 'servizi';
@@ -5261,18 +6037,18 @@ export class SectionPageComponent {
       .slice(0, 4);
   });
   protected readonly cashTodayReceiptCount = computed(() =>
-    this.allCashTransactions().filter((transaction) => transaction.receiptNumber !== null).length,
+    this.cashReportActiveTransactions().filter((transaction) => transaction.receiptNumber !== null).length,
   );
   protected readonly cashTodayInvoiceCount = computed(() =>
-    this.allCashTransactions().filter((transaction) => transaction.invoiceNumber !== null).length,
+    this.cashReportActiveTransactions().filter((transaction) => transaction.invoiceNumber !== null).length,
   );
   protected readonly cashTodayDiscountTotal = computed(() =>
-    this.allCashTransactions()
+    this.cashReportTransactions()
       .filter((transaction) => transaction.status === 'pagato')
       .reduce((sum, transaction) => sum + (transaction.discountAmount || 0), 0),
   );
   protected readonly cashClosureReceiptRange = computed(() => {
-    const receipts = this.allCashTransactions()
+    const receipts = this.cashReportActiveTransactions()
       .filter((transaction) => transaction.receiptNumber !== null)
       .map((transaction) => transaction.receiptNumber!)
       .sort((left, right) => left - right);
@@ -5284,7 +6060,7 @@ export class SectionPageComponent {
       : `Scontrini n. ${receipts[0]} – ${receipts[receipts.length - 1]}`;
   });
   protected readonly cashClosureInvoiceRange = computed(() => {
-    const invoices = this.allCashTransactions()
+    const invoices = this.cashReportActiveTransactions()
       .filter((transaction) => transaction.invoiceNumber !== null)
       .map((transaction) => transaction.invoiceNumber!)
       .sort((left, right) => left - right);
@@ -5297,7 +6073,7 @@ export class SectionPageComponent {
   });
   protected readonly cashByOperator = computed(() => {
     const totals = new Map<string, { operator: string; total: number; count: number }>();
-    for (const transaction of this.allCashTransactions().filter((item) => item.status === 'pagato')) {
+    for (const transaction of this.cashActiveTransactions().filter((item) => item.status === 'pagato')) {
       for (const line of transaction.lines) {
         const current = totals.get(line.operatorName) ?? { operator: line.operatorName, total: 0, count: 0 };
         current.total += line.total;
@@ -11531,6 +12307,17 @@ ${paymentXml}
     return `http://${ip}:${port}/portale-dipendenti`;
   });
 
+  /**
+   * Link pubblico del portale dipendenti, da inoltrare ai dipendenti.
+   * Deriva dall'origine corrente: in produzione è l'URL Vercel, in sviluppo localhost.
+   */
+  protected readonly epPortalShareUrl = computed(() => {
+    if (typeof window === 'undefined' || !window.location?.origin) {
+      return '/portale-dipendenti';
+    }
+    return `${window.location.origin}/portale-dipendenti`;
+  });
+
   /** Sorgente immagine del QR code (api.qrserver.com - esterno) */
   protected readonly epQrSrc = computed(() => {
     const url = this.epLanUrl();
@@ -11554,12 +12341,29 @@ ${paymentXml}
 
   // ============ PORTALE DIPENDENTI: retroazione nelle sezioni principali (cassa + magazzino) ============
   // --- Task 6: Servizi pendenti da incassare nella /cassa
-  protected readonly epCassaPendingServices = computed(() =>
-    this.data
+  protected readonly epCassaPendingServices = computed(() => {
+    const client = this.selectedCashClient();
+    if (!client) {
+      return [];
+    }
+
+    const normalizedClientName = client.name.trim().toLowerCase();
+
+    return this.data
       .pendingServices()
-      .filter((svc) => svc.status === 'inviato')
-      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0)),
-  );
+      .filter((svc) => {
+        if (svc.status !== 'inviato') {
+          return false;
+        }
+
+        if (svc.clientId) {
+          return svc.clientId === client.id;
+        }
+
+        return (svc.clientSnapshot ?? '').trim().toLowerCase() === normalizedClientName;
+      })
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  });
   protected epPendingServiceClientLabel(svc: PendingServiceRecord): string {
     if (svc.clientSnapshot) return svc.clientSnapshot;
     if (svc.clientId) {
@@ -11589,8 +12393,14 @@ ${paymentXml}
     const lineName = `${label} · Portale dipendenti${description}`;
     const total = +(price * qty).toFixed(2);
     // Operatore di cassa: usa quello assegnato dal portale, altrimenti il tecnico creatore
-    const lineOperator =
-      svc.targetCashOperatorName || svc.createdByOperatorName || this.cashCurrentOperator();
+    const lineOperator = this.resolveCashAutoOperator(
+      svc.targetCashOperatorName || svc.createdByOperatorName || this.cashCurrentOperator(),
+    );
+    if (!lineOperator) {
+      this.pushToast('Seleziona prima un operatore di cassa valido.', 'error');
+      return;
+    }
+    this.cashCurrentOperator.set(lineOperator);
     this.cashCart.update((items) => [
       ...items,
       {
@@ -12553,8 +13363,13 @@ ${paymentXml}
       }
     }
 
+    const existingQuote = this.editingQuoteId()
+      ? this.allQuotes().find((item) => item.id === this.editingQuoteId()!) ?? null
+      : null;
+
     const normalizedQuote = {
       issueDate: payload.issueDate,
+      operatorName: payload.operatorName,
       customerName: payload.customerName,
       isAnonymous: payload.isAnonymous || false,
       discountAmount: Number(payload.discountAmount) || 0,
@@ -12579,6 +13394,34 @@ ${paymentXml}
       stage: payload.stage,
       notes: payload.notes,
       lines: normalizedLines,
+      history: this.buildQuoteSaveHistory(existingQuote, {
+        issueDate: payload.issueDate,
+        operatorName: payload.operatorName,
+        customerName: payload.customerName,
+        isAnonymous: payload.isAnonymous || false,
+        discountAmount: Number(payload.discountAmount) || 0,
+        customerPhone: payload.customerPhone,
+        customerEmail: payload.customerEmail,
+        customerAddress: payload.customerAddress,
+        customerTaxId: payload.customerTaxId,
+        customerPec: payload.customerPec,
+        customerSdiCode: payload.customerSdiCode,
+        attachmentName: payload.attachmentName,
+        fulfillmentType: payload.fulfillmentType,
+        fulfillmentAddress: payload.fulfillmentAddress,
+        paymentPlan: payload.paymentPlan,
+        installmentCount: Number(payload.installmentCount) || 0,
+        installmentCadence: payload.installmentCadence,
+        financingProvider: payload.financingProvider,
+        paymentAlertDays: Number(payload.paymentAlertDays) || 7,
+        paymentNotes: payload.paymentNotes,
+        projectType: payload.projectType,
+        value: computedValue,
+        dueDate: payload.dueDate,
+        stage: payload.stage,
+        notes: payload.notes,
+        lines: normalizedLines,
+      }),
     } satisfies Omit<QuoteRecord, 'id'>;
 
     this.syncQuoteClientToRegistry(normalizedQuote);
@@ -12910,10 +13753,10 @@ ${paymentXml}
     this.syncWarehouseReceiptCategoryState();
   }
 
-  protected applyInventoryAdjustment(): void {
+  protected applyInventoryAdjustment(): boolean {
     if (this.warehouseAdjustmentForm.invalid) {
       this.warehouseAdjustmentForm.markAllAsTouched();
-      return;
+      return false;
     }
 
     const payload = this.warehouseAdjustmentForm.getRawValue();
@@ -12939,7 +13782,7 @@ ${paymentXml}
     const ok = typeof window !== 'undefined' ? window.confirm(msg) : true;
     if (!ok) {
       this.pushToast('Rettifica annullata · giacenza NON modificata.', 'success');
-      return;
+      return false;
     }
 
     this.data.adjustInventoryQuantity({
@@ -12952,6 +13795,7 @@ ${paymentXml}
     this.warehouseAdjustmentForm.patchValue({
       reason: '',
     });
+    return true;
   }
 
   protected addExpense(): void {
@@ -13361,7 +14205,9 @@ ${paymentXml}
     const payload = this.cashOperatorForm.getRawValue();
     this.data.addCashOperator({
       ...payload,
-      jobTitle: payload.jobTitle.trim() || payload.role,
+      // Se la qualifica non è specificata, usa l'etichetta leggibile della mansione
+      // (es. "Tecnico") invece del codice interno (es. "tecnico").
+      jobTitle: payload.jobTitle.trim() || this.employeeRoleLabel(payload.role),
       contractHoursWeekly:
         payload.employmentType === 'titolare' ? 0 : Math.max(0, Number(payload.contractHoursWeekly) || 40),
       shiftPatterns: [{ lun: '', mar: '', mer: '', gio: '', ven: '', sab: '', dom: '' }],
@@ -13375,7 +14221,7 @@ ${paymentXml}
       epPortalLastLoginAt: null,
     });
 
-    if (!this.cashOperators().length || this.cashCurrentOperator() === 'Banco') {
+    if (!this.cashHasSelectedOperator()) {
       this.cashCurrentOperator.set(payload.name);
     }
 
@@ -13585,6 +14431,7 @@ ${paymentXml}
     this.editingQuoteId.set(quote.id);
     this.quoteForm.patchValue({
       issueDate: quote.issueDate,
+      operatorName: quote.operatorName || this.defaultQuoteOperator(),
       customerName: quote.customerName,
       isAnonymous: quote.isAnonymous || false,
       discountAmount: quote.discountAmount || 0,
@@ -14005,6 +14852,24 @@ ${paymentXml}
     this.expenseModalOpen.set(false);
   }
 
+  protected openWarehouseAdjustmentModal(): void {
+    const selectedId = this.selectedInventoryId();
+    if (selectedId) {
+      const item = this.allInventoryItems().find((entry) => entry.id === selectedId);
+      if (item) {
+        this.warehouseAdjustmentForm.patchValue({
+          inventoryItemId: item.id,
+          actualQuantity: item.stock,
+        });
+      }
+    }
+    this.warehouseAdjustmentModalOpen.set(true);
+  }
+
+  protected closeWarehouseAdjustmentModal(): void {
+    this.warehouseAdjustmentModalOpen.set(false);
+  }
+
   protected openWarehouseModal(): void {
     this.resetWarehouseForm('new');
     this.restoreFormDraft('warehouse', this.warehouseReceiptForm);
@@ -14132,7 +14997,33 @@ ${paymentXml}
 
 
   protected advanceQuote(id: string): void {
-    this.data.advanceQuote(id);
+    const quote = this.allQuotes().find((item) => item.id === id);
+    if (!quote) {
+      return;
+    }
+
+    const nextStage =
+      quote.stage === 'bozza' ? 'trattativa' : quote.stage === 'trattativa' ? 'ordine' : quote.stage;
+
+    if (nextStage === quote.stage) {
+      return;
+    }
+
+    this.data.updateQuote({
+      ...quote,
+      stage: nextStage,
+      history: [
+        ...(quote.history ?? []),
+        this.createQuoteHistoryEntry(
+          'Fase preventivo aggiornata',
+          quote.operatorName || 'Operatore commerciale',
+          `Da ${this.quoteStageLabel(quote.stage)} a ${this.quoteStageLabel(nextStage)}`,
+          'Avanzamento commerciale del preventivo',
+          'Pipeline',
+          nextStage === 'ordine' || nextStage === 'confermato' ? 'success' : 'info',
+        ),
+      ],
+    });
   }
 
   protected removeQuote(id: string): void {
@@ -14153,6 +15044,17 @@ ${paymentXml}
     this.data.updateQuote({
       ...quote,
       stage,
+      history: [
+        ...(quote.history ?? []),
+        this.createQuoteHistoryEntry(
+          'Stato preventivo modificato',
+          quote.operatorName || 'Operatore commerciale',
+          `Da ${this.quoteStageLabel(quote.stage)} a ${this.quoteStageLabel(stage)}`,
+          'Cambio fase impostato manualmente',
+          'Pipeline',
+          stage === 'ordine' || stage === 'confermato' ? 'success' : 'warning',
+        ),
+      ],
     });
   }
 
@@ -14228,6 +15130,9 @@ ${paymentXml}
   protected loadQuoteToCash(quoteId: string): void {
     const quote = this.allQuotes().find((item) => item.id === quoteId);
     if (!quote) return;
+    if (!this.ensureCashOperatorSelected()) {
+      return;
+    }
 
     if (
       this.cashHasSessionContent() &&
@@ -14320,7 +15225,12 @@ ${paymentXml}
       this.cashCustomerMode.set('walk-in');
     }
 
-    const operatorName = ticket.technician || this.cashCurrentOperator();
+    const operatorName = this.resolveCashAutoOperator(ticket.technician || this.cashCurrentOperator());
+    if (!operatorName) {
+      this.pushToast('Seleziona prima un operatore di cassa valido.', 'error');
+      return;
+    }
+    this.cashCurrentOperator.set(operatorName);
     const cartLines: CashTransactionLine[] = [
       {
         id: `cash-line-${crypto.randomUUID()}`,
@@ -14393,6 +15303,9 @@ ${paymentXml}
     const product = this.allCashProducts().find((item) => item.id === productId);
 
     if (!product) {
+      return;
+    }
+    if (!this.ensureCashCartPrerequisites()) {
       return;
     }
 
@@ -14573,6 +15486,17 @@ ${paymentXml}
   protected completeCashSale(status: CashTransactionRecord['status']): void {
     if (!this.cashCart().length) {
       return;
+    }
+
+    if (!this.cashIsSettlingPending()) {
+      if (!this.cashHasSelectedOperator()) {
+        this.pushToast('Seleziona prima un operatore di cassa.', 'error');
+        return;
+      }
+      if (!this.cashCartHasAssignedOperators()) {
+        this.pushToast('Assegna un operatore valido a tutte le righe del carrello.', 'error');
+        return;
+      }
     }
 
     let finalStatus = status;
@@ -14812,7 +15736,7 @@ ${paymentXml}
   }
 
   protected setCashCurrentOperator(operatorName: string): void {
-    this.cashCurrentOperator.set(operatorName);
+    this.cashCurrentOperator.set(this.isCashOperatorAssigned(operatorName) ? operatorName : '');
   }
 
   protected toggleCashOperatorActive(id: string): void {
@@ -14829,11 +15753,8 @@ ${paymentXml}
     });
 
     if (this.cashCurrentOperator() === operator.name && !nuovoStato) {
-      const fallbackOperator = this.data
-        .activeCashOperators()
-        .find((item) => item.id !== operator.id)?.name;
-
-      this.cashCurrentOperator.set(fallbackOperator ?? 'Banco');
+      const fallbackOperator = this.cashOperators().find((name) => name !== operator.name) ?? '';
+      this.cashCurrentOperator.set(fallbackOperator);
     }
 
     this.pushToast(
@@ -14866,7 +15787,7 @@ ${paymentXml}
     }
 
     if (this.cashCurrentOperator() === operator.name) {
-      const fallbackOperator = this.data.activeCashOperators()[0]?.name ?? 'Banco';
+      const fallbackOperator = this.cashOperators().find((name) => name !== operator.name) ?? '';
       this.cashCurrentOperator.set(fallbackOperator);
     }
   }
@@ -16436,6 +17357,30 @@ ${paymentXml}
     this.cashHistoryModalOpen.set(false);
   }
 
+  protected cancelCashDraft(): void {
+    if (!this.currentCashSessionHasContent()) {
+      this.resetCashCurrentSession();
+      return;
+    }
+
+    const message = this.cashEditingTransaction()
+      ? 'Annullare le modifiche del documento riportato in cassa?\n\nIl documento archiviato resterà invariato.'
+      : 'Annullare questo scontrino in creazione?\n\nIl carrello corrente verrà svuotato.';
+
+    if (!window.confirm(message)) {
+      return;
+    }
+
+    const wasEditing = !!this.cashEditingTransaction();
+    this.resetCashCurrentSession();
+    this.pushToast(
+      wasEditing
+        ? 'Modifiche annullate · documento archivio lasciato invariato.'
+        : 'Scontrino in creazione annullato.',
+      'success',
+    );
+  }
+
   /** Apre il popup con l'elenco dei clienti in attesa */
   protected openCashWaitingModal(): void {
     this.cashWaitingModalOpen.set(true);
@@ -16577,6 +17522,81 @@ ${paymentXml}
     }
 
     return `Sc. ${transaction.receiptNumber}`;
+  }
+
+  protected cashTransactionCanBeAnnulled(transaction: CashTransactionRecord | null): boolean {
+    return !!transaction && transaction.documentType === 'scontrino' && transaction.status !== 'annullato';
+  }
+
+  protected cashShiftMetrics(shift: CashShiftRecord): {
+    transactionsCount: number;
+    paidTotal: number;
+    suspendedTotal: number;
+    receiptCount: number;
+    invoiceCount: number;
+    annulledCount: number;
+  } {
+    const matchedTransactions = this.cashReportTransactions().filter((transaction) => {
+      const matchesReceipt =
+        transaction.receiptNumber !== null && shift.receiptNumbers.includes(transaction.receiptNumber);
+      const matchesInvoice =
+        transaction.invoiceNumber !== null && shift.invoiceNumbers.includes(transaction.invoiceNumber);
+      return matchesReceipt || matchesInvoice;
+    });
+    const activeTransactions = matchedTransactions.filter((transaction) => transaction.status !== 'annullato');
+    const paidTransactions = activeTransactions.filter((transaction) => transaction.status === 'pagato');
+
+    return {
+      transactionsCount: activeTransactions.length,
+      paidTotal: paidTransactions.reduce((sum, transaction) => sum + transaction.total, 0),
+      suspendedTotal: activeTransactions
+        .filter((transaction) => transaction.status === 'sospeso')
+        .reduce((sum, transaction) => sum + transaction.total, 0),
+      receiptCount: activeTransactions.filter((transaction) => transaction.receiptNumber !== null).length,
+      invoiceCount: activeTransactions.filter((transaction) => transaction.invoiceNumber !== null).length,
+      annulledCount: matchedTransactions.filter((transaction) => transaction.status === 'annullato').length,
+    };
+  }
+
+  /**
+   * Restituisce la transazione come deve essere vista nel profilo corrente.
+   * Il titolare vede il record completo; il profilo operativo non deve vedere
+   * righe fuori scontrino nei riepiloghi, nelle chiusure e nei report cassa.
+   */
+  private cashTransactionVisibleForCurrentRole(
+    transaction: CashTransactionRecord,
+  ): CashTransactionRecord | null {
+    if (this.auth.isOwner()) {
+      return transaction;
+    }
+
+    const visibleLines = transaction.lines.filter((line) => !line.excludeFromReceipt);
+    if (!visibleLines.length) {
+      return null;
+    }
+
+    const linesGross = this.roundCurrency(transaction.lines.reduce((sum, line) => sum + line.total, 0));
+    const visibleGross = this.roundCurrency(visibleLines.reduce((sum, line) => sum + line.total, 0));
+    const visibilityRatio = linesGross > 0 ? visibleGross / linesGross : 1;
+    const visibleDiscount = this.roundCurrency((transaction.discountAmount || 0) * visibilityRatio);
+    const visibleTotal = this.roundCurrency(Math.max(visibleGross - visibleDiscount, 0));
+    const totalRatio = transaction.total > 0 ? visibleTotal / transaction.total : visibilityRatio;
+
+    return {
+      ...transaction,
+      total: visibleTotal,
+      discountAmount: visibleDiscount,
+      receivedAmount: this.roundCurrency((transaction.receivedAmount || 0) * totalRatio),
+      changeAmount: this.roundCurrency((transaction.changeAmount || 0) * totalRatio),
+      paymentSplit: transaction.paymentSplit
+        ? {
+          contanti: this.roundCurrency(transaction.paymentSplit.contanti * totalRatio),
+          elettronico: this.roundCurrency(transaction.paymentSplit.elettronico * totalRatio),
+          elettronicoMethod: transaction.paymentSplit.elettronicoMethod,
+        }
+        : null,
+      lines: visibleLines.map((line) => ({ ...line })),
+    };
   }
 
   protected loadPendingCashTransaction(id: string): void {
@@ -16865,10 +17885,8 @@ ${paymentXml}
     this.cashReceiptSearch.set('');
     this.cashDocumentListFilter.set('scontrini');
     this.cashReceiptsModalOpen.set(true);
-
-    const firstReceipt = this.cashReceiptTransactions()[0] ?? null;
-    this.selectedCashReceiptId.set(firstReceipt?.id ?? null);
-    this.syncCashReceiptEditForm(firstReceipt);
+    this.selectedCashReceiptId.set(null);
+    this.syncCashReceiptEditForm(null);
   }
 
   protected closeCashReceiptsModal(): void {
@@ -16921,9 +17939,8 @@ ${paymentXml}
 
   protected setCashDocumentListFilter(filter: 'scontrini' | 'fatture'): void {
     this.cashDocumentListFilter.set(filter);
-    const firstDocument = this.cashReceiptTransactions()[0] ?? null;
-    this.selectedCashReceiptId.set(firstDocument?.id ?? null);
-    this.syncCashReceiptEditForm(firstDocument);
+    this.selectedCashReceiptId.set(null);
+    this.syncCashReceiptEditForm(null);
   }
 
   protected selectCashReceipt(id: string): void {
@@ -16940,9 +17957,8 @@ ${paymentXml}
     const hasSelectedInList = this.cashReceiptTransactions().some((item) => item.id === selectedId);
 
     if (!hasSelectedInList) {
-      const firstReceipt = this.cashReceiptTransactions()[0] ?? null;
-      this.selectedCashReceiptId.set(firstReceipt?.id ?? null);
-      this.syncCashReceiptEditForm(firstReceipt);
+      this.selectedCashReceiptId.set(null);
+      this.syncCashReceiptEditForm(null);
     }
   }
 
@@ -16951,6 +17967,11 @@ ${paymentXml}
 
     if (!receipt || this.cashReceiptEditForm.invalid) {
       this.cashReceiptEditForm.markAllAsTouched();
+      return;
+    }
+
+    if (receipt.status === 'annullato') {
+      this.pushToast('Uno scontrino annullato non può essere modificato.', 'error');
       return;
     }
 
@@ -16966,6 +17987,52 @@ ${paymentXml}
     this.data.updateCashTransaction(updatedReceipt);
     this.selectedCashTransactionId.set(updatedReceipt.id);
     this.pushToast('Documento aggiornato correttamente.', 'success');
+  }
+
+  protected annulCashTransaction(transactionId: string, source: 'archivio' | 'report' = 'archivio'): void {
+    const transaction = this.allCashTransactions().find((item) => item.id === transactionId) ?? null;
+    if (!transaction) {
+      return;
+    }
+
+    if (transaction.documentType !== 'scontrino') {
+      this.pushToast('L annullo rapido è disponibile solo per gli scontrini.', 'error');
+      return;
+    }
+
+    if (transaction.status === 'annullato') {
+      this.pushToast('Questo scontrino è già annullato.', 'error');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Confermi l annullamento dello scontrino ${transaction.receiptNumber}?\n\nTotale € ${transaction.total.toLocaleString('it-IT')} · ${transaction.customerName}\n\nLo scontrino resterà in archivio ma verrà escluso dagli incassi e dalle reportistiche.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const annulled = this.data.annulCashTransaction(transactionId);
+    if (!annulled) {
+      this.pushToast('Impossibile annullare lo scontrino selezionato.', 'error');
+      return;
+    }
+
+    if (this.selectedCashReceiptId() === transactionId) {
+      this.syncCashReceiptEditForm(annulled);
+    }
+
+    if (this.cashPendingTransactionId() === transactionId) {
+      this.cashPendingTransactionId.set(null);
+    }
+
+    this.selectedCashTransactionId.set(annulled.id);
+    this.pushToast(
+      source === 'report'
+        ? 'Scontrino annullato · report e riepiloghi aggiornati.'
+        : 'Scontrino annullato correttamente.',
+      'success',
+    );
   }
 
   protected downloadSelectedCashInvoiceXml(): void {
@@ -18356,6 +19423,23 @@ ${paymentXml}
       this.pushToast(`Metodo di pagamento impostato su ${payload.paymentMethod}.`, 'success');
     }
 
+    this.data.updateQuote({
+      ...quote,
+      history: [
+        ...(quote.history ?? []),
+        this.createQuoteHistoryEntry(
+          payload.paymentMethod === 'sul_posto' ? 'Pagamento registrato' : 'Pagamento pianificato',
+          payload.operatorName || quote.operatorName || 'Operatore commerciale',
+          payload.paymentMethod === 'sul_posto'
+            ? `Saldo in loco · € ${this.formatCurrency(payload.amount)}`
+            : `Metodo ${payload.paymentMethod} · € ${this.formatCurrency(payload.amount)}`,
+          payload.notes?.trim() || `Rif. ${this.quotePaymentSummary(quote)}`,
+          'Pagamento',
+          payload.paymentMethod === 'sul_posto' ? 'success' : 'warning',
+        ),
+      ],
+    });
+
     // Mark quote as confirmed/done? Just add a note for now.
     // Real CRM might move it to 'chiuso' or 'fatturato'.
     this.closeQuotePaymentModal();
@@ -19682,6 +20766,9 @@ ${paymentXml}
   }
 
   protected cashStatusLabel(status: CashTransactionRecord['status']): string {
+    if (status === 'annullato') {
+      return 'annullato';
+    }
     if (status === 'insoluto') {
       return 'insoluto';
     }
@@ -19766,6 +20853,38 @@ ${paymentXml}
     this.selectedCashProductId.set(null);
   }
 
+  /** Ritorna true solo per operatori reali e attivi in cassa. */
+  private isCashOperatorAssigned(operatorName: string | null | undefined): boolean {
+    const normalized = (operatorName ?? '').trim();
+    return !!normalized && this.cashOperators().includes(normalized);
+  }
+
+  /**
+   * Usa l'operatore passato se valido; utile per i caricamenti automatici
+   * dal tecnico/portale che devono auto-riconoscere chi ha generato la voce.
+   */
+  private resolveCashAutoOperator(operatorName: string | null | undefined): string {
+    return this.isCashOperatorAssigned(operatorName) ? String(operatorName).trim() : '';
+  }
+
+  /** Richiede la selezione dell'operatore prima di comporre il carrello manualmente. */
+  private ensureCashOperatorSelected(): boolean {
+    if (this.cashHasSelectedOperator()) {
+      return true;
+    }
+    this.pushToast('Seleziona prima un operatore di cassa.', 'error');
+    return false;
+  }
+
+  /** Flusso guidato cassa: prima cliente, poi operatore, poi carrello. */
+  private ensureCashCartPrerequisites(): boolean {
+    if (!this.cashHasSelectedClientStep()) {
+      this.pushToast('Seleziona prima un cliente o imposta "Cliente di passaggio".', 'error');
+      return false;
+    }
+    return this.ensureCashOperatorSelected();
+  }
+
   private stashCurrentCashSession(): boolean {
     if (!this.currentCashSessionHasContent() || this.cashIsSettlingPending()) {
       return false;
@@ -19805,6 +20924,7 @@ ${paymentXml}
     this.selectedCashClientId.set(null);
     this.cashCustomerMode.set('walk-in');
     this.cashSalesMode.set('tutti');
+    this.cashCurrentOperator.set('');
   }
 
   private resetClientForm(): void {
@@ -19836,7 +20956,7 @@ ${paymentXml}
   /** Operatore da proporre di default nel preventivo: quello attivo se presente in elenco. */
   private defaultQuoteOperator(): string {
     const current = this.cashCurrentOperator();
-    const operators = this.cashOperators();
+    const operators = this.hrOperators();
     if (current && operators.includes(current)) {
       return current;
     }
@@ -20616,6 +21736,178 @@ ${paymentXml}
       return count > 0 ? `${count} rate ${cadence}${alert}` : `Rate negozio${alert}`;
     }
     return 'Saldo in un’unica soluzione';
+  }
+
+  protected quoteFulfillmentSummary(
+    quote: Pick<QuoteRecord, 'fulfillmentType' | 'fulfillmentAddress'>,
+  ): string {
+    return quote.fulfillmentType === 'esterno'
+      ? `Servizio esterno${quote.fulfillmentAddress ? ` · ${quote.fulfillmentAddress}` : ''}`
+      : 'In negozio / showroom';
+  }
+
+  protected quoteRegisterDateLabel(value: string | null | undefined): string {
+    if (!value) {
+      return 'Data non disponibile';
+    }
+
+    return value.includes('T')
+      ? this.formatIsoDateTimeLabel(value)
+      : this.formatIsoDateLabel(value);
+  }
+
+  protected quoteTransactionOperatorsLabel(transaction: CashTransactionRecord): string {
+    const operators = transaction.lines
+      .map((line) => line.operatorName.trim())
+      .filter((name) => name.length > 0);
+
+    return Array.from(new Set(operators)).join(', ') || 'Cassa';
+  }
+
+  protected quoteTransactionPaymentLabel(transaction: CashTransactionRecord): string {
+    if (transaction.paymentMethod === 'misto') {
+      const electronic = transaction.paymentSplit?.elettronicoMethod || transaction.electronicMethod || 'carta';
+      return `Misto · ${electronic}`;
+    }
+
+    if (transaction.paymentMethod === 'pos') {
+      const electronic = transaction.electronicMethod || 'carta';
+      return `POS · ${electronic}`;
+    }
+
+    return transaction.paymentMethod;
+  }
+
+  private createQuoteHistoryEntry(
+    title: string,
+    actor: string,
+    how: string,
+    why: string,
+    badge: string,
+    tone: QuoteHistoryEntry['tone'],
+    createdAt: string = new Date().toISOString(),
+  ): QuoteHistoryEntry {
+    return {
+      id: `quote-history-${crypto.randomUUID()}`,
+      title,
+      actor: actor.trim() || 'Operatore non specificato',
+      how,
+      why,
+      badge,
+      tone,
+      createdAt,
+    };
+  }
+
+  private quotePaymentHistorySignature(
+    quote: Pick<
+      QuoteRecord,
+      | 'paymentPlan'
+      | 'financingProvider'
+      | 'installmentCount'
+      | 'installmentCadence'
+      | 'paymentAlertDays'
+      | 'paymentNotes'
+    >,
+  ): string {
+    return JSON.stringify({
+      paymentPlan: quote.paymentPlan ?? 'unica',
+      financingProvider: quote.financingProvider ?? '',
+      installmentCount: quote.installmentCount ?? 0,
+      installmentCadence: quote.installmentCadence ?? '',
+      paymentAlertDays: quote.paymentAlertDays ?? 0,
+      paymentNotes: quote.paymentNotes ?? '',
+    });
+  }
+
+  private quoteLinesSignature(lines: QuoteLineRecord[] | undefined): string {
+    return JSON.stringify(
+      (lines ?? []).map((line) => ({
+        kind: line.kind,
+        description: line.description,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        vatRate: line.vatRate,
+        discountPercent: line.discountPercent ?? 0,
+      })),
+    );
+  }
+
+  private buildQuoteSaveHistory(
+    existing: QuoteRecord | null,
+    draft: Omit<QuoteRecord, 'id'>,
+  ): QuoteHistoryEntry[] {
+    const actor = draft.operatorName?.trim() || existing?.operatorName?.trim() || 'Operatore non specificato';
+    const history = [...(existing?.history ?? [])];
+
+    if (!existing) {
+      history.push(
+        this.createQuoteHistoryEntry(
+          'Preventivo creato',
+          actor,
+          `${this.quoteFulfillmentSummary(draft)} · ${this.quotePaymentPlanLabel(draft.paymentPlan || 'unica')}`,
+          draft.projectType || `Valore iniziale € ${this.formatCurrency(draft.value)}`,
+          'Preventivo',
+          'info',
+          draft.issueDate ? `${draft.issueDate}T09:00:00` : new Date().toISOString(),
+        ),
+      );
+      return history;
+    }
+
+    const changes: string[] = [];
+    const paymentChanged = this.quotePaymentHistorySignature(existing) !== this.quotePaymentHistorySignature(draft);
+
+    if (existing.customerName !== draft.customerName) {
+      changes.push(`Cliente ${draft.customerName}`);
+    }
+    if (existing.projectType !== draft.projectType) {
+      changes.push(`Oggetto ${draft.projectType}`);
+    }
+    if ((existing.operatorName ?? '') !== (draft.operatorName ?? '')) {
+      changes.push(`Operatore ${draft.operatorName || 'non assegnato'}`);
+    }
+    if (existing.dueDate !== draft.dueDate) {
+      changes.push(`Scadenza ${this.quoteRegisterDateLabel(draft.dueDate)}`);
+    }
+    if (existing.value !== draft.value) {
+      changes.push(`Valore € ${this.formatCurrency(draft.value)}`);
+    }
+    if (this.quoteFulfillmentSummary(existing) !== this.quoteFulfillmentSummary(draft)) {
+      changes.push(this.quoteFulfillmentSummary(draft));
+    }
+    if (paymentChanged) {
+      changes.push(this.quotePaymentSummary(draft as QuoteRecord));
+    }
+    if (this.quoteLinesSignature(existing.lines) !== this.quoteLinesSignature(draft.lines)) {
+      changes.push(`${draft.lines?.length ?? 0} righe preventivo`);
+    }
+    if ((existing.notes ?? '').trim() !== (draft.notes ?? '').trim()) {
+      changes.push('Note aggiornate');
+    }
+
+    if (!changes.length) {
+      return history;
+    }
+
+    const title = paymentChanged && changes.length === 1
+      ? 'Accettazione pagamento aggiornata'
+      : 'Preventivo aggiornato';
+    const badge = paymentChanged && changes.length === 1 ? 'Pagamento' : 'Preventivo';
+    const tone: QuoteHistoryEntry['tone'] = paymentChanged && changes.length === 1 ? 'warning' : 'info';
+
+    history.push(
+      this.createQuoteHistoryEntry(
+        title,
+        actor,
+        changes.slice(0, 3).join(' · '),
+        draft.notes?.trim() || draft.paymentNotes?.trim() || 'Modifica salvata sul preventivo',
+        badge,
+        tone,
+      ),
+    );
+
+    return history;
   }
 
   private syncQuoteClientToRegistry(quote: Omit<QuoteRecord, 'id'>): void {

@@ -986,6 +986,51 @@
   width: 100%;
 }
 
+.ui-modal-body>.form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 22rem));
+  justify-content: start;
+}
+
+.ui-modal-body>.form-grid>.wide-field {
+  grid-column: 1 / -1;
+  width: min(100%, 32rem);
+  justify-self: start;
+}
+
+.op-form-pro .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 22rem));
+  justify-content: start;
+}
+
+.op-form-pro .form-grid>label,
+.op-form-pro .form-grid>div {
+  width: min(100%, 22rem);
+}
+
+.op-form-pro .form-grid>.wide-field,
+.op-form-pro>.wide-field,
+.op-form-pro>.form-actions.wide-field {
+  width: min(100%, 42rem);
+  justify-self: start;
+}
+
+.op-form-pro .form-grid>.wide-field textarea,
+.op-form-pro>.wide-field textarea {
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+
+  .ui-modal-body>.form-grid>.wide-field,
+  .op-form-pro .form-grid>label,
+  .op-form-pro .form-grid>div,
+  .op-form-pro .form-grid>.wide-field,
+  .op-form-pro>.wide-field,
+  .op-form-pro>.form-actions.wide-field {
+    width: 100%;
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════════
    🟩 NUOVA SPESA (popup LARGHISSIMO 75vw · zero scroll */
 /* ══════════════════════════════════════════════════════════════════════
@@ -5325,13 +5370,22 @@
 }
 
 .btn-danger-sm {
-  border-color: rgba(220, 38, 38, 0.3);
+  // ✅ Bordo e alone tinti di rosso: l'azione distruttiva si riconosce a colpo d'occhio
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border-strong));
   color: var(--danger);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 1px 2px color-mix(in srgb, var(--danger) 18%, transparent),
+    0 6px 14px -8px color-mix(in srgb, var(--danger) 35%, transparent);
 
   &:hover {
     background: var(--danger-bg);
     border-color: var(--danger);
     color: var(--danger);
+    box-shadow:
+      var(--shadow-inset-top),
+      0 2px 4px color-mix(in srgb, var(--danger) 28%, transparent),
+      0 12px 24px -12px color-mix(in srgb, var(--danger) 50%, transparent);
   }
 }
 
@@ -5341,7 +5395,8 @@
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
-  border: 1px solid var(--panel-border);
+  // ✅ Contorno tinto e luce interna: anche i micro-pulsanti seguono il nuovo stile
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-strong));
   border-radius: var(--radius-sm);
   background: var(--card-subtle-bg);
   color: var(--text-primary);
@@ -5349,10 +5404,17 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.12s;
+  box-shadow:
+    var(--shadow-inset-top),
+    0 1px 2px color-mix(in srgb, var(--border-strong) 40%, transparent);
 
   &:hover {
     background: var(--accent-soft);
     border-color: var(--accent);
+    color: var(--accent);
+    box-shadow:
+      var(--shadow-inset-top),
+      0 3px 8px -4px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 }
 
@@ -6060,13 +6122,19 @@
   border: 1px solid var(--panel-border);
   border-radius: 1rem;
   overflow: hidden;
-  background: var(--panel-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 10%, transparent), transparent 22%),
+    var(--panel-bg);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 18px 34px -28px rgba(15, 23, 42, 0.26);
 }
 
 .agenda-month-header-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  background: var(--card-subtle-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--surface-2)), color-mix(in srgb, var(--accent) 3%, var(--card-subtle-bg)));
   border-bottom: 1px solid var(--panel-border);
 
   span {
@@ -6074,9 +6142,10 @@
     font-size: 0.8rem;
     font-weight: 800;
     text-transform: uppercase;
-    color: var(--text-muted);
+    color: color-mix(in srgb, var(--accent) 42%, var(--text-secondary));
     text-align: center;
     border-right: 1px solid var(--panel-border);
+    letter-spacing: 0.04em;
 
     &:last-child {
       border-right: none;
@@ -6098,15 +6167,45 @@
   border-right: 1px solid var(--panel-border);
   border-bottom: 1px solid var(--panel-border);
   padding: 0.65rem;
-  background: rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 14%, transparent), transparent 34%),
+    color-mix(in srgb, var(--accent) 2.5%, var(--surface-1));
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 
   &:nth-child(7n) {
     border-right: none;
   }
 
+  &.has-events {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 16%, transparent), transparent 34%),
+      color-mix(in srgb, var(--accent) 4.5%, var(--surface-1));
+  }
+
+  &.is-weekend {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--warning) 7%, #ffffff 8%), transparent 38%),
+      color-mix(in srgb, var(--warning) 4%, var(--surface-1));
+  }
+
+  &.is-today {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, #ffffff 12%), transparent 38%),
+      color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+
   &.out-of-month {
-    background: rgba(var(--surface-light-rgb), 0.08);
-    opacity: 0.48;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 10%, transparent), transparent 36%),
+      color-mix(in srgb, var(--surface-3) 55%, transparent);
+    opacity: 0.62;
+  }
+
+  &:hover {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 18%, transparent), transparent 34%),
+      color-mix(in srgb, var(--accent) 6%, var(--surface-1));
   }
 }
 
@@ -6121,6 +6220,10 @@
   font-size: 1rem;
   font-weight: 800;
   color: var(--text-primary);
+
+  .agenda-month-cell.is-today & {
+    color: var(--accent);
+  }
 }
 
 .agenda-month-events {
@@ -6128,6 +6231,7 @@
   flex-direction: column;
   gap: 0.25rem;
   overflow-y: auto;
+  padding-right: 0.1rem;
 }
 
 .agenda-type-legend {
@@ -6199,11 +6303,15 @@
   cursor: pointer;
   border: 1px solid rgba(148, 163, 184, 0.14);
   border-left: 3px solid var(--accent);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 8px 18px -16px rgba(15, 23, 42, 0.24);
 
   &:hover {
     background:
       linear-gradient(180deg, var(--card-grad-strong-a, rgba(255, 255, 255, 0.72)), var(--card-grad-strong-b, rgba(255, 255, 255, 0.12))),
       var(--card-subtle-bg);
+    transform: translateY(-1px);
   }
 
   &.is-planned {
@@ -6232,6 +6340,45 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+:host-context([data-theme='dark']) {
+  .agenda-month-wrapper {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 3%, transparent), transparent 22%),
+      var(--panel-bg);
+  }
+
+  .agenda-month-cell {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 4%, transparent), transparent 34%),
+      color-mix(in srgb, var(--accent) 4%, var(--surface-1));
+
+    &.has-events {
+      background:
+        linear-gradient(180deg, color-mix(in srgb, #ffffff 5%, transparent), transparent 34%),
+        color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+    }
+
+    &.is-weekend {
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--warning) 10%, transparent), transparent 36%),
+        color-mix(in srgb, var(--warning) 6%, var(--surface-1));
+    }
+
+    &.is-today {
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 36%),
+        color-mix(in srgb, var(--accent) 11%, var(--surface-1));
+    }
+
+    &.out-of-month {
+      background:
+        linear-gradient(180deg, color-mix(in srgb, #ffffff 2%, transparent), transparent 36%),
+        color-mix(in srgb, var(--surface-3) 70%, transparent);
+      opacity: 0.74;
+    }
   }
 }
 
@@ -6472,43 +6619,69 @@
 // ─── Badge ───
 .badge {
   display: inline-flex;
-  padding: 0.22rem 0.55rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.24rem 0.58rem;
   border-radius: var(--radius-full);
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: capitalize;
-  background: var(--card-subtle-bg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    color-mix(in srgb, var(--accent) 6%, var(--card-subtle-bg));
   color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-subtle));
+  box-shadow:
+    var(--shadow-inset-top),
+    0 4px 10px -8px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .badge-success {
-  background: var(--success-bg, rgba(34, 197, 94, 0.12));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--success-bg, rgba(34, 197, 94, 0.12));
   color: var(--success);
+  border-color: var(--success-border);
 }
 
 .badge-warning {
-  background: var(--warning-bg, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--warning-bg, transparent);
   color: var(--warning);
+  border-color: var(--warning-border);
 }
 
 .badge-danger {
-  background: var(--danger-bg, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--danger-bg, transparent);
   color: var(--danger);
+  border-color: var(--danger-border);
 }
 
 .badge-info {
-  background: var(--info-bg, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--info-bg, transparent);
   color: var(--info);
+  border-color: var(--info-border);
 }
 
 .badge-purple {
-  background: rgba(124, 58, 237, 0.12);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    var(--purple-bg);
   color: var(--purple);
+  border-color: var(--purple-border);
 }
 
 .badge-neutral {
-  background: var(--accent-soft);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 22%, transparent), transparent 76%),
+    color-mix(in srgb, var(--accent) 8%, var(--card-subtle-bg));
   color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-subtle));
 }
 
 // ─── Detail Fields ───
@@ -6710,11 +6883,11 @@
 // ─── Chip (operator/category toggle) ───
 .chip {
   padding: 0.42rem 0.85rem;
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-subtle));
   border-radius: var(--radius-full);
   background:
-    linear-gradient(180deg, transparent, transparent),
-    var(--card-subtle-bg);
+    linear-gradient(180deg, color-mix(in srgb, #ffffff 18%, transparent), transparent 78%),
+    color-mix(in srgb, var(--accent) 4%, var(--card-subtle-bg));
   color: var(--text-secondary);
   font-size: 0.78rem;
   font-weight: 600;
@@ -6726,23 +6899,32 @@
     box-shadow 0.18s ease,
     color 0.18s ease;
   white-space: nowrap;
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.03);
+  box-shadow:
+    var(--shadow-inset-top),
+    0 4px 10px -8px color-mix(in srgb, var(--accent) 26%, transparent);
 
   &.active {
     border-color: var(--accent);
     background:
-      linear-gradient(180deg, transparent, transparent),
-      var(--accent-soft);
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 16%, transparent), transparent 76%),
+      color-mix(in srgb, var(--accent) 12%, var(--surface-2));
     color: var(--accent);
     font-weight: 700;
-    box-shadow: 0 0 0 1px transparent, 0 8px 18px transparent;
+    box-shadow:
+      var(--shadow-inset-top),
+      0 8px 18px -12px color-mix(in srgb, var(--accent) 42%, transparent);
   }
 
   &:hover:not(.active) {
     transform: translateY(-1px);
-    background: var(--panel-hover);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, #ffffff 18%, transparent), transparent 78%),
+      color-mix(in srgb, var(--accent) 8%, var(--panel-hover));
     border-color: var(--accent);
-    box-shadow: 0 8px 16px rgba(15, 23, 42, 0.05);
+    color: var(--accent);
+    box-shadow:
+      var(--shadow-inset-top),
+      0 8px 16px -10px color-mix(in srgb, var(--accent) 34%, transparent);
   }
 }
 
@@ -8541,20 +8723,22 @@
 }
 
 .cash-history-modal {
-  width: min(1120px, calc(100vw - 2rem));
-  max-height: calc(100vh - 2.5rem);
+  width: min(1140px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
 }
 
 .cash-history-body {
   display: grid;
   min-height: 0;
+  padding: 1rem 1.05rem 1.1rem;
 }
 
 .cash-history-grid {
   display: grid;
   grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
-  gap: 1rem;
+  gap: 1.05rem;
   min-height: 0;
+  align-items: start;
 }
 
 .cash-history-side,
@@ -8568,6 +8752,10 @@
 .cash-history-side {
   padding-right: 1rem;
   border-right: 1px solid var(--panel-border);
+}
+
+.cash-history-main {
+  padding-left: 0.15rem;
 }
 
 .cash-history-columns {
@@ -8923,27 +9111,50 @@
 
 .cash-receipts-body {
   display: grid;
-  grid-template-columns: minmax(18rem, 0.85fr) minmax(0, 1.25fr);
-  gap: 0.75rem;
-  padding: 0.82rem 0.9rem 0.9rem;
+  grid-template-columns: minmax(15.75rem, 17.5rem) minmax(0, 1fr);
+  gap: 0.85rem;
+  padding: 0.9rem 0.95rem 0.95rem;
 }
 
 .cash-receipts-list-panel,
 .cash-receipt-detail-panel {
   display: grid;
-  gap: 0.65rem;
+  gap: 0.8rem;
+  min-width: 0;
 }
 
 .cash-document-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+  align-items: center;
+}
+
+.cash-document-tabs .chip {
+  flex: 0 0 auto;
+  min-height: 1.95rem;
+  padding: 0.35rem 0.68rem;
+  font-size: 0.74rem;
+}
+
+.cash-receipt-search {
+  gap: 0.22rem;
+
+  span {
+    font-size: 0.7rem;
+  }
+
+  input {
+    min-height: 2.55rem;
+    padding: 0.55rem 0.72rem;
+    font-size: 0.82rem;
+  }
 }
 
 .cash-receipts-list {
   display: grid;
-  gap: 0.4rem;
-  max-height: 28rem;
+  gap: 0.32rem;
+  max-height: 24.5rem;
   overflow: auto;
 }
 
@@ -8951,10 +9162,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.5rem;
   width: 100%;
-  padding: 0.62rem 0.7rem;
-  border-radius: 0.82rem;
+  padding: 0.48rem 0.58rem;
+  border-radius: 0.7rem;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: var(--card-subtle-bg);
   text-align: left;
@@ -8970,39 +9181,72 @@
     border-color: transparent;
     background: linear-gradient(135deg, var(--accent-surface), transparent);
   }
+
+  &.is-annulled {
+    border-color: var(--danger-border);
+    background: color-mix(in srgb, var(--danger) 8%, var(--card-subtle-bg));
+  }
 }
 
 .cash-receipt-row-main,
 .cash-receipt-row-side {
   display: grid;
-  gap: 0.15rem;
+  gap: 0.08rem;
 }
 
 .cash-receipt-row-main strong,
 .cash-receipt-row-side strong {
   color: var(--text-primary);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 .cash-receipt-row-main span,
 .cash-receipt-row-side span {
   color: var(--text-muted);
-  font-size: 0.76rem;
+  font-size: 0.7rem;
+  line-height: 1.25;
 }
 
 .cash-receipt-row-side {
   text-align: right;
+  flex-shrink: 0;
+}
+
+.cash-receipt-empty {
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 0.45rem;
+  min-height: 100%;
+  padding: 1.05rem 1.1rem;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 0.95rem;
+  background: linear-gradient(180deg, var(--surface-2), transparent);
+
+  h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1rem;
+  }
+
+  p {
+    margin: 0;
+    max-width: 34rem;
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
 }
 
 .cash-receipt-summary {
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 0.55rem;
-  padding: 0.72rem 0.8rem;
+  gap: 0.7rem;
+  padding: 0.82rem 0.92rem;
   border-radius: 0.85rem;
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.82), transparent);
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(135deg, var(--accent-surface), transparent 70%), var(--surface-2);
 
   strong {
     display: block;
@@ -9014,7 +9258,18 @@
 
 .cash-receipt-edit-grid {
   display: grid;
-  gap: 0.65rem;
+  gap: 0.8rem;
+}
+
+.cash-transaction-status-note {
+  padding: 0.78rem 0.9rem;
+  border-radius: 0.82rem;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .cash-receipt-lines {
@@ -10105,6 +10360,21 @@
   width: min(48rem, 100%);
 }
 
+.warehouse-adjustment-modal {
+  width: min(58rem, 100%);
+}
+
+.warehouse-adjustment-modal-note {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.warehouse-adjustment-modal-form {
+  padding-top: 0.9rem;
+}
+
 .quote-lines-table th:nth-child(1),
 .quote-lines-table td:nth-child(1) {
   width: 10%;
@@ -10295,35 +10565,26 @@
 
 .quote-doc-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 15.5rem;
-  gap: 0.9rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
   align-items: start;
 }
 
 .quote-doc-main {
   display: grid;
   gap: 1.25rem;
-  grid-column: 1;
-  grid-row: 1;
 }
 
-.quote-doc-side {
+.quote-doc-footer {
   display: grid;
   gap: 0.85rem;
-  position: sticky;
-  top: 1rem;
-  grid-column: 2;
-  grid-row: 1;
-}
-
-/* Barra azioni del preventivo: attiva solo su tablet/mobile (vedi media query) */
-.quote-mobile-actions {
-  display: none;
+  grid-template-columns: minmax(0, 1.1fr) minmax(16rem, 22rem) minmax(16rem, 18rem);
+  align-items: start;
 }
 
 .quote-block-full {
-  grid-column: 1 / -1;
-  grid-row: 2;
+  grid-column: auto;
+  grid-row: auto;
 }
 
 .quote-block,
@@ -10433,6 +10694,58 @@
 
 .quote-grid.compact {
   align-items: end;
+}
+
+.quote-payment-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(16rem, 20rem);
+  gap: 0.95rem;
+  align-items: start;
+}
+
+.quote-payment-main {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.quote-payment-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.quote-payment-notes {
+  width: min(100%, 42rem);
+}
+
+.quote-payment-summary {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--panel-border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-surface) 55%, transparent), transparent 75%),
+    var(--card-subtle-bg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.quote-payment-summary-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.quote-payment-summary strong {
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+.quote-payment-summary p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
 }
 
 /* Blocco dati fiscali del preventivo: collassabile per ridurre la densità del form */
@@ -10603,15 +10916,49 @@
     var(--card-subtle-bg);
 }
 
-.quote-actions-vertical {
-  display: grid;
-  gap: 0.6rem;
+.quote-summary-card-actions {
+  align-content: center;
 }
 
-.quote-actions-vertical .btn-primary,
-.quote-actions-vertical .btn-ghost {
+.quote-actions-inline {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.quote-actions-inline .btn-primary,
+.quote-actions-inline .btn-ghost {
+  flex: 1 1 0;
   min-height: 3rem;
   border-radius: 1rem;
+}
+
+.quote-register-list {
+  gap: 0.7rem;
+}
+
+.quote-register-row {
+  align-items: flex-start;
+}
+
+.quote-register-info {
+  gap: 0.28rem;
+}
+
+.quote-register-info small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.quote-register-info small strong {
+  color: var(--text-secondary);
+}
+
+.quote-doc-footer .quote-summary-card:last-child {
+  align-self: stretch;
 }
 
 .form-actions .btn-sm {
@@ -10674,36 +11021,21 @@
 
   .quote-doc-top,
   .quote-doc-layout,
+  .quote-doc-footer,
   .quote-grid.two,
   .quote-grid.three {
     grid-template-columns: 1fr;
   }
 
   .quote-doc-main,
-  .quote-doc-side,
+  .quote-doc-footer,
   .quote-block-full {
     grid-column: 1;
     grid-row: auto;
   }
 
-  .quote-doc-side {
-    position: static;
-  }
-
-  /* Su tablet/mobile i pulsanti del preventivo restano fissi in fondo */
-  .quote-mobile-actions {
-    display: flex;
-    gap: 0.6rem;
-    position: sticky;
-    bottom: 0;
-    z-index: 5;
-    padding: 0.75rem 0 0.25rem;
-    background: var(--panel-bg, var(--card-bg, transparent));
-    border-top: 1px solid var(--panel-border);
-  }
-
-  .quote-mobile-actions .btn-primary {
-    flex: 1;
+  .quote-payment-layout {
+    grid-template-columns: 1fr;
   }
 
   .cash-client-modal-grid,
@@ -10716,6 +11048,7 @@
 }
 
 @media (max-width: 768px) {
+
   .pos-topbar-grid,
   .pos-topbar-kpis-pos,
   .pos-cart-line-controls,
@@ -10851,6 +11184,10 @@
 
   .quote-lines-table {
     min-width: 36rem;
+  }
+
+  .quote-actions-inline {
+    flex-direction: column;
   }
 
 
@@ -11597,7 +11934,7 @@
   gap: 0.22rem;
 }
 
-.pos-search-block > span {
+.pos-search-block>span {
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.03em;
@@ -11803,7 +12140,7 @@
   line-height: 1.12;
 }
 
-.pos-product > span:not(.pos-product-badge):not(.pos-product-meta) {
+.pos-product>span:not(.pos-product-badge):not(.pos-product-meta) {
   font-size: 0.86rem;
   font-weight: 900;
   color: #0f9f6d;
@@ -12349,13 +12686,13 @@
 }
 
 .cash-report-modal {
-  width: min(76rem, 100%);
+  width: min(82rem, 100%);
 }
 
 .cash-report-modal-body {
   display: grid;
-  gap: 0.75rem;
-  padding: 0.85rem 0.92rem 0.95rem;
+  gap: 1rem;
+  padding: 1rem 1.05rem 1.05rem;
 }
 
 .cash-report-detail-grid {
@@ -12393,6 +12730,11 @@
     background: var(--accent-surface);
   }
 
+  &.is-annulled {
+    border-color: var(--danger-border);
+    background: color-mix(in srgb, var(--danger) 8%, var(--card-bg));
+  }
+
   div {
     display: grid;
     gap: 0.15rem;
@@ -12407,6 +12749,10 @@
     color: var(--text-primary);
     font-size: 0.82rem;
   }
+}
+
+.cash-report-detail-actions {
+  justify-content: flex-start;
 }
 
 .report-section-title {
@@ -18071,27 +18417,31 @@ h2.op-card-title {
 /* ═══════════════════════════════════════════════════════════════════════ */
 .employee-modal-wide {
   /* Container globale (eredita il tema dalla app) */
-  background: var(--panel-bg) !important;
-  border: 1px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.35) !important;
-  box-shadow: 0 30px 70px rgba(15, 23, 42, 0.45) !important;
+  background: var(--modal-bg) !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: var(--shadow-floating) !important;
   border-radius: 1rem !important;
   color: var(--text-primary) !important;
   width: min(1060px, 96vw) !important;
-  /* ⭐ più larga per evitare le righe sovrapposte */
   max-height: 92vh;
 
+  /* ✅ Layout a FLUSSO NORMALE: header / tabs / corpo sono tre righe della
+     grid della modale. Niente position:absolute né margin-top compensativi. */
+  display: grid !important;
+  grid-template-rows: auto auto minmax(0, 1fr) !important;
+
+  /* ── Modalità CREAZIONE ─────────────────────────────────────────── */
+  /* In creazione NON esistono le tab (nascoste nel template): la modale
+     usa due sole righe e il form parte subito sotto l'header. */
   &.employee-modal-create {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+
     .ui-modal-head {
-      padding-bottom: 1rem !important;
+      padding-bottom: 1.25rem !important;
     }
 
-    .employee-modal-tabs {
-      top: 148px !important;
-      min-height: 70px !important;
-    }
-
-    .ui-modal-body {
-      margin-top: 90px !important;
+    .ui-modal-body.employee-create {
+      margin-top: 0 !important;
     }
   }
 
@@ -18101,17 +18451,13 @@ h2.op-card-title {
 
   /* ── 1. HEADER MODALE + AVATAR ───────────────────────────────────── */
   .ui-modal-head {
-    background:
-      linear-gradient(180deg,
-        rgba(var(--surface-light-rgb, 30, 58, 138), 0.38),
-        rgba(var(--surface-light-rgb, 30, 58, 138), 0.08)),
-      var(--panel-bg);
-    border-bottom: 1px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.35);
-    padding: 1.4rem 1.6rem 1.25rem !important;
+    background: var(--modal-head-bg);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 1.25rem 1.6rem !important;
     border-radius: 1rem 1rem 0 0;
 
     .detail-subtitle {
-      color: var(--accent, #3b82f6);
+      color: var(--accent);
       text-transform: uppercase;
       font-size: 0.72rem;
       letter-spacing: 0.08em;
@@ -18120,8 +18466,8 @@ h2.op-card-title {
 
     .op-card-title {
       color: var(--text-primary);
-      font-size: 1.45rem;
-      margin: 3px 0 0;
+      font-size: 1.35rem;
+      margin: 0.15rem 0 0;
       font-weight: 800;
     }
   }
@@ -18202,55 +18548,42 @@ h2.op-card-title {
     border: 1px solid rgba(148, 163, 184, 0.32);
   }
 
-  /* Per poter usare position absolute sulle tabs dobbiamo dare POSITION al contenitore padre */
-  position: relative !important;
-
-  /* ── 2. BLOCCO TABS 3 SEZIONI (ABSOLUTE subito sotto header) ───── */
-  /* ⚠️ BUG ORDINE DOM: tabs sono DOPO .ui-modal-body nel markup HTML! */
-  /*    Soluzione: absolute per tirarle FUORI dal flusso e posizionarle   */
-  /*    esattamente tra .ui-modal-head e il .ui-modal-body.              */
+  /* ── 2. TABS (in flusso normale, sotto l'header) ────────────────── */
+  /* Le tab sono figlie dirette della grid della modale: nessun         */
+  /* position:absolute, nessun offset da compensare.                    */
   .employee-modal-tabs {
-    position: absolute !important;
-    top: 214px !important;
-    /* ⭐ header (con avatar 60px) finisce ~200px */
-    left: 1.6rem !important;
-    right: 1.6rem !important;
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    align-items: stretch !important;
-    gap: 0.55rem;
-    margin: 0 !important;
-    padding: 10px !important;
-    background: rgba(var(--surface-light-rgb, 30, 58, 138), 0.12);
-    border: 1px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.25);
-    border-radius: 14px;
-    z-index: 15 !important;
-    overflow: visible !important;
-    min-height: 76px !important;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.4rem;
+    margin: 1.1rem 1.6rem 0;
+    padding: 0.4rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.9rem;
   }
 
   .employee-modal-tabs .employee-tab-btn {
     flex: 1 1 0;
-    min-height: 56px !important;
-    /* ⭐ height minima = 56px per non stare 18px! */
-    padding: 0.85rem 1rem !important;
-    border-radius: 10px !important;
-    background: transparent !important;
-    color: var(--text-secondary, #64748b) !important;
-    font-size: 1rem !important;
-    font-weight: 800 !important;
-    border: 1.5px solid transparent !important;
-    cursor: pointer !important;
-    transition: all 140ms ease-out !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     gap: 0.45rem;
+    min-height: 2.7rem;
+    padding: 0.5rem 0.9rem;
+    border: 1.5px solid transparent;
+    border-radius: 0.65rem;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
 
     &:hover:not(:disabled) {
-      background: rgba(var(--surface-light-rgb, 30, 58, 138), 0.2) !important;
-      color: var(--text-primary) !important;
-      border-color: rgba(var(--surface-light-rgb, 30, 58, 138), 0.35) !important;
+      background: var(--surface-3);
+      color: var(--text-primary);
+      border-color: var(--border-strong);
     }
 
     &:disabled {
@@ -18259,224 +18592,118 @@ h2.op-card-title {
     }
 
     &.active {
-      background:
-        linear-gradient(135deg,
-          rgba(var(--surface-light-rgb, 30, 58, 138), 0.82),
-          rgba(var(--surface-light-rgb, 30, 58, 138), 0.58)),
-        var(--accent-strong, #2563eb) !important;
-      color: #ffffff !important;
-      border-color: rgba(var(--surface-light-rgb, 30, 58, 138), 0.55) !important;
-      box-shadow: 0 8px 22px rgba(var(--surface-light-rgb, 30, 58, 138), 0.35) !important;
+      background: var(--action-bg);
+      color: var(--action-text);
+      border-color: var(--action-bg);
+      box-shadow: var(--shadow-card);
     }
   }
 
-  /* ── 3. BODY FORM + INPUT/SELECT (ereditano il tema) ────────────── */
-  /* ⚠️ Siamo GIA' dentro .employee-modal-wide: NON ripetere il selector padre */
-  /* ⚠️ BUG ORDINE DOM: le tabs sono SOTTO .ui-modal-body nel markup! Quindi */
-  /*    dobbiamo spingere il body IN BASSO per lasciare spazio alle tabs!     */
+  /* ── 3. CORPO DELLA MODALE ──────────────────────────────────────── */
   .ui-modal-body {
     display: block !important;
-    padding: 0 1.6rem 1.6rem !important;
+    margin-top: 0 !important;
+    padding: 1.35rem 1.6rem 1.6rem !important;
     color: var(--text-primary) !important;
-    margin-top: 152px !important;
-    /* ⭐ garantisce SEMPRE sotto tabs: tabs.height 96 + gap 32px + sicurezza */
-    position: relative !important;
-    z-index: 1 !important;
   }
 
+  /* ── 4. CAMPI DEI FORM (creazione e modifica): stile unico ──────── */
+  .employee-create,
   .employee-modal-form {
     label {
-      color: var(--text-primary) !important;
-      font-weight: 700;
-      display: block;
-      margin-bottom: 0.15rem;
-
-      span {
-        color: var(--accent, #2563eb) !important;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: 800;
-      }
+      display: grid;
+      gap: 0.35rem;
+      min-width: 0;
     }
 
-    input[type="text"],
-    input[type="number"],
-    input[type="date"],
-    select,
-    textarea {
-      background: var(--panel-bg) !important;
-      border: 1.5px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.32) !important;
-      color: var(--text-primary) !important;
-      border-radius: 10px !important;
-      padding: 0 0.9rem !important;
-      height: 3rem !important;
-      font-size: 1rem !important;
-      font-weight: 600 !important;
-      transition: all 140ms ease-out;
-      width: 100%;
-
-      &:focus {
-        outline: none !important;
-        border-color: var(--accent-strong, #2563eb) !important;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18) !important;
-      }
-
-      &::placeholder {
-        color: var(--text-muted, #94a3b8);
-      }
-    }
-
-    option {
-      background: var(--panel-bg, #ffffff);
-      color: var(--text-primary, #0f172a);
-    }
-  }
-
-  .employee-modal-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.2rem 1.4rem;
-    margin: 0 0 1.35rem;
-
-    @media (max-width: 760px) {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .employee-field-wide {
-    grid-column: 1 / -1;
-  }
-
-  .employee-create-form {
-    display: grid;
-    gap: 1rem;
-  }
-
-  .employee-create-summary {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.7rem;
-  }
-
-  .employee-create-kpi {
-    display: grid;
-    gap: 0.18rem;
-    padding: 0.78rem 0.88rem;
-    border-radius: 0.95rem;
-    border: 1px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.24);
-    background:
-      linear-gradient(180deg,
-        rgba(var(--surface-light-rgb, 30, 58, 138), 0.12),
-        rgba(var(--surface-light-rgb, 30, 58, 138), 0.03)),
-      var(--panel-bg);
-
-    span {
-      font-size: 0.72rem;
+    label>span {
+      font-size: 0.76rem;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: var(--text-soft);
     }
 
-    strong {
-      font-size: 0.96rem;
-      line-height: 1.2;
+    input[type='text'],
+    input[type='number'],
+    input[type='date'],
+    select {
+      width: 100%;
+      height: 2.9rem;
+      padding: 0 0.85rem;
+      border: 1.5px solid var(--input-border);
+      border-radius: 0.7rem;
+      background: var(--input-bg);
       color: var(--text-primary);
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: border-color 0.16s ease, box-shadow 0.16s ease;
+
+      &::placeholder {
+        color: var(--text-soft);
+        font-weight: 500;
+      }
+
+      &:focus {
+        outline: none;
+        border: 2px solid var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-surface);
+      }
+    }
+
+    option {
+      background: var(--modal-bg);
+      color: var(--text-primary);
+    }
+
+    label.has-error>span {
+      color: var(--danger);
+    }
+
+    label.has-error input {
+      border-color: var(--danger);
     }
   }
 
-  .employee-create-layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1.18fr) minmax(18rem, 0.82fr);
-    gap: 0.9rem;
-    align-items: start;
-  }
-
-  .employee-create-panel {
-    display: grid;
-    gap: 0.85rem;
-    padding: 0.95rem;
-    border-radius: 1rem;
-    border: 1px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.22);
-    background:
-      linear-gradient(180deg,
-        rgba(var(--surface-light-rgb, 30, 58, 138), 0.08),
-        rgba(var(--surface-light-rgb, 30, 58, 138), 0.02)),
-      var(--panel-bg);
-  }
-
-  .employee-create-panel-main {
-    box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
-  }
-
-  .employee-create-panel-head {
-    display: grid;
-    gap: 0.14rem;
-
-    strong {
-      font-size: 1rem;
-      line-height: 1.2;
-      color: var(--text-primary);
-    }
-  }
-
+  /* ── 5. GRIGLIE DEI CAMPI ───────────────────────────────────────── */
+  .employee-modal-grid,
   .employee-create-grid {
-    gap: 0.95rem 1rem;
-    margin-bottom: 0;
-  }
-
-  .employee-create-note {
-    padding: 0.85rem 0.95rem;
-  }
-
-  .employee-create-hints {
     display: grid;
-    gap: 0.65rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.15rem 1.4rem;
+    margin: 0 0 1.35rem;
+  }
+
+  .employee-field-wide {
+    grid-column: 1 / -1;
+  }
+
+  /* ── 6. FOOTER DEL FORM DI CREAZIONE ────────────────────────────── */
+  .employee-create-footer {
+    display: grid;
+    gap: 0.35rem;
   }
 
   .employee-create-hint {
-    display: grid;
-    gap: 0.15rem;
-    padding: 0.8rem 0.88rem;
-    border-radius: 0.9rem;
-    border: 1px solid rgba(var(--surface-light-rgb, 30, 58, 138), 0.2);
-    background: rgba(255, 255, 255, 0.6);
-
-    strong {
-      font-size: 0.92rem;
-      color: var(--text-primary);
-    }
-
-    span {
-      font-size: 0.82rem;
-      line-height: 1.4;
-      color: var(--text-secondary);
-    }
+    margin: 0;
+    font-size: 0.86rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
   }
 
-  .employee-create-actions {
-    margin-top: -0.1rem;
+  .employee-create-footer .form-actions {
+    margin-top: 0;
   }
 
-  @media (max-width: 920px) {
-    &.employee-modal-create {
-      .employee-modal-tabs {
-        top: 136px !important;
-      }
+  @media (max-width: 760px) {
 
-      .ui-modal-body {
-        margin-top: 86px !important;
-      }
-    }
-
-    .employee-create-summary,
-    .employee-create-layout {
+    .employee-modal-grid,
+    .employee-create-grid {
       grid-template-columns: 1fr;
     }
   }
 
-  /* ── 4. TAB 2 · TURNI STANDARD · PRESET + RIGHE ─────────────────── */
+  /* ── 7. TAB 2 · TURNI STANDARD · PRESET + RIGHE ─────────────────── */
   .default-shift-presets {
     position: relative !important;
     z-index: 1 !important;
@@ -20496,6 +20723,38 @@ h2.op-card-title {
 .ep-empty-cta {
   display: inline-flex;
   margin-top: 0.6rem;
+}
+
+/* ===== Link del portale dipendenti da inoltrare ===== */
+.ep-portal-link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+
+  .ep-input {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+  }
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.ep-portal-link-copy {
+  flex-shrink: 0;
+}
+
+.ep-portal-link-feedback {
+  margin: 0.5rem 0 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--success-text, #0f766e);
 }
 
 /* ===== Impostazioni Portale Dipendenti: selezione modalità scrittura magazzino ===== */
@@ -23448,8 +23707,8 @@ h2.op-card-title {
     color: var(--text-secondary);
 
     :is(.op-card, .contact-command-main, .tech-command-main, .quote-command-main,
-        .crm-section-hero, .module-hero, .pos-topbar, .pos-topbar-card,
-        .pos-products-panel, .pos-cart-panel, .pos-checkout-panel) {
+      .crm-section-hero, .module-hero, .pos-topbar, .pos-topbar-card,
+      .pos-products-panel, .pos-cart-panel, .pos-checkout-panel) {
       background: var(--surface-2);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
@@ -23464,15 +23723,15 @@ h2.op-card-title {
     }
 
     :is(.contact-command-main, .tech-command-main, .quote-command-main,
-        .services-hero-unified, .warehouse-toolbar-unified, .expenses-hero-unified,
-        .report-command-unified, .crm-section-hero) {
+      .services-hero-unified, .warehouse-toolbar-unified, .expenses-hero-unified,
+      .report-command-unified, .crm-section-hero) {
       padding: 1rem 1.15rem;
       gap: 0.8rem;
       border-top: 3px solid var(--accent);
     }
 
     :is(.contact-command-copy, .tech-command-copy, .quote-command-copy,
-        .section-toolbar-text) .op-card-title,
+      .section-toolbar-text) .op-card-title,
     .crm-section-title {
       color: var(--text-primary) !important;
       font-size: clamp(1.2rem, 1.45vw, 1.6rem) !important;
@@ -23492,8 +23751,8 @@ h2.op-card-title {
     }
 
     :is(.contact-segment-card, .crm-section-kpi, .appointment-kpi-card,
-        .services-kpi-card, .expenses-kpi-card, .report-dashboard-kpi,
-        .ddt-kpi-btn, .pos-stage-card, .pos-topbar-kpi) {
+      .services-kpi-card, .expenses-kpi-card, .report-dashboard-kpi,
+      .ddt-kpi-btn, .pos-stage-card, .pos-topbar-kpi) {
       background: var(--surface-3);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
@@ -23521,7 +23780,7 @@ h2.op-card-title {
     }
 
     :is(.btn-ghost, .btn-sm, .chip-btn, .pos-toggle-btn, .pos-filter-btn,
-        .pos-search-clear, .section-view-toggle) {
+      .pos-search-clear, .section-view-toggle) {
       border-radius: var(--radius-md);
       background: var(--surface-2);
       border: 1px solid var(--border-strong);
@@ -23635,7 +23894,7 @@ h2.op-card-title {
       box-shadow: var(--shadow-floating);
     }
 
-    .ui-modal > .ui-modal-head {
+    .ui-modal>.ui-modal-head {
       padding: 1rem 1.25rem;
       background: var(--surface-2);
       border-bottom: 1px solid var(--border-subtle);
@@ -23656,7 +23915,7 @@ h2.op-card-title {
     }
 
     :is(.form-section, .form-block, .warehouse-form-card, .service-form-card,
-        .employee-form-card, .cash-client-form-card) {
+      .employee-form-card, .cash-client-form-card) {
       background: var(--surface-2);
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-lg);
@@ -23669,6 +23928,7 @@ h2.op-card-title {
     }
 
     :is(.op-form, .form-grid, .ui-modal-body) {
+
       input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']):not([type='hidden']),
       select,
       textarea {
@@ -23692,7 +23952,7 @@ h2.op-card-title {
     }
 
     :is(.warehouse-modal-footer, .service-modal-footer, .appointment-modal-footer,
-        .ticket-modal-footer, .cash-client-modal-actions) {
+      .ticket-modal-footer, .cash-client-modal-actions) {
       position: sticky;
       bottom: 0;
       background: var(--surface-2);
@@ -23723,8 +23983,7 @@ h2.op-card-title {
     .ep-container {
       width: min(680px, 100%);
       gap: 1rem;
-      padding: max(0.65rem, env(safe-area-inset-top)) 1rem
-        calc(var(--portal-nav-h) + env(safe-area-inset-bottom) + 1.5rem);
+      padding: max(0.65rem, env(safe-area-inset-top)) 1rem calc(var(--portal-nav-h) + env(safe-area-inset-bottom) + 1.5rem);
     }
 
     .ep-svg {
@@ -23887,7 +24146,7 @@ h2.op-card-title {
     }
 
     :is(.ep-login-card, .ep-detail-card, .ep-editor-card, .ep-list-item, .ep-field-block,
-        .ep-ddt-line, .ep-comm-body, .ep-comm-body-links) {
+      .ep-ddt-line, .ep-comm-body, .ep-comm-body-links) {
       background: var(--surface-2);
       color: var(--text-secondary);
       border: 1px solid var(--border-subtle);
@@ -23901,13 +24160,13 @@ h2.op-card-title {
     }
 
     :is(.ep-detail-head h3, .ep-tab-head h2, .ep-list-name, .ep-agenda-customer,
-        .ep-agenda-time, .ep-agenda-type, .ep-detail-grid dd, .ep-login-field,
-        .ep-nav-user-name, .ep-nav-brand strong, .ep-field-label) {
+      .ep-agenda-time, .ep-agenda-type, .ep-detail-grid dd, .ep-login-field,
+      .ep-nav-user-name, .ep-nav-brand strong, .ep-field-label) {
       color: var(--text-primary);
     }
 
     :is(.ep-list-meta, .ep-comm-preview, .ep-agenda-addr, .ep-nav-user-role,
-        .ep-detail-grid dt, .ep-form-row label > span, .ep-login-foot) {
+      .ep-detail-grid dt, .ep-form-row label > span, .ep-login-foot) {
       color: var(--text-muted);
       line-height: 1.45;
     }
@@ -23985,7 +24244,7 @@ h2.op-card-title {
       gap: 0.65rem;
       border-color: var(--border-subtle);
 
-      > button {
+      >button {
         min-height: 48px;
         flex: 1 1 140px;
       }
@@ -24178,7 +24437,7 @@ h2.op-card-title {
 
   @media (max-width: 640px) {
     :host .section-page {
-      .ui-modal > .ui-modal-head {
+      .ui-modal>.ui-modal-head {
         padding: 0.85rem 1rem;
       }
 
@@ -24337,5 +24596,83 @@ h2.op-card-title {
       background: var(--surface-2);
       color: var(--text-primary);
     }
+  }
+}
+
+/* =====================================================================
+   REGISTRO ATTIVITÀ · audit centralizzato e filtrabile (solo titolare)
+   ===================================================================== */
+.audit-register-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.audit-register-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 12rem;
+  min-width: 11rem;
+  max-width: 18rem;
+}
+
+.audit-register-filter>span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.audit-register-filter select {
+  min-height: 2.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.audit-register-stats {
+  margin-bottom: 0.9rem;
+}
+
+.audit-register-list {
+  gap: 0.7rem;
+}
+
+.audit-register-row {
+  align-items: flex-start;
+}
+
+.audit-register-info {
+  gap: 0.28rem;
+}
+
+.audit-register-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.audit-register-head strong {
+  color: var(--text-primary);
+}
+
+.audit-register-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  margin-top: 0.9rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .audit-register-filter {
+    flex: 1 1 100%;
+    max-width: none;
   }
 }
