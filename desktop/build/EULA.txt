@@ -1,0 +1,82 @@
+CONTRATTO DI LICENZA D'USO DEL SOFTWARE
+
+AudioMax CRM — versione desktop per macOS e Windows
+
+1. PARTI E DEFINIZIONI
+
+1.1 Licenziante: Audiomax di [RAGIONE SOCIALE], con sede legale in [INDIRIZZO COMPLETO], P.IVA/C.F. [NUMERO], e-mail [INDIRIZZO E-MAIL] (di seguito "Licenziante").
+
+1.2 Licenziatario: la persona fisica o giuridica che installa, accede o utilizza il Software (di seguito "Licenziatario").
+
+1.3 Software: il programma applicativo "AudioMax CRM" in versione desktop, comprensivo dell'applicazione installabile per macOS (file .dmg) e per Windows (file .exe), dei relativi file di configurazione, della documentazione e di ogni aggiornamento messo a disposizione dal Licenziante.
+
+1.4 Servizi cloud: i servizi di archiviazione e sincronizzazione dei dati erogati tramite la piattaforma Supabase utilizzata dal Software.
+
+2. OGGETTO E CONCESSIONE DELLA LICENZA
+
+2.1 Il Licenziante concede al Licenziatario una licenza d'uso del Software personale, non esclusiva, non trasferibile e non sublicenziabile, limitata al numero di aziende (tenant) attivate sull'account del Licenziatario.
+
+2.2 La licenza consente l'installazione del Software sui dispositivi nella disponibilità del Licenziatario e l'utilizzo dello stesso per la gestione della propria attività.
+
+2.3 La licenza è concessa a titolo oneroso secondo le condizioni economiche concordate separatamente tra le parti. In assenza di accordo scritto, l'uso del Software oltre il periodo di prova eventualmente concesso non è autorizzato.
+
+3. LIMITAZIONI D'USO
+
+3.1 È vietato al Licenziatario:
+a) copiare, distribuire, vendere, noleggiare, prestare o altrimenti mettere a disposizione di terzi il Software o la licenza;
+b) decompilare, disassemblare, effettuare reverse engineering o tentare di ricavare il codice sorgente del Software, salvo nei limiti inderogabilmente consentiti dalla legge;
+c) rimuovere, occultare o alterare gli avvisi di copyright, i marchi o le diciture di titolarità presenti nel Software;
+d) utilizzare il Software per finalità illecite o in violazione di obblighi di legge, regolamentari o contrattuali;
+e) aggirare o manomettere i meccanismi di autenticazione, di separazione dei dati tra aziende o di controllo degli accessi.
+
+3.2 Il Licenziatario è responsabile della custodia delle credenziali di accesso e dell'operato degli utenti che abilita all'interno del Software.
+
+4. DATI, RISERVATEZZA E PROTEZIONE DEI DATI PERSONALI
+
+4.1 I dati inseriti nel Software (contatti, preventivi, documenti, dati fiscali, dati dei dipendenti e dei clienti) restano di titolarità del Licenziatario.
+
+4.2 Il Licenziatario è titolare autonomo del trattamento dei dati personali trattati tramite il Software e si impegna a utilizzarlo nel rispetto del Regolamento (UE) 2016/679 (GDPR) e della normativa nazionale applicabile, raccogliendo ove necessario il consenso degli interessati e fornendo le informative dovute.
+
+4.3 Il Software archivia una copia locale dei dati sul dispositivo del Licenziatario e ne sincronizza una copia sui Servizi cloud. Il Licenziante opera come fornitore di servizi e non utilizza i dati del Licenziatario per finalità proprie.
+
+4.4 Il Licenziatario è responsabile dell'esecuzione di copie di sicurezza periodiche dei dati secondo le modalità rese disponibili nel Software.
+
+5. AGGIORNAMENTI E ASSISTENZA
+
+5.1 Il Licenziante può rilasciare aggiornamenti, correzioni e nuove versioni del Software. L'installazione di un aggiornamento comporta l'accettazione del presente contratto nella versione vigente.
+
+5.2 L'assistenza tecnica è fornita secondo le modalità e i tempi concordati tra le parti.
+
+6. PROPRIETÀ INTELLETTUALE
+
+6.1 Il Software è protetto dalle norme sul diritto d'autore e sulla proprietà industriale. Ogni diritto non espressamente concesso con il presente contratto resta riservato al Licenziante.
+
+6.2 Il Software include componenti open source di terze parti (fra cui Electron, Angular e Supabase JS), distribuiti secondo le rispettive licenze, consultabili nella documentazione dei rispettivi progetti.
+
+7. GARANZIE E LIMITAZIONE DI RESPONSABILITÀ
+
+7.1 Il Software è fornito "così com'è". Il Licenziante garantisce che il Software è conforme alla documentazione tecnica fornita e si impegna a correggere i difetti riproducibili segnalati dal Licenziatario.
+
+7.2 Il Licenziante non risponde di danni indiretti, perdita di dati, mancati guadagni o interruzioni di attività derivanti dall'uso o dall'impossibilità di usare il Software, salvo dolo o colpa grave, e comunque entro il limite del corrispettivo annuale di licenza versato dal Licenziatario.
+
+7.3 Il Licenziante non risponde del funzionamento della rete, dei dispositivi del Licenziatario, dei servizi di connettività, né di interruzioni imputabili ai Servizi cloud o a cause di forza maggiore.
+
+8. DURATA E RISOLUZIONE
+
+8.1 Il contratto ha la durata della licenza attivata e si rinnova secondo gli accordi tra le parti.
+
+8.2 Il Licenziante può risolvere il contratto con effetto immediato, dandone comunicazione scritta, in caso di violazione delle clausole 2 e 3. In tal caso il Licenziatario deve cessare ogni utilizzo e disinstallare il Software.
+
+8.3 Alla cessazione del contratto il Licenziatario può esportare i propri dati secondo le funzioni rese disponibili nel Software.
+
+9. LEGGE APPLICABILE E FORO COMPETENTE
+
+9.1 Il presente contratto è regolato dalla legge italiana.
+
+9.2 Per ogni controversia è competente in via esclusiva il Foro di [FORO COMPETENTE], salvo diverso obbligo di legge inderogabile.
+
+10. ACCETTAZIONE
+
+10.1 Il Licenziatario dichiara di aver letto e compreso il presente contratto e di accettarlo integralmente. L'installazione del Software, la selezione dell'opzione "Accetto" durante l'installazione o l'utilizzo del Software costituiscono accettazione del contratto.
+
+Data di ultimo aggiornamento: [DATA]

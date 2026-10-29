@@ -50,3 +50,9 @@ Thumbs.db
 
 # Stato condiviso per sincronizzazione LAN (generato automaticamente)
 .audiomax-state.json
+
+# App desktop (Electron): dipendenze, build web copiata e installer generati
+/desktop/node_modules
+/desktop/web
+/desktop/release
+/desktop/dist

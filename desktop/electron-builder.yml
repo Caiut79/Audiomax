@@ -1,0 +1,76 @@
+# ============================================================================
+# Configurazione electron-builder — AudioMax CRM desktop
+# Genera: DMG per macOS (Intel + Apple Silicon) e installer NSIS per Windows.
+# Entrambi gli installer mostrano il contratto di licenza (EULA.txt).
+# ============================================================================
+appId: com.audiomax.crm
+productName: AudioMax CRM
+copyright: Copyright © Audiomax
+asar: true
+npmRebuild: false
+publish: null
+
+directories:
+  output: release
+  buildResources: build
+
+# Contenuto dell'app: solo il wrapper Electron e la build web della PWA Angular
+files:
+  - electron/**
+  - web/**
+  - package.json
+
+# Il contratto di licenza viene copiato accanto all'eseguibile, così resta
+# consultabile dal menu dell'applicazione anche dopo l'installazione.
+extraResources:
+  - from: build/EULA.txt
+    to: EULA.txt
+
+mac:
+  category: public.app-category.business
+  icon: build/icon.png
+  darkModeSupport: true
+  # Nessun certificato Apple Developer configurato: la firma viene saltata e
+  # il primo avvio richiede il consenso manuale di Gatekeeper (vedi istruzioni).
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+
+dmg:
+  title: AudioMax CRM ${version}
+  iconSize: 120
+  # Accordo di licenza mostrato all'apertura del DMG
+  license: build/EULA.txt
+  artifactName: AudioMax-CRM-${version}-${arch}.${ext}
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AudioMax CRM
+  # Pagina del contratto di licenza con i pulsanti "Accetto" / "Rifiuto"
+  license: build/EULA.txt
+  installerLanguages:
+    - it_IT
+  language: 1040
+  artifactName: AudioMax-CRM-Setup-${version}.${ext}
