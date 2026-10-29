@@ -56,7 +56,8 @@ export class LoginPageComponent {
   ];
 
   // ── Campi login ──
-  protected readonly loginEmail = signal('');
+  /** Email del titolare oppure username di un accesso staff dedicato. */
+  protected readonly loginIdentifier = signal('');
   protected readonly loginPassword = signal('');
   protected readonly loginPasswordVisible = signal(false);
   /** True = sessione persistente ("Rimani connesso"), false = solo scheda corrente. */
@@ -146,7 +147,7 @@ export class LoginPageComponent {
     this.errorMessage.set('');
     this.successMessage.set('');
 
-    const result = await this.auth.login(this.loginEmail(), this.loginPassword(), this.rememberMe());
+    const result = await this.auth.login(this.loginIdentifier(), this.loginPassword(), this.rememberMe());
 
     this.submitting.set(false);
 

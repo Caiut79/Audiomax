@@ -100,9 +100,9 @@
         </div>
 
         <label class="auth-field">
-          <span>Email di riferimento</span>
-          <input type="email" autocomplete="username" placeholder="nome@azienda.it" [value]="loginEmail()"
-            (input)="loginEmail.set($any($event.target).value)" required>
+          <span>Email o username</span>
+          <input type="text" autocomplete="username" placeholder="nome@azienda.it oppure username"
+            [value]="loginIdentifier()" (input)="loginIdentifier.set($any($event.target).value)" required>
         </label>
 
         <label class="auth-field">

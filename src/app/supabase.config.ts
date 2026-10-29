@@ -4,6 +4,8 @@ export const supabaseConfig = {
   tables: {
     // ===== Account e licenze (multi-azienda) =====
     accounts: 'app_accounts',
+    // Accessi gestionali dedicati (titolare / operativo), distinti dal Portale Dipendenti
+    staffAccounts: 'app_staff_accounts',
     clients: 'crm_clients',
     quotes: 'crm_quotes',
     appointments: 'crm_appointments',

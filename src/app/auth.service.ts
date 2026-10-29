@@ -8,6 +8,14 @@ import { SupabaseService } from './supabase.service';
 export type AppAccountRole = 'azienda' | 'super-admin';
 /** Stato del profilo: attivo, sospeso dal super admin oppure eliminato. */
 export type AppAccountStatus = 'attiva' | 'sospesa' | 'eliminata';
+/**
+ * Ruolo operativo all'interno dell'azienda:
+ * - `titolare`  → profilo principale creato in fase di attivazione, vede tutto
+ *                 incluso il registro attività;
+ * - `operativo` → accesso creato dall'azienda per un dipendente, uso operativo
+ *                 senza registro attività.
+ */
+export type AppStaffRole = 'titolare' | 'operativo';
 
 /** Account (azienda o super admin) letto dalla tabella public.app_accounts. */
 export interface AppAccountRecord {
@@ -23,12 +31,37 @@ export interface AppAccountRecord {
   loginCount: number;
 }
 
+/**
+ * Accesso gestionale dedicato creato dall'azienda (tabella app_staff_accounts).
+ * Separato dalle credenziali del Portale Dipendenti.
+ */
+export interface AppStaffAccountRecord {
+  id: string;
+  tenantId: string;
+  username: string;
+  displayName: string;
+  role: AppStaffRole;
+  status: AppAccountStatus;
+  createdAt: string;
+  lastLoginAt: string | null;
+  loginCount: number;
+}
+
 /** Sessione minimale persistita in localStorage per non perdere l'accesso al reload. */
 export interface AuthSession {
   accountId: string;
   companyName: string;
   email: string;
   role: AppAccountRole;
+  /**
+   * Ruolo operativo effettivo. È opzionale per retro-compatibilità: le sessioni
+   * salvate prima dell'introduzione dei profili staff vengono lette come `titolare`.
+   */
+  staffRole?: AppStaffRole;
+  /** Valorizzato solo per gli accessi staff (non per il titolare). */
+  staffId?: string;
+  /** Nome mostrato in topbar per gli accessi staff. */
+  displayName?: string;
   issuedAt: number;
 }
 
@@ -42,6 +75,17 @@ export interface RegisterPayload {
   companyName: string;
   email: string;
   password: string;
+}
+
+/** Dati per creare un accesso gestionale dedicato a un dipendente. */
+export interface StaffAccountPayload {
+  /** Può essere un semplice username oppure un indirizzo email (anche fittizio). */
+  username: string;
+  password: string;
+  /** Opzionale: se assente viene mostrato lo username. */
+  displayName?: string;
+  /** Opzionale: gli accessi creati dall'azienda sono operativi. */
+  role?: AppStaffRole;
 }
 
 interface AppAccountRow {
@@ -59,6 +103,21 @@ interface AppAccountRow {
   login_count: number;
   suspended_at?: string | null;
   deleted_at?: string | null;
+}
+
+interface AppStaffRow {
+  id: string;
+  tenant_id: string;
+  username: string;
+  display_name: string | null;
+  password_hash: string;
+  password_salt: string;
+  role: AppStaffRole;
+  status: AppAccountStatus;
+  created_at: string;
+  last_login_at: string | null;
+  login_count: number;
+  suspended_at?: string | null;
 }
 
 /**
@@ -116,10 +175,30 @@ export class AuthService {
   readonly tenantId = computed(() => this.session()?.accountId ?? null);
   readonly companyName = computed(() => this.session()?.companyName ?? '');
   readonly accountEmail = computed(() => this.session()?.email ?? '');
-  /** Etichetta del ruolo, usata nella topbar. */
-  readonly roleLabel = computed(() =>
-    this.session()?.role === 'super-admin' ? 'Super Admin' : 'Azienda',
+  /**
+   * Ruolo operativo effettivo dell'accesso corrente.
+   * Le sessioni salvate prima dell'introduzione dei profili staff non hanno
+   * `staffRole`: in quel caso valgono come `titolare` (nessuna retro-regressione).
+   */
+  readonly staffRole = computed<AppStaffRole>(() => this.session()?.staffRole ?? 'titolare');
+  /** True se l'accesso è del titolare (o del super admin): vede tutto. */
+  readonly isOwner = computed(() => this.staffRole() === 'titolare');
+  /**
+   * True solo per gli accessi che possono consultare il registro attività
+   * "chi ha fatto cosa". Il profilo operativo non lo vede.
+   */
+  readonly canViewAuditRegister = computed(() => this.isOwner());
+  /** Nome mostrato in topbar: per gli accessi staff è il nome dell'operatore. */
+  readonly displayName = computed(
+    () => this.session()?.displayName?.trim() || this.session()?.email || '',
   );
+  /** Etichetta del ruolo, usata nella topbar. */
+  readonly roleLabel = computed(() => {
+    if (this.session()?.role === 'super-admin') {
+      return 'Super Admin';
+    }
+    return this.staffRole() === 'operativo' ? 'Operativo' : 'Titolare';
+  });
 
   constructor() {
     this.restoreSession();
@@ -150,13 +229,21 @@ export class AuthService {
    * Avvia la sessione.
    * @param remember true = localStorage (resta connesso anche dopo la chiusura),
    *                 false = sessionStorage (solo per la scheda corrente).
+   * @param staff    dati dell'accesso staff; se assente la sessione è del titolare.
    */
-  private startSession(account: AppAccountRecord, remember = true): void {
+  private startSession(
+    account: AppAccountRecord,
+    remember = true,
+    staff?: { staffId: string; displayName: string; staffRole: AppStaffRole },
+  ): void {
     const session: AuthSession = {
       accountId: account.id,
       companyName: account.companyName,
       email: account.email,
       role: account.role,
+      staffRole: staff?.staffRole ?? 'titolare',
+      staffId: staff?.staffId,
+      displayName: staff?.displayName,
       issuedAt: Date.now(),
     };
 
@@ -225,48 +312,171 @@ export class AuthService {
 
   /**
    * Verifica le credenziali e avvia la sessione.
+   * L'identificativo può essere l'email del titolare (app_accounts) oppure lo
+   * username di un accesso staff (app_staff_accounts).
    * @param remember true = "Rimani connesso" (sessione persistente nel browser).
    */
-  async login(emailRaw: string, password: string, remember = true): Promise<AuthResult> {
-    const email = emailRaw.trim().toLowerCase();
+  async login(identifierRaw: string, password: string, remember = true): Promise<AuthResult> {
+    const identifier = identifierRaw.trim().toLowerCase();
 
-    if (!email || !password) {
-      return { ok: false, message: 'Inserisci email e password.' };
+    if (!identifier || !password) {
+      return { ok: false, message: 'Inserisci credenziali e password.' };
     }
 
     if (!this.isCryptoAvailable()) {
       return { ok: false, message: CRYPTO_UNAVAILABLE_MESSAGE };
     }
 
-    const { row, error } = await this.loadAccountRow(email);
+    // 1) Titolare / azienda: l'identificativo è l'email in app_accounts.
+    const { row, error } = await this.loadAccountRow(identifier);
     if (error) {
       return { ok: false, message: error };
     }
+    if (row) {
+      if (row.status === 'eliminata') {
+        return { ok: false, message: 'Questo account è stato eliminato.' };
+      }
+      if (row.status === 'sospesa') {
+        return { ok: false, message: "Account sospeso. Contatta l'amministratore del gestionale." };
+      }
+
+      const hash = await this.derivePasswordHash(password, row.password_salt);
+      if (!this.constantTimeEquals(hash, row.password_hash)) {
+        return { ok: false, message: 'Password non corretta.' };
+      }
+
+      const licenseError = this.checkLicense(row);
+      if (licenseError) {
+        return { ok: false, message: licenseError };
+      }
+
+      const account = this.mapAccountRow(row);
+      this.startSession(account, remember);
+      void this.touchLogin(row);
+
+      return { ok: true, account };
+    }
+
+    // 2) Accesso staff: l'identificativo è lo username in app_staff_accounts.
+    return this.loginStaff(identifier, password, remember);
+  }
+
+  /**
+   * Accesso con credenziali staff dedicate al gestionale.
+   * Restituisce sempre un AuthResult: se lo username non esiste, il messaggio
+   * resta neutro per non rivelare quali username sono registrati.
+   */
+  private async loginStaff(
+    username: string,
+    password: string,
+    remember: boolean,
+  ): Promise<AuthResult> {
+    const genericFailure: AuthResult = {
+      ok: false,
+      message: 'Credenziali non valide.',
+    };
+
+    const client = this.supabase.client;
+    if (!client) {
+      return { ok: false, message: 'Supabase non configurato: impossibile verificare le credenziali.' };
+    }
+
+    const { data, error } = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .select('*')
+      .ilike('username', username)
+      .limit(5);
+
+    if (error) {
+      // Tabella non ancora creata: il messaggio aiuta a capire cosa fare.
+      if (error.code === 'PGRST205' || error.code === '42P01') {
+        return {
+          ok: false,
+          message:
+            'Accessi staff non ancora attivi: esegui lo script supabase/audiomax_multi_tenant.sql su Supabase.',
+        };
+      }
+      return { ok: false, message: `Errore di connessione al database: ${error.message ?? ''}` };
+    }
+
+    const normalized = username.trim().toLowerCase();
+    const row = (data ?? []).find(
+      (item: AppStaffRow) => (item.username ?? '').trim().toLowerCase() === normalized,
+    ) as AppStaffRow | undefined;
+
     if (!row) {
-      return { ok: false, message: 'Nessun account trovato con questa email.' };
+      return genericFailure;
     }
-    if (row.status === 'eliminata') {
-      return { ok: false, message: 'Questo account è stato eliminato.' };
-    }
-    if (row.status === 'sospesa') {
-      return { ok: false, message: "Account sospeso. Contatta l'amministratore del gestionale." };
+    if (row.status === 'eliminata' || row.status === 'sospesa') {
+      return { ok: false, message: 'Accesso sospeso. Contatta il titolare dell\'azienda.' };
     }
 
     const hash = await this.derivePasswordHash(password, row.password_salt);
     if (!this.constantTimeEquals(hash, row.password_hash)) {
-      return { ok: false, message: 'Password non corretta.' };
+      return genericFailure;
     }
 
-    const licenseError = this.checkLicense(row);
-    if (licenseError) {
-      return { ok: false, message: licenseError };
+    // Serve il nome azienda per la topbar: lo leggiamo dall'account titolare.
+    const companyName = await this.loadCompanyName(row.tenant_id);
+    if (!companyName) {
+      return { ok: false, message: 'Azienda non disponibile per questo accesso.' };
     }
 
-    const account = this.mapAccountRow(row);
-    this.startSession(account, remember);
-    void this.touchLogin(row);
+    const ownerAccount: AppAccountRecord = {
+      id: row.tenant_id,
+      companyName,
+      email: row.username,
+      role: 'azienda',
+      status: 'attiva',
+      licenseExpiresAt: null,
+      licenseNotes: null,
+      createdAt: row.created_at,
+      lastLoginAt: row.last_login_at,
+      loginCount: row.login_count ?? 0,
+    };
 
-    return { ok: true, account };
+    this.startSession(ownerAccount, remember, {
+      staffId: row.id,
+      displayName: row.display_name?.trim() || row.username,
+      staffRole: row.role,
+    });
+    void this.touchStaffLogin(row);
+
+    return { ok: true, account: ownerAccount };
+  }
+
+  private async loadCompanyName(tenantId: string): Promise<string | null> {
+    const client = this.supabase.client;
+    if (!client) {
+      return null;
+    }
+
+    const { data, error } = await client
+      .from(supabaseConfig.tables.accounts)
+      .select('company_name')
+      .eq('id', tenantId)
+      .limit(1);
+
+    if (error || !data?.length) {
+      return null;
+    }
+
+    return (data[0] as { company_name: string }).company_name ?? null;
+  }
+
+  private async touchStaffLogin(row: AppStaffRow): Promise<void> {
+    const client = this.supabase.client;
+    if (!client) {
+      return;
+    }
+
+    await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .update({
+        last_login_at: new Date().toISOString(),
+        login_count: (row.login_count ?? 0) + 1,
+      })
+      .eq('id', row.id);
   }
 
   async register(payload: RegisterPayload): Promise<AuthResult> {
@@ -362,8 +572,43 @@ export class AuthService {
       return false;
     }
 
+    // Accesso staff: verifichiamo anche che l'accesso del dipendente sia attivo,
+    // così la sospensione decisa dal titolare ha effetto subito.
+    const staffValid = await this.checkStaffStillActive(session.staffId);
+    if (!staffValid) {
+      this.logout();
+      return false;
+    }
+
     this.currentAccount.set(this.mapAccountRow(row));
     return true;
+  }
+
+  /**
+   * Verifica che un accesso staff sia ancora attivo.
+   * Se il backend non è raggiungibile non blocchiamo l'utente (ritorna true).
+   */
+  private async checkStaffStillActive(staffId: string | undefined): Promise<boolean> {
+    if (!staffId) {
+      return true;
+    }
+
+    const client = this.supabase.client;
+    if (!client) {
+      return true;
+    }
+
+    const { data, error } = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .select('status')
+      .eq('id', staffId)
+      .limit(1);
+
+    if (error || !data?.length) {
+      return true;
+    }
+
+    return (data[0] as { status: AppAccountStatus }).status === 'attiva';
   }
 
   // ==========================================================================
@@ -461,6 +706,220 @@ export class AuthService {
     }
 
     return { ok: true };
+  }
+
+  // ==========================================================================
+  // Accessi staff (creati dal titolare da Impostazioni)
+  // ==========================================================================
+
+  /** Elenco degli accessi staff dell'azienda collegata. */
+  async listStaffAccounts(): Promise<AppStaffAccountRecord[]> {
+    const client = this.supabase.client;
+    const tenant = this.tenantId();
+
+    if (!client || !tenant) {
+      return [];
+    }
+
+    const { data, error } = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .select('*')
+      .eq('tenant_id', tenant)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      return [];
+    }
+
+    return (data as AppStaffRow[]).map((row) => this.mapStaffRow(row));
+  }
+
+  /** Crea un accesso gestionale per un dipendente (username + password). */
+  async createStaffAccount(payload: StaffAccountPayload): Promise<AuthResult> {
+    const client = this.supabase.client;
+    const tenant = this.tenantId();
+
+    if (!client || !tenant) {
+      return { ok: false, message: 'Supabase non configurato.' };
+    }
+    if (!this.isCryptoAvailable()) {
+      return { ok: false, message: CRYPTO_UNAVAILABLE_MESSAGE };
+    }
+
+    const username = payload.username.trim().toLowerCase();
+    // Il nome mostrato è opzionale: se non indicato usiamo lo username stesso.
+    const displayName = payload.displayName?.trim() || username;
+    const role: AppStaffRole = payload.role ?? 'operativo';
+
+    const usernameError = this.validateUsername(username);
+    if (usernameError) {
+      return { ok: false, message: usernameError };
+    }
+    if (payload.password.length < 8) {
+      return { ok: false, message: 'La password deve avere almeno 8 caratteri.' };
+    }
+
+    // Lo username deve essere univoco a livello globale perché il login avviene
+    // solo con lo username, senza indicare l'azienda.
+    const existing = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .select('id, username')
+      .ilike('username', username)
+      .limit(5);
+
+    if (existing.error) {
+      if (existing.error.code === 'PGRST205' || existing.error.code === '42P01') {
+        return {
+          ok: false,
+          message:
+            'Accessi staff non ancora attivi: esegui lo script supabase/audiomax_multi_tenant.sql su Supabase.',
+        };
+      }
+      return { ok: false, message: `Errore di connessione al database: ${existing.error.message ?? ''}` };
+    }
+
+    const taken = (existing.data ?? []).some(
+      (item: { username?: string }) => (item.username ?? '').trim().toLowerCase() === username,
+    );
+    if (taken) {
+      return { ok: false, message: 'Username già in uso: scegline un altro.' };
+    }
+
+    const salt = this.randomHex(this.saltBytes);
+    const hash = await this.derivePasswordHash(payload.password, salt);
+
+    const { error } = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .insert({
+        tenant_id: tenant,
+        username,
+        display_name: displayName,
+        password_hash: hash,
+        password_salt: salt,
+        role,
+        status: 'attiva',
+      });
+
+    if (error) {
+      return { ok: false, message: this.describeStaffError(error) };
+    }
+
+    return { ok: true };
+  }
+
+  /** Reimposta la password di un accesso staff. */
+  async setStaffPassword(staffId: string, password: string): Promise<AuthResult> {
+    if (password.length < 8) {
+      return { ok: false, message: 'La password deve avere almeno 8 caratteri.' };
+    }
+    if (!this.isCryptoAvailable()) {
+      return { ok: false, message: CRYPTO_UNAVAILABLE_MESSAGE };
+    }
+
+    const salt = this.randomHex(this.saltBytes);
+    const hash = await this.derivePasswordHash(password, salt);
+
+    return this.patchStaff(staffId, { password_hash: hash, password_salt: salt });
+  }
+
+  /** Sospende un accesso staff: il login viene bloccato finché non viene riattivato. */
+  async suspendStaffAccount(staffId: string): Promise<AuthResult> {
+    return this.patchStaff(staffId, {
+      status: 'sospesa',
+      suspended_at: new Date().toISOString(),
+    });
+  }
+
+  /** Riattiva un accesso staff sospeso. */
+  async resumeStaffAccount(staffId: string): Promise<AuthResult> {
+    return this.patchStaff(staffId, { status: 'attiva', suspended_at: null });
+  }
+
+  /** Elimina definitivamente un accesso staff. */
+  async deleteStaffAccount(staffId: string): Promise<AuthResult> {
+    const client = this.supabase.client;
+
+    if (!client) {
+      return { ok: false, message: 'Supabase non configurato.' };
+    }
+
+    const { error } = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .delete()
+      .eq('id', staffId);
+
+    if (error) {
+      return { ok: false, message: this.describeStaffError(error) };
+    }
+
+    return { ok: true };
+  }
+
+  private async patchStaff(
+    staffId: string,
+    patch: Record<string, unknown>,
+  ): Promise<AuthResult> {
+    const client = this.supabase.client;
+
+    if (!client) {
+      return { ok: false, message: 'Supabase non configurato.' };
+    }
+
+    const { error } = await client
+      .from(supabaseConfig.tables.staffAccounts)
+      .update(patch)
+      .eq('id', staffId);
+
+    if (error) {
+      return { ok: false, message: this.describeStaffError(error) };
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * Lo username accetta lettere, numeri, punto, trattino e underscore; è
+   * ammesso anche un indirizzo email (anche fittizio) per comodità d'uso.
+   */
+  private validateUsername(username: string): string | null {
+    if (username.length < 3 || username.length > 60) {
+      return 'Lo username deve avere tra 3 e 60 caratteri.';
+    }
+    if (!/^[a-z0-9._%+-]+(@[a-z0-9-]+(\.[a-z0-9-]+)+)?$/.test(username)) {
+      return 'Usa uno username semplice oppure un indirizzo email (es. nome@azienda.it).';
+    }
+    return null;
+  }
+
+  private describeStaffError(error: { code?: string; message?: string }): string {
+    const message = error.message ?? '';
+
+    if (
+      error.code === 'PGRST205' ||
+      error.code === '42P01' ||
+      message.includes('Could not find the table')
+    ) {
+      return 'Accessi staff non ancora attivi: esegui lo script supabase/audiomax_multi_tenant.sql su Supabase.';
+    }
+    if (error.code === '23505') {
+      return 'Username già in uso: scegline un altro.';
+    }
+
+    return `Errore di connessione al database: ${message}`;
+  }
+
+  private mapStaffRow(row: AppStaffRow): AppStaffAccountRecord {
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      username: row.username,
+      displayName: row.display_name?.trim() ?? '',
+      role: row.role,
+      status: row.status,
+      createdAt: row.created_at,
+      lastLoginAt: row.last_login_at,
+      loginCount: row.login_count ?? 0,
+    };
   }
 
   private async touchLogin(row: AppAccountRow): Promise<void> {

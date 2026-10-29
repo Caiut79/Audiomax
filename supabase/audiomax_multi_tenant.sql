@@ -165,7 +165,80 @@ end $$;
 
 
 -- ============================================================================
--- 5) VERIFICA
+-- 5) ACCOUNT STAFF — accessi gestionali dedicati (Titolare / Operativo)
+-- ============================================================================
+-- Le credenziali del TITOLARE vivono in app_accounts (ruolo 'azienda'): è il
+-- profilo creato in fase di attivazione e vede tutto, incluso il registro.
+-- Qui stanno invece gli accessi AGGIUNTIVI creati dall'azienda per i dipendenti:
+-- username + password dedicati al GESTIONALE, indipendenti dal Portale Dipendenti.
+-- Il login avviene con lo username, quindi lo username è univoco a livello globale.
+create table if not exists public.app_staff_accounts (
+  id              uuid primary key default gen_random_uuid(),
+  tenant_id       uuid        not null references public.app_accounts(id) on delete cascade,
+  username        text        not null,
+  display_name    text        not null default '',
+  password_hash   text        not null,
+  password_salt   text        not null,
+  role            text        not null default 'operativo'
+                              check (role in ('operativo', 'titolare')),
+  status          text        not null default 'attiva'
+                              check (status in ('attiva', 'sospesa', 'eliminata')),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  last_login_at   timestamptz,
+  login_count     integer     not null default 0,
+  suspended_at    timestamptz
+);
+
+-- Username univoco senza distinzione di maiuscole/minuscole
+create unique index if not exists app_staff_accounts_username_lower_key
+  on public.app_staff_accounts (lower(username));
+
+-- Indice per elencare gli accessi di una singola azienda
+create index if not exists app_staff_accounts_tenant_id_idx
+  on public.app_staff_accounts (tenant_id);
+
+-- Aggiorna automaticamente updated_at a ogni modifica
+create or replace function public.app_staff_accounts_touch_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists app_staff_accounts_touch_updated_at on public.app_staff_accounts;
+create trigger app_staff_accounts_touch_updated_at
+  before update on public.app_staff_accounts
+  for each row execute function public.app_staff_accounts_touch_updated_at();
+
+-- Accesso alla tabella (stesso stile delle altre tabelle del progetto)
+alter table public.app_staff_accounts enable row level security;
+
+drop policy if exists "publishable can read staff accounts"   on public.app_staff_accounts;
+drop policy if exists "publishable can insert staff accounts" on public.app_staff_accounts;
+drop policy if exists "publishable can update staff accounts" on public.app_staff_accounts;
+drop policy if exists "publishable can delete staff accounts" on public.app_staff_accounts;
+
+create policy "publishable can read staff accounts"
+on public.app_staff_accounts for select to anon using (true);
+
+create policy "publishable can insert staff accounts"
+on public.app_staff_accounts for insert to anon with check (true);
+
+create policy "publishable can update staff accounts"
+on public.app_staff_accounts for update to anon using (true) with check (true);
+
+create policy "publishable can delete staff accounts"
+on public.app_staff_accounts for delete to anon using (true);
+
+grant select, insert, update, delete on public.app_staff_accounts to anon;
+
+
+-- ============================================================================
+-- 6) VERIFICA
 -- ============================================================================
 -- Mostra gli account e quanti clienti ha ciascuno.
 select
@@ -173,6 +246,7 @@ select
   a.email,
   a.role,
   a.status,
-  (select count(*) from public.crm_clients c where c.tenant_id = a.id) as clienti
+  (select count(*) from public.crm_clients c where c.tenant_id = a.id) as clienti,
+  (select count(*) from public.app_staff_accounts s where s.tenant_id = a.id) as accessi_staff
 from public.app_accounts a
 order by a.role, a.company_name;
