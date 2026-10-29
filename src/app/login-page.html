@@ -70,14 +70,11 @@
 
       @if (backendMissing()) {
       <div class="auth-banner auth-banner-warning" role="status">
-        <strong>Database account non inizializzato.</strong>
+        <strong>Database account non raggiungibile.</strong>
         <span>
-          Esegui lo script <code>supabase/audiomax_multi_tenant.sql</code> su Supabase per attivare
-          registrazione e login. Nel frattempo puoi continuare a usare il gestionale in locale.
+          Controlla la connessione oppure esegui lo script <code>supabase/audiomax_multi_tenant.sql</code> su
+          Supabase: senza la tabella degli account il login non è disponibile.
         </span>
-        <button type="button" class="btn-ghost btn-tiny" (click)="enterWithoutAccountDatabase()">
-          Continua senza account →
-        </button>
       </div>
       }
 
@@ -120,6 +117,18 @@
             </button>
           </div>
         </label>
+
+        <label class="auth-remember">
+          <input type="checkbox" [checked]="rememberMe()" (change)="rememberMe.set($any($event.target).checked)">
+          <span>Rimani connesso</span>
+        </label>
+        <p class="auth-remember-note">
+          @if (rememberMe()) {
+          L'accesso resta attivo anche dopo la chiusura del browser.
+          } @else {
+          L'accesso dura solo per questa scheda: alla prossima apertura servirà di nuovo la password.
+          }
+        </p>
 
         <button type="submit" class="auth-submit" [disabled]="submitting()">
           @if (submitting()) { Accesso in corso… } @else { Accedi al gestionale }

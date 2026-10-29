@@ -79,7 +79,9 @@ const CRYPTO_UNAVAILABLE_MESSAGE =
  * - Le password NON vengono mai salvate: in app_accounts finiscono solo hash e salt.
  * - Algoritmo: PBKDF2-SHA256, 210000 iterazioni, 32 byte, salt casuale di 16 byte.
  *   Gli stessi parametri sono usati dagli hash già presenti su Supabase.
- * - La sessione vive in localStorage: al reload l'utente resta collegato.
+ * - La sessione vive in localStorage quando l'utente sceglie "Rimani connesso",
+ *   altrimenti in sessionStorage: in quel caso si resta collegati solo nella
+ *   scheda corrente e al reload/riapertura si torna alla pagina di login.
  */
 @Injectable({
   providedIn: 'root',
@@ -105,6 +107,8 @@ export class AuthService {
    * - true = backend pronto: l'accesso richiede una sessione valida.
    */
   readonly authBackendReady = signal(false);
+  /** Probe del backend account, eseguito una sola volta e riusato dalle guardie. */
+  private backendProbe: Promise<boolean> | null = null;
 
   readonly isAuthenticated = computed(() => this.session() !== null);
   readonly isSuperAdmin = computed(() => this.session()?.role === 'super-admin');
@@ -119,15 +123,21 @@ export class AuthService {
 
   constructor() {
     this.restoreSession();
-    void this.probeAuthBackend();
+    this.backendProbe = this.probeAuthBackend();
   }
 
   // ==========================================================================
   // Sessione
   // ==========================================================================
 
+  /**
+   * Recupera la sessione salvata: prima quella persistente ("Rimani connesso"),
+   * poi quella temporanea della scheda corrente.
+   */
   private restoreSession(): void {
-    const stored = this.storage.getJson<AuthSession>(this.sessionStorageKey);
+    const persistent = this.storage.getJson<AuthSession>(this.sessionStorageKey, 'local');
+    const temporary = this.storage.getJson<AuthSession>(this.sessionStorageKey, 'session');
+    const stored = persistent ?? temporary;
 
     if (!stored || !stored.accountId) {
       return;
@@ -136,7 +146,12 @@ export class AuthService {
     this.session.set(stored);
   }
 
-  private startSession(account: AppAccountRecord): void {
+  /**
+   * Avvia la sessione.
+   * @param remember true = localStorage (resta connesso anche dopo la chiusura),
+   *                 false = sessionStorage (solo per la scheda corrente).
+   */
+  private startSession(account: AppAccountRecord, remember = true): void {
     const session: AuthSession = {
       accountId: account.id,
       companyName: account.companyName,
@@ -147,14 +162,24 @@ export class AuthService {
 
     this.session.set(session);
     this.currentAccount.set(account);
-    this.storage.setJson(this.sessionStorageKey, session);
+
+    // Salviamo in un solo ambito: cancelliamo sempre l'altro per non lasciare
+    // sessioni duplicate o vecchie.
+    if (remember) {
+      this.storage.setJson(this.sessionStorageKey, session, 'local');
+      this.storage.removeItem(this.sessionStorageKey, 'session');
+    } else {
+      this.storage.setJson(this.sessionStorageKey, session, 'session');
+      this.storage.removeItem(this.sessionStorageKey, 'local');
+    }
   }
 
-  /** Chiude la sessione e cancella la copia locale. */
+  /** Chiude la sessione e cancella le copie locali (persistente e temporanea). */
   logout(): void {
     this.session.set(null);
     this.currentAccount.set(null);
-    this.storage.removeItem(this.sessionStorageKey);
+    this.storage.removeItem(this.sessionStorageKey, 'local');
+    this.storage.removeItem(this.sessionStorageKey, 'session');
   }
 
   // ==========================================================================
@@ -183,11 +208,26 @@ export class AuthService {
     return ready;
   }
 
+  /**
+   * Attende l'esito (una sola volta) del probe sul backend account.
+   * Le guardie di rotta la usano per decidere se l'accesso è consentito:
+   * senza questa attesa la prima navigazione partirebbe prima che il probe
+   * sia concluso e il gestionale si aprirebbe senza login.
+   */
+  ensureAuthBackendProbe(): Promise<boolean> {
+    this.backendProbe ??= this.probeAuthBackend();
+    return this.backendProbe;
+  }
+
   // ==========================================================================
   // Login / Registrazione
   // ==========================================================================
 
-  async login(emailRaw: string, password: string): Promise<AuthResult> {
+  /**
+   * Verifica le credenziali e avvia la sessione.
+   * @param remember true = "Rimani connesso" (sessione persistente nel browser).
+   */
+  async login(emailRaw: string, password: string, remember = true): Promise<AuthResult> {
     const email = emailRaw.trim().toLowerCase();
 
     if (!email || !password) {
@@ -223,7 +263,7 @@ export class AuthService {
     }
 
     const account = this.mapAccountRow(row);
-    this.startSession(account);
+    this.startSession(account, remember);
     void this.touchLogin(row);
 
     return { ok: true, account };

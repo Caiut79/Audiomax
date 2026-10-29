@@ -1,11 +1,19 @@
 import { Injectable } from '@angular/core';
 
+/**
+ * Ambito di persistenza:
+ * - 'local'   → localStorage, i dati sopravvivono alla chiusura del browser;
+ * - 'session' → sessionStorage, i dati durano solo per la scheda corrente.
+ *   Usato quando l'utente sceglie di NON restare connesso.
+ */
+export type StorageScope = 'local' | 'session';
+
 @Injectable({
   providedIn: 'root',
 })
 export class BrowserStorageService {
-  getItem(key: string): string | null {
-    const storage = this.resolveStorage();
+  getItem(key: string, scope: StorageScope = 'local'): string | null {
+    const storage = this.resolveStorage(scope);
     if (!storage) {
       return null;
     }
@@ -17,8 +25,8 @@ export class BrowserStorageService {
     }
   }
 
-  getJson<T>(key: string): T | null {
-    const raw = this.getItem(key);
+  getJson<T>(key: string, scope: StorageScope = 'local'): T | null {
+    const raw = this.getItem(key, scope);
     if (!raw) {
       return null;
     }
@@ -26,13 +34,13 @@ export class BrowserStorageService {
     try {
       return JSON.parse(raw) as T;
     } catch {
-      this.removeItem(key);
+      this.removeItem(key, scope);
       return null;
     }
   }
 
-  setItem(key: string, value: string): boolean {
-    const storage = this.resolveStorage();
+  setItem(key: string, value: string, scope: StorageScope = 'local'): boolean {
+    const storage = this.resolveStorage(scope);
     if (!storage) {
       return false;
     }
@@ -45,12 +53,12 @@ export class BrowserStorageService {
     }
   }
 
-  setJson(key: string, value: unknown): boolean {
-    return this.setItem(key, JSON.stringify(value));
+  setJson(key: string, value: unknown, scope: StorageScope = 'local'): boolean {
+    return this.setItem(key, JSON.stringify(value), scope);
   }
 
-  removeItem(key: string): void {
-    const storage = this.resolveStorage();
+  removeItem(key: string, scope: StorageScope = 'local'): void {
+    const storage = this.resolveStorage(scope);
     if (!storage) {
       return;
     }
@@ -62,11 +70,11 @@ export class BrowserStorageService {
     }
   }
 
-  private resolveStorage(): Storage | null {
-    if (typeof localStorage === 'undefined') {
-      return null;
+  private resolveStorage(scope: StorageScope): Storage | null {
+    if (scope === 'session') {
+      return typeof sessionStorage === 'undefined' ? null : sessionStorage;
     }
 
-    return localStorage;
+    return typeof localStorage === 'undefined' ? null : localStorage;
   }
 }

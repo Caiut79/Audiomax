@@ -59,6 +59,8 @@ export class LoginPageComponent {
   protected readonly loginEmail = signal('');
   protected readonly loginPassword = signal('');
   protected readonly loginPasswordVisible = signal(false);
+  /** True = sessione persistente ("Rimani connesso"), false = solo scheda corrente. */
+  protected readonly rememberMe = signal(true);
 
   // ── Campi registrazione ──
   protected readonly companyName = signal('');
@@ -144,7 +146,7 @@ export class LoginPageComponent {
     this.errorMessage.set('');
     this.successMessage.set('');
 
-    const result = await this.auth.login(this.loginEmail(), this.loginPassword());
+    const result = await this.auth.login(this.loginEmail(), this.loginPassword(), this.rememberMe());
 
     this.submitting.set(false);
 
@@ -193,11 +195,6 @@ export class LoginPageComponent {
 
     this.successMessage.set('Account creato. Preparo il gestionale…');
     this.enterApplication();
-  }
-
-  /** Torna al gestionale quando il database degli account non è ancora attivo. */
-  protected enterWithoutAccountDatabase(): void {
-    window.location.assign('/dashboard');
   }
 
   /**

@@ -4,10 +4,11 @@ import { authGuard, guestGuard } from './auth.guard';
 import { crmSections } from './crm-sections';
 
 export const routes: Routes = [
+  // ✅ La prima schermata è sempre il login: la radice non entra nel gestionale.
   {
     path: '',
     pathMatch: 'full',
-    redirectTo: 'dashboard',
+    redirectTo: 'login',
   },
   // ✅ Pagina di accesso: fuori dalla shell CRM (standalonePortal) e senza guardia.
   {
@@ -60,8 +61,10 @@ export const routes: Routes = [
         standalonePortal: false,
       },
     })),
+  // ✅ URL non riconosciuto: si riparte dalla pagina di accesso (il gestionale
+  // si apre solo dopo il login).
   {
     path: '**',
-    redirectTo: 'dashboard',
+    redirectTo: 'login',
   },
 ];

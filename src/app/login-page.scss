@@ -365,6 +365,39 @@
   }
 }
 
+/* Checkbox "Rimani connesso": sessione persistente o solo scheda corrente. */
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+
+  input {
+    width: 1.05rem;
+    height: 1.05rem;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  span {
+    font-size: 0.82rem;
+    font-weight: 650;
+    color: var(--text-secondary);
+  }
+
+  &:hover span {
+    color: var(--text-primary);
+  }
+}
+
+.auth-remember-note {
+  margin: -0.35rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--text-soft);
+}
+
 .auth-field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

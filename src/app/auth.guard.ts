@@ -6,18 +6,20 @@ import { AuthService } from './auth.service';
 /**
  * Protegge le rotte del gestionale.
  *
- * Regola:
- * - se esiste una sessione, l'accesso è consentito;
- * - se il backend account non è ancora disponibile (script SQL non eseguito,
- *   Supabase non configurato o offline) l'accesso resta consentito, così il
- *   gestionale non si blocca completamente durante la messa in servizio;
- * - altrimenti si viene rimandati alla pagina di login.
+ * Regola: si entra solo con una sessione attiva.
+ * Prima di decidere attende l'esito del probe sul backend account: senza questa
+ * attesa la prima navigazione (es. apertura del link in produzione) arriverebbe
+ * prima della verifica e il gestionale si aprirebbe senza login.
+ * Se il backend account non è raggiungibile, la pagina di login mostra un
+ * avviso con l'accesso alternativo in locale.
  */
-export const authGuard: CanActivateFn = () => {
+export const authGuard: CanActivateFn = async () => {
   const auth = inject(AuthService);
   const router = inject(Router);
 
-  if (auth.isAuthenticated() || !auth.authBackendReady()) {
+  await auth.ensureAuthBackendProbe();
+
+  if (auth.isAuthenticated()) {
     return true;
   }
 
@@ -26,10 +28,14 @@ export const authGuard: CanActivateFn = () => {
 
 /**
  * Impedisce di riaprire la pagina di login quando la sessione è già attiva.
+ * Attende il probe come la guardia di accesso, così al reload di un utente
+ * già collegato non si vede il login per un istante.
  */
-export const guestGuard: CanActivateFn = () => {
+export const guestGuard: CanActivateFn = async () => {
   const auth = inject(AuthService);
   const router = inject(Router);
+
+  await auth.ensureAuthBackendProbe();
 
   if (!auth.isAuthenticated()) {
     return true;
